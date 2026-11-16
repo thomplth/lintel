@@ -44,6 +44,27 @@ open build/Lintel.app
 
 Quit any running instance first (`build/Lintel.app/Contents/MacOS/Lintel ctl '{"cmd":"quit"}'`). Do not copy the app elsewhere or replace an installed copy unless the user supplies the command.
 
+## Testing in the VM
+
+The developer works on the host desktop, so never synthesise input or take over the pointer there. Drags, clicks and
+mid-gesture screenshots go to the macOS Tart guest shared with the Debut project (`debut-e2e-27`, needs
+`~/Developer/debut`), driven by `Scripts/vm.sh`:
+
+```sh
+Scripts/vm.sh session            # run in the background; waits its turn in Debut's Tart queue, prints "VM ready"
+Scripts/vm.sh install            # bundle this checkout, install it with a fresh layout, launch, hold the bar open
+Scripts/vm.sh lintel '{"cmd":"state"}'                         # rows, chip frames (screen points) and drag state
+Scripts/vm.sh input drag 752 720 740 480 --hold 0.5 --command  # ⌘-drag; also `input click X Y`
+Scripts/vm.sh shot after-drag    # screenshot with the pointer; prints the PNG's host path
+Scripts/vm.sh stop               # always: an idle guest burns host CPU and blocks Debut's runs
+```
+
+- Coordinates are AppKit screen points with the origin at the bottom left; the guest screen is 1024×768. Read chip
+  frames from `state` again after every drop, since modules resize and reflow.
+- Debut's E2E runs share the queue and the VM, so a session can wait. Stop as soon as checks finish.
+- Run guest commands only through `Scripts/vm.sh`. Its SSH session holds the guest's Accessibility and Screen Recording
+  grants; `osascript` and other new automation raise a consent dialog that blocks the guest.
+
 ## Documentation maintenance
 
 - Update this file whenever a change alters project-wide architecture, workflows, conventions or durable gotchas.
