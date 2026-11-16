@@ -6,9 +6,13 @@ Everything in it is a module; modules are built, restyled and arranged by chatti
 ## Run
 
 ```sh
-Scripts/bundle.sh            # builds build/Lintel.app (release, ad-hoc signed)
+Scripts/bundle.sh            # builds build/Lintel.app (release, signed with your Apple Development identity)
 open build/Lintel.app
 ```
+
+The bundle is signed with the first Apple Development identity in your keychain, so a rebuilt app keeps its keychain
+access; set `LINTEL_SIGN_IDENTITY` to pick another identity, or `-` for ad-hoc (macOS then asks for the login password
+after every rebuild).
 
 For development, run the binary directly; it then inherits the terminal's Accessibility and Screen Recording grants:
 

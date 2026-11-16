@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds Lintel.app from the Swift package. Ad-hoc signed: enough to run on this Mac, not to distribute.
+# Builds Lintel.app from the Swift package, signed for this Mac only, not for distribution.
 set -euo pipefail
 root=${0:A:h:h}
 configuration=${1:-release}
@@ -48,5 +48,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-codesign --force --deep --sign - "$app" >/dev/null
+# An ad-hoc signature changes with every build, so the keychain treats each rebuild as a new app and asks for the
+# login password again before Lintel can read its saved API keys. A certificate identity stays the same across builds.
+identity=${LINTEL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)}
+codesign --force --deep --sign "${identity:--}" "$app" >/dev/null
 print "$app"
