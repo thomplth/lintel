@@ -4,6 +4,7 @@ import SwiftUI
 
 struct BarView: View {
     @ObservedObject var model: BarModel
+    @State private var isMovingBar = false
 
     private var material: SurfaceMaterial {
         model.isActive ? SurfaceMaterial(active: model.theme.activeMaterial) : SurfaceMaterial(idle: model.theme.idleMaterial)
@@ -35,18 +36,54 @@ struct BarView: View {
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 8, coordinateSpace: .global)
-                .onChanged { model.onDragChanged($0.translation) }
-                .onEnded { model.onDragEnded($0.translation.width) }
+                .onChanged(dragChanged)
+                .onEnded(dragEnded)
         )
         .fixedSize()
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { model.onContentSize($0) })
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: model.alignment, vertical: .top))
+        .overlay { dropMarker }
         .animation(theme.motion == "full" ? .smooth(duration: 0.22) : nil, value: model.isActive)
         .environment(\.colorScheme, colorScheme(for: material) ?? systemScheme)
         .onExitCommand { model.onDismiss() }
     }
 
     @Environment(\.colorScheme) private var systemScheme
+
+    private func dragChanged(_ value: DragGesture.Value) {
+        if model.rearrangement != nil {
+            model.updateRearranging(at: value.location)
+        } else if !isMovingBar, model.isActive, NSEvent.modifierFlags.contains(.command), let key = model.slotID(at: value.startLocation) {
+            model.beginRearranging(key)
+            model.updateRearranging(at: value.location)
+        } else {
+            isMovingBar = true
+            model.onDragChanged(value.translation)
+        }
+    }
+
+    private func dragEnded(_ value: DragGesture.Value) {
+        if model.rearrangement != nil {
+            model.updateRearranging(at: value.location)
+            model.endRearranging()
+        } else {
+            isMovingBar = false
+            model.onDragEnded(value.translation.width)
+        }
+    }
+
+    @ViewBuilder private var dropMarker: some View {
+        if let marker = model.rearrangement?.drop?.marker(in: model.chipRows) {
+            GeometryReader { proxy in
+                let origin = proxy.frame(in: .global).origin
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(width: marker.width, height: marker.height)
+                    .position(x: marker.midX - origin.x, y: marker.midY - origin.y)
+            }
+            .allowsHitTesting(false)
+        }
+    }
 
     private func colorScheme(for material: SurfaceMaterial) -> ColorScheme? {
         switch model.theme.colorScheme {
@@ -86,6 +123,7 @@ struct ChipView: View {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)
                 }
             }
+            .opacity(model.rearrangement?.key == slot.id ? 0.45 : 1)
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable { model.onSlotClick(slot) } }

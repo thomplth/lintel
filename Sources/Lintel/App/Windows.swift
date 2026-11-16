@@ -185,7 +185,7 @@ final class BarWindowController {
         // is at the top edge; elsewhere an occasional look is enough to notice it leaving.
         let isNearTop = NSEvent.mouseLocation.y > (screen?.frame.maxY ?? 0) - 48
         if isNearTop || hasSteppedAside || pointerTicks % 20 == 0 { stepAsideForSystemMenuBar() }
-        guard !hasSteppedAside, !model.isHiddenByUser, dragOrigin == nil else { return }
+        guard !hasSteppedAside, !model.isHiddenByUser, dragOrigin == nil, model.rearrangement == nil else { return }
         let pointer = NSEvent.mouseLocation
         var isInside = panel.frame.insetBy(dx: -2, dy: -2).contains(pointer)
         if activation.isActive, let frame = panelFrame(), frame.insetBy(dx: -4, dy: -10).contains(pointer) { isInside = true }

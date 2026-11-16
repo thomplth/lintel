@@ -22,6 +22,8 @@ xcrun --sdk macosx swift test
 ```
 
 Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides it. Settings are behind the gear in any panel.
+Drag the open bar to move it to the left, centre or right of the screen; hold ⌘ and drag a module to move it beside
+another, into another row, or onto a row's top or bottom edge (or past the bar) to start a new row there.
 User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to use another folder.
 
 ## Layout of the code

@@ -45,6 +45,11 @@ struct PanelState: Equatable {
     var isPinnedOpen = false
 }
 
+struct Rearrangement: Equatable {
+    var key: String
+    var drop: BarDrop?
+}
+
 struct ChatMessage: Identifiable, Equatable, Codable {
     enum Role: String, Codable {
         case user, assistant
@@ -77,6 +82,7 @@ final class BarModel: ObservableObject {
     @Published var chatFocusRequests = 0
     @Published var chatDraft = ""
     @Published var engineName = ""
+    @Published var rearrangement: Rearrangement?
 
     var slotFrames: [String: CGRect] = [:]
 
@@ -91,6 +97,7 @@ final class BarModel: ObservableObject {
     var onPanelCommand: (String) -> Void = { _ in }
     var onDragEnded: (CGFloat) -> Void = { _ in }
     var onDragChanged: (CGSize) -> Void = { _ in }
+    var onRearrange: (_ key: String, _ drop: BarDrop) -> Void = { _, _ in }
     var manifestFor: (String) -> ModuleManifest? = { _ in nil }
 
     var alignment: HorizontalAlignment {
@@ -107,6 +114,38 @@ final class BarModel: ObservableObject {
 
     var layoutItems: [BarLayout.Item] {
         slots.map { BarLayout.Item(key: $0.id, isPinned: $0.isPinned, order: $0.order, isOptIn: $0.isOptIn) }
+    }
+
+    var chipRows: [[BarDrop.Chip]] {
+        visibleRows.map { row in row.compactMap { slot in slotFrames[slot.id].map { BarDrop.Chip(key: slot.id, frame: $0) } } }
+    }
+
+    func slotID(at point: CGPoint) -> String? {
+        visibleRows.joined().first { $0.kind != .assistant && slotFrames[$0.id]?.contains(point) == true }?.id
+    }
+
+    func beginRearranging(_ key: String) {
+        rearrangement = Rearrangement(key: key)
+        NSCursor.closedHand.push()
+    }
+
+    func updateRearranging(at point: CGPoint) {
+        guard var rearrangement else { return }
+        let drop = BarDrop.resolve(at: point, in: chipRows)
+        rearrangement.drop = drop.flatMap { drop in
+            var trial = BarLayout(rows: visibleRows.map { $0.map(\.id) })
+            let before = trial.rows
+            trial.move(rearrangement.key, to: drop)
+            return trial.rows == before ? nil : drop
+        }
+        if rearrangement != self.rearrangement { self.rearrangement = rearrangement }
+    }
+
+    func endRearranging() {
+        guard let rearrangement else { return }
+        self.rearrangement = nil
+        NSCursor.pop()
+        if let drop = rearrangement.drop { onRearrange(rearrangement.key, drop) }
     }
 
     var visibleRows: [[Slot]] {

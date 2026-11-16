@@ -267,6 +267,63 @@ private func evaluate(_ script: String) -> JSValue {
     }
 }
 
+@Suite struct Rearranging {
+    private let rows: [[BarDrop.Chip]] = [
+        [.init(key: "a", frame: CGRect(x: 0, y: 4, width: 40, height: 20)), .init(key: "b", frame: CGRect(x: 50, y: 4, width: 40, height: 20))],
+        [.init(key: "c", frame: CGRect(x: 0, y: 30, width: 40, height: 20))],
+    ]
+
+    @Test func aPointerOnTheMiddleOfARowDropsBesideTheNearestChip() {
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: rows) == .row(0, index: 0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 60, y: 14), in: rows) == .row(0, index: 1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 85, y: 14), in: rows) == .row(0, index: 2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 200, y: 40), in: rows) == .row(1, index: 1))
+    }
+
+    @Test func aPointerOnARowsTopOrBottomEdgeOrBeyondTheBarOpensANewRow() {
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 5), in: rows) == .newRow(0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: -20), in: rows) == .newRow(0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 27), in: rows) == .newRow(1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 49), in: rows) == .newRow(2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 300), in: rows) == .newRow(2))
+    }
+
+    @Test func movingWithinARowCountsPositionsBeforeTheItemLeaves() {
+        var layout = BarLayout(rows: [["a", "b", "c"]])
+        layout.move("a", to: .row(0, index: 2))
+        #expect(layout.rows == [["b", "a", "c"]])
+        layout.move("c", to: .row(0, index: 0))
+        #expect(layout.rows == [["c", "b", "a"]])
+    }
+
+    @Test func movingIntoAnotherRowDropsTheRowItLeavesEmpty() {
+        var layout = BarLayout(rows: [["a"], ["b", "c"]])
+        layout.move("a", to: .row(1, index: 1))
+        #expect(layout.rows == [["b", "a", "c"]])
+    }
+
+    @Test func movingIntoANewRowSplitsItOutAtThatPosition() {
+        var layout = BarLayout(rows: [["a", "b"], ["c"]])
+        layout.move("b", to: .newRow(1))
+        #expect(layout.rows == [["a"], ["b"], ["c"]])
+        layout.move("c", to: .newRow(0))
+        #expect(layout.rows == [["c"], ["a"], ["b"]])
+    }
+
+    @Test func aLoneItemDroppedIntoANewRowBesideItselfStaysPut() {
+        var layout = BarLayout(rows: [["a"], ["b"]])
+        layout.move("a", to: .newRow(1))
+        #expect(layout.rows == [["a"], ["b"]])
+    }
+
+    @Test func theMarkerIsAnUprightBarBetweenChipsOrALevelBarBetweenRows() {
+        #expect(BarDrop.row(0, index: 1).marker(in: rows) == CGRect(x: 44, y: 4, width: 2, height: 20))
+        #expect(BarDrop.row(0, index: 2).marker(in: rows) == CGRect(x: 91, y: 4, width: 2, height: 20))
+        #expect(BarDrop.newRow(1).marker(in: rows) == CGRect(x: 0, y: 26, width: 90, height: 2))
+        #expect(BarDrop.newRow(0).marker(in: rows) == CGRect(x: 0, y: 1, width: 90, height: 2))
+    }
+}
+
 @Suite struct Placements {
     private let plain = ScreenGeometry(
         frame: CGRect(x: 0, y: 0, width: 1000, height: 600), visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 576), menuBarAutoHides: true

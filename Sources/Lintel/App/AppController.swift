@@ -43,6 +43,7 @@ final class AppController {
         }
         model.onSlotClick = { [weak self] slot in self?.clicked(slot) }
         model.onSlotSecondaryAction = { [weak self] slot, command in self?.edit(slot, command) }
+        model.onRearrange = { [weak self] key, drop in self?.rearrange(key, to: drop) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         model.onPanelCommand = { [weak self] command in self?.panelCommand(command) }
         model.onChatSubmit = { [weak self] message in self?.chat.submit(message) }
@@ -220,6 +221,16 @@ final class AppController {
             return
         default: return
         }
+        host.update(layout)
+        adoption.refreshSlots()
+    }
+
+    private func rearrange(_ key: String, to drop: BarDrop) {
+        var layout = model.layout
+        layout.materialise(model.layoutItems.filter { item in
+            !item.isOptIn || layout.rows.contains { $0.contains(item.key) }
+        })
+        layout.move(key, to: drop)
         host.update(layout)
         adoption.refreshSlots()
     }
