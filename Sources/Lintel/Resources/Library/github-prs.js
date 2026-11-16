@@ -39,7 +39,9 @@ defineModule({
   },
   async render(host) {
     await load(host);
-    host.attention(!failure && waiting.length > 0);
+    const seen = new Set(host.storage.get('seenReviewRequests', []));
+    const unseen = waiting.filter((pull) => !seen.has(pull.url));
+    host.attention(!failure && unseen.length > 0);
     if (failure) return row([icon('arrow.triangle.pull', { tone: 'secondary' }), icon('exclamationmark.triangle.fill', { tone: 'warn' })]);
     return waiting.length === 0
       ? icon('arrow.triangle.pull')
@@ -52,6 +54,7 @@ defineModule({
         message: `${failure}. Check that gh is installed and signed in (gh auth login).`, action: 'retry',
       })];
     }
+    host.storage.set('seenReviewRequests', waiting.map((pull) => pull.url));
     if (waiting.length === 0 && mine.length === 0) {
       return [empty('checkmark.circle.fill', 'All clear', { message: 'No open pull requests involve you.' })];
     }
