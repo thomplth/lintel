@@ -92,8 +92,9 @@ struct NodeView: View {
             .lineLimit(lines)
             .truncationMode(.tail)
         if context.surface == .chip {
+            // numericText renders the text in a layer clipped to its frame, which cuts the Halo shadow to a
+            // rectangle and cross-fades every tick of the clock, so bar text swaps without a transition.
             text.fixedSize()
-                .contentTransition(isMono && context.animates ? .numericText() : .identity)
         } else {
             text.fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.leading)
