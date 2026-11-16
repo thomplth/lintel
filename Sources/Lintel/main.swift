@@ -1,0 +1,185 @@
+import AppKit
+import Foundation
+import LintelCore
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+
+if arguments.first == "runner" {
+    RunnerProcess.main()
+}
+
+func option(_ name: String) -> String? {
+    guard let index = arguments.firstIndex(of: "--\(name)"), index + 1 < arguments.count else { return nil }
+    return arguments[index + 1]
+}
+
+func emit(_ text: String) {
+    FileHandle.standardOutput.write(Data((text + "\n").utf8))
+}
+
+switch arguments.first {
+case "ctl":
+    ControlChannel.post(arguments.dropFirst().first ?? "{}")
+    // Delivery is asynchronous; leaving at once can drop the notification.
+    Thread.sleep(forTimeInterval: 0.2)
+    exit(0)
+case "guide":
+    emit(DesignGuide.reference)
+    exit(0)
+default:
+    break
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var app: AppController?
+    private var stage: Stage?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let app = AppController(home: .standard)
+        self.app = app
+        switch arguments.first {
+        case "trial":
+            app.host.primeData()
+            Task { await self.trial(app) }
+        case "stage":
+            app.startModules(watching: false)
+            Task { await self.shoot(app) }
+        case "chat":
+            app.startModules(watching: false)
+            Task {
+                let reply = await app.chat.handle(arguments.dropFirst().filter { !$0.hasPrefix("--") }.joined(separator: " "), approving: arguments.contains("--approve"))
+                emit(reply.text + (reply.detail.map { "\n\($0)" } ?? ""))
+                exit(reply.isError ? 1 : 0)
+            }
+        case "export":
+            app.startModules(watching: false)
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                let listings = await app.host.listings()
+                guard arguments.count == 3, let listing = listings.first(where: { $0.id == arguments[1] }),
+                      let source = try? String(contentsOf: listing.file, encoding: .utf8)
+                else {
+                    emit("usage: Lintel export <module id> <file>")
+                    exit(1)
+                }
+                app.home.save(ModuleBundle(
+                    id: listing.id, title: listing.title, permissions: listing.permissions,
+                    prompt: app.host.prompt(of: listing.id), source: source
+                ), to: URL(fileURLWithPath: arguments[2]))
+                emit(arguments[2])
+                exit(0)
+            }
+        case "import":
+            app.host.primeData()
+            Task {
+                guard arguments.count >= 2, let data = FileManager.default.contents(atPath: arguments[1]) else {
+                    emit("usage: Lintel import <file> [--approve]")
+                    exit(1)
+                }
+                let bundle = try? JSONDecoder().decode(ModuleBundle.self, from: data)
+                let source = bundle?.source ?? String(decoding: data, as: UTF8.self)
+                let trial = await app.host.trial(source: source)
+                guard trial.errors.isEmpty, let manifest = trial.description?.manifest else {
+                    emit("not installed:\n  " + trial.errors.joined(separator: "\n  "))
+                    exit(1)
+                }
+                try? app.host.install(source: source, id: manifest.id, prompt: bundle?.prompt)
+                if arguments.contains("--approve"), !manifest.permissions.isEmpty {
+                    app.home.save(app.home.loadApprovals().merging([manifest.id: Approval(permissions: manifest.permissions)]) { $1 }, to: app.home.approvalsFile)
+                }
+                emit("installed \(manifest.id)" + (manifest.permissions.isEmpty ? "" : " (asks for: \(manifest.permissions.joined(separator: ", ")))"))
+                exit(0)
+            }
+        case "items":
+            for item in MenuBarItems.scanNow() {
+                emit("\(item.key) | \(item.label) | \(Int(item.frame.minX)),\(Int(item.frame.minY)) \(Int(item.frame.width))x\(Int(item.frame.height))")
+            }
+            exit(0)
+        default:
+            app.startModules()
+            app.startInterface()
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let app else { return }
+        for url in urls where url.pathExtension == ModuleBundle.fileExtension || url.pathExtension == "js" {
+            ModuleSharing.importModule(app: app, from: url)
+        }
+    }
+
+    private func trial(_ app: AppController) async {
+        var failed = false
+        for path in arguments.dropFirst() {
+            guard let source = try? String(contentsOfFile: path, encoding: .utf8) else {
+                emit("\(path): cannot read")
+                failed = true
+                continue
+            }
+            let trial = await app.host.trial(source: source)
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            if trial.errors.isEmpty {
+                let warnings = trial.problems.filter { $0.severity == .warning }.map(\.message)
+                emit("\(name): ok" + (warnings.isEmpty ? "" : "\n  warning: " + warnings.joined(separator: "\n  warning: ")))
+            } else {
+                failed = true
+                emit("\(name): FAILED\n  " + trial.errors.joined(separator: "\n  "))
+            }
+            if arguments.contains("--dump") {
+                emit("  chip: \(String(describing: trial.chip))")
+            }
+        }
+        exit(failed ? 1 : 0)
+    }
+
+    /// `stage --out /tmp/shots --shots halo/idle,halo/active,ink/panel:system [--backdrop photo] [--size 900x620]`
+    private func shoot(_ app: AppController) async {
+        let directory = URL(fileURLWithPath: option("out") ?? "/tmp/lintel-stage")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let dimensions = (option("size") ?? "900x620").split(separator: "x").compactMap { Double($0) }
+        let size = CGSize(width: dimensions.first ?? 900, height: dimensions.last ?? 620)
+        let backdrop = Backdrop.Style(rawValue: option("backdrop") ?? "photo") ?? .photo
+        let baseTheme = app.model.theme
+        if let anchor = option("anchor").flatMap(BarAnchor.init(rawValue:)) { app.model.settings.anchor = anchor }
+        try? await Task.sleep(for: .seconds(Double(option("wait") ?? "3") ?? 3))
+        let stage = Stage(model: app.model, size: size, backdrop: backdrop)
+        self.stage = stage
+
+        for shot in (option("shots") ?? "halo/idle,halo/active").split(separator: ",").map(String.init) {
+            let parts = shot.split(separator: "/", maxSplits: 1).map(String.init)
+            let state = parts.last ?? "idle"
+            app.model.theme = parts.count == 2 ? (Theme.preset(parts[0]) ?? baseTheme) : baseTheme
+            app.host.closePanel()
+            app.model.isActive = state != "idle"
+            if state.hasPrefix("panel:") {
+                let id = String(state.dropFirst(6))
+                if id == AppController.assistantSlot {
+                    app.model.panel = PanelState(slotID: id, content: .assistant)
+                } else {
+                    app.host.openPanel(id)
+                }
+            }
+            try? await Task.sleep(for: .seconds(Double(option("settle") ?? "1.6") ?? 1.6))
+            let file = directory.appending(path: shot.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + ".png")
+            do {
+                try await stage.capture(to: file)
+                emit(file.path)
+            } catch {
+                emit("failed \(shot): \(ModuleFailure.describe(error))")
+            }
+        }
+        for slot in app.model.slots where slot.failure != nil {
+            emit("module \(slot.id) failed: \(slot.failure ?? "")")
+        }
+        exit(0)
+    }
+}
+
+MainActor.assumeIsolated {
+    let delegate = AppDelegate()
+    let application = NSApplication.shared
+    application.setActivationPolicy(.accessory)
+    application.delegate = delegate
+    application.run()
+}
