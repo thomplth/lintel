@@ -1,10 +1,11 @@
 import CoreGraphics
 import Foundation
 
-/// Where a module dragged across the bar would land. Row and index count positions before the module leaves its own.
+/// Where a module dragged across the bar would land. Rows and indices count the bar as it is once the module has left its place.
 public enum BarDrop: Equatable, Sendable {
     case row(Int, index: Int)
     case newRow(Int)
+    case remove
 
     public struct Chip: Equatable, Sendable {
         public var key: String
@@ -17,10 +18,21 @@ public enum BarDrop: Equatable, Sendable {
     }
 
     private static let newRowEdgeShare: CGFloat = 0.25
+    private static let removalDepthInLines: CGFloat = 1.5
+    private static let removalSideMargin: CGFloat = 48
 
-    public static func resolve(at point: CGPoint, in rows: [[Chip]]) -> BarDrop? {
+    public static func resolve(at point: CGPoint, in displayed: [[Chip]], moving key: String) -> BarDrop? {
+        let rows = displayed.map { $0.filter { $0.key != key } }.filter { !$0.isEmpty }
         let bands = rows.map(band)
         guard let first = bands.first, let last = bands.last else { return nil }
+        let bar = bands.reduce(first) { $0.union($1) }
+        // A module carried into a new row of its own must count toward the bar's depth, or that row lies past the
+        // removal line whenever the remaining modules fit on fewer lines, and the drop flips to removing it.
+        let drawnBottom = displayed.joined().map(\.frame.maxY).max() ?? last.maxY
+        let removalDepth = drawnBottom + lineHeight(rows[rows.count - 1]) * removalDepthInLines
+        if point.y > removalDepth || point.x < bar.minX - removalSideMargin || point.x > bar.maxX + removalSideMargin {
+            return .remove
+        }
         if point.y < first.minY { return .newRow(0) }
         if point.y > last.maxY { return .newRow(rows.count) }
 
@@ -33,35 +45,6 @@ public enum BarDrop: Equatable, Sendable {
             return .row(index, index: insertionIndex(at: point, in: rows[index]))
         }
         return .newRow(rows.count)
-    }
-
-    public func marker(in rows: [[Chip]], thickness: CGFloat = 2) -> CGRect? {
-        switch self {
-        case .row(let row, let index):
-            guard rows.indices.contains(row), let lastChip = rows[row].last else { return nil }
-            let chips = rows[row]
-            guard index < chips.count else {
-                return CGRect(x: lastChip.frame.maxX + 1, y: lastChip.frame.minY, width: thickness, height: lastChip.frame.height)
-            }
-            let next = chips[index].frame
-            var x = next.minX - thickness - 1
-            if index > 0, chips[index - 1].frame.minY == next.minY {
-                x = (chips[index - 1].frame.maxX + next.minX) / 2 - thickness / 2
-            }
-            return CGRect(x: x, y: next.minY, width: thickness, height: next.height)
-        case .newRow(let row):
-            let bands = rows.map(Self.band)
-            guard let first = bands.first, let last = bands.last else { return nil }
-            let all = bands.reduce(first) { $0.union($1) }
-            let y: CGFloat = if row <= 0 {
-                first.minY - thickness - 1
-            } else if row >= bands.count {
-                last.maxY + 1
-            } else {
-                (bands[row - 1].maxY + bands[row].minY) / 2 - thickness / 2
-            }
-            return CGRect(x: all.minX, y: y, width: all.width, height: thickness)
-        }
     }
 
     private static func band(_ row: [Chip]) -> CGRect {
@@ -87,17 +70,16 @@ public enum BarDrop: Equatable, Sendable {
 
 extension BarLayout {
     public mutating func move(_ key: String, to drop: BarDrop) {
-        guard let from = row(of: key), let fromIndex = rows[from].firstIndex(of: key) else { return }
+        guard row(of: key) != nil else { return }
+        remove(key)
         switch drop {
         case .row(let target, let index):
-            guard rows.indices.contains(target) else { return }
-            let adjusted = target == from && fromIndex < index ? index - 1 : index
-            rows[from].remove(at: fromIndex)
-            rows[target].insert(key, at: min(max(adjusted, 0), rows[target].count))
+            guard rows.indices.contains(target) else { return rows.append([key]) }
+            rows[target].insert(key, at: min(max(index, 0), rows[target].count))
         case .newRow(let target):
-            rows[from].remove(at: fromIndex)
             rows.insert([key], at: min(max(target, 0), rows.count))
+        case .remove:
+            setHidden(key, true)
         }
-        rows.removeAll(where: \.isEmpty)
     }
 }

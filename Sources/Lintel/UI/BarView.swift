@@ -5,6 +5,7 @@ import SwiftUI
 struct BarView: View {
     @ObservedObject var model: BarModel
     @State private var isMovingBar = false
+    @Namespace private var chipTravel
 
     private var material: SurfaceMaterial {
         model.isActive ? SurfaceMaterial(active: model.theme.activeMaterial) : SurfaceMaterial(idle: model.theme.idleMaterial)
@@ -23,7 +24,7 @@ struct BarView: View {
                         maxWidth: model.maxBarWidth
                     ) {
                         ForEach(row.element) { slot in
-                            ChipView(slot: slot, model: model, material: material)
+                            ChipView(slot: slot, model: model, material: material, travel: chipTravel)
                         }
                     }
                     .frame(minHeight: row.offset == 0 ? model.topRowMinHeight : 0)
@@ -42,7 +43,6 @@ struct BarView: View {
         .fixedSize()
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { model.onContentSize($0) })
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: model.alignment, vertical: .top))
-        .overlay { dropMarker }
         .animation(theme.motion == "full" ? .smooth(duration: 0.22) : nil, value: model.isActive)
         .environment(\.colorScheme, colorScheme(for: material) ?? systemScheme)
         .onExitCommand { model.onDismiss() }
@@ -52,10 +52,10 @@ struct BarView: View {
 
     private func dragChanged(_ value: DragGesture.Value) {
         if model.rearrangement != nil {
-            model.updateRearranging(at: value.location)
-        } else if !isMovingBar, model.isActive, NSEvent.modifierFlags.contains(.command), let key = model.slotID(at: value.startLocation) {
-            model.beginRearranging(key)
-            model.updateRearranging(at: value.location)
+            model.carry(to: value.location)
+        } else if !isMovingBar, model.isActive, isCommandHeld, let key = model.slotID(at: value.startLocation) {
+            model.beginRearranging(key, grabbedAt: value.startLocation)
+            model.carry(to: value.location)
         } else {
             isMovingBar = true
             model.onDragChanged(value.translation)
@@ -64,25 +64,16 @@ struct BarView: View {
 
     private func dragEnded(_ value: DragGesture.Value) {
         if model.rearrangement != nil {
-            model.updateRearranging(at: value.location)
-            model.endRearranging()
+            model.carry(to: value.location)
+            model.drop()
         } else {
             isMovingBar = false
             model.onDragEnded(value.translation.width)
         }
     }
 
-    @ViewBuilder private var dropMarker: some View {
-        if let marker = model.rearrangement?.drop?.marker(in: model.chipRows) {
-            GeometryReader { proxy in
-                let origin = proxy.frame(in: .global).origin
-                Capsule()
-                    .fill(Color.accentColor)
-                    .frame(width: marker.width, height: marker.height)
-                    .position(x: marker.midX - origin.x, y: marker.midY - origin.y)
-            }
-            .allowsHitTesting(false)
-        }
+    private var isCommandHeld: Bool {
+        NSEvent.modifierFlags.contains(.command) || NSApp.currentEvent?.modifierFlags.contains(.command) == true
     }
 
     private func colorScheme(for material: SurfaceMaterial) -> ColorScheme? {
@@ -98,6 +89,8 @@ struct ChipView: View {
     let slot: Slot
     @ObservedObject var model: BarModel
     let material: SurfaceMaterial
+    var travel: Namespace.ID?
+    var isCarried = false
     @State private var isHovered = false
 
     private var isPanelOpen: Bool {
@@ -105,10 +98,22 @@ struct ChipView: View {
     }
 
     var body: some View {
+        if !isCarried, let rearrangement = model.rearrangement, rearrangement.key == slot.id {
+            // GlassEffectContainer draws every chip's glass and content itself, so opacity(0) leaves the chip visible.
+            Color.clear
+                .frame(width: rearrangement.size.width, height: rearrangement.size.height)
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: { model.slotFrames[slot.id] = $0 })
+                .modifier(Travels(id: slot.id, namespace: travel))
+        } else {
+            chip
+        }
+    }
+
+    private var chip: some View {
         let context = RenderContext(theme: model.theme, surface: .chip, material: material, moduleID: slot.id)
         let hasCapsule = material == .glass || material == .solid
         let isClickable = model.isActive && slot.isClickable
-        content(context)
+        return content(context)
             .frame(minHeight: context.metrics.fontSize(role: nil) * 1.3)
             .padding(.horizontal, hasCapsule ? context.metrics.chipPaddingHorizontal : 0)
             .padding(.vertical, hasCapsule ? context.metrics.chipPaddingVertical : 0)
@@ -123,12 +128,12 @@ struct ChipView: View {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)
                 }
             }
-            .opacity(model.rearrangement?.key == slot.id ? 0.45 : 1)
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
-            .onTapGesture { if isClickable { model.onSlotClick(slot) } }
+            .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
-            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: { model.slotFrames[slot.id] = $0 })
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: { if !isCarried { model.slotFrames[slot.id] = $0 } })
+            .modifier(Travels(id: slot.id, namespace: isCarried ? nil : travel))
             .help(model.isActive ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
     }
@@ -182,6 +187,59 @@ struct ChipView: View {
             }
         }
         Button("Lintel Settings…") { model.onSlotSecondaryAction(slot, "settings") }
+    }
+}
+
+/// The module being dragged, drawn in a screen-sized window above the bar so it can follow the pointer anywhere.
+struct CarrierView: View {
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        if let rearrangement = model.rearrangement, let slot = model.slot(rearrangement.key) {
+            let carried = CGPoint(
+                x: model.carriedPointer.x - rearrangement.grabOffset.width, y: model.carriedPointer.y - rearrangement.grabOffset.height
+            )
+            let barTopLeft = rearrangement.phase == .landing ? model.slotFrames[slot.id]?.origin ?? carried : carried
+            let topLeft = model.barToCarrier(barTopLeft)
+            ChipView(slot: slot, model: model, material: SurfaceMaterial(active: model.theme.activeMaterial), isCarried: true)
+                .fixedSize()
+                .opacity(rearrangement.phase == .vanishing ? 0 : 1)
+                .scaleEffect(scale(of: rearrangement))
+                .blur(radius: rearrangement.phase == .vanishing ? 4 : 0)
+                .shadow(color: .black.opacity(rearrangement.phase == .carrying ? 0.3 : 0), radius: 10, y: 4)
+                .offset(x: topLeft.x, y: topLeft.y)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .environment(\.colorScheme, colorScheme ?? systemScheme)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @Environment(\.colorScheme) private var systemScheme
+
+    private var colorScheme: ColorScheme? {
+        switch model.theme.colorScheme {
+        case "light": .light
+        case "dark": .dark
+        default: nil
+        }
+    }
+
+    private func scale(of rearrangement: Rearrangement) -> CGFloat {
+        switch rearrangement.phase {
+        case .carrying: 1.08
+        case .landing: 1
+        case .vanishing: 0.5
+        }
+    }
+}
+
+/// Lets a chip glide between rows, which are separate containers, instead of vanishing from one and appearing in the other.
+private struct Travels: ViewModifier {
+    let id: String
+    let namespace: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let namespace { content.matchedGeometryEffect(id: id, in: namespace) } else { content }
     }
 }
 

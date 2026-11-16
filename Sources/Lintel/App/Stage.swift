@@ -175,6 +175,8 @@ final class ControlChannel {
                 "chatBusy": .bool(app.model.isChatBusy), "keyEventsSeen": .number(Double(keyEventsSeen)),
                 "keyWindow": app.windows.first { $0.window.isKeyWindow }.map { .string($0.name) } ?? .null, "hidden": .bool(app.model.isHiddenByUser),
                 "theme": .object(app.model.theme.patch), "anchor": .string(app.model.settings.anchor.rawValue),
+                "carrying": app.model.rearrangement.map { .string("\($0.key) \($0.drop.map { "\($0)" } ?? "none") \($0.phase) at \(app.model.carriedPointer)") } ?? .null,
+                "barFrame": app.bar.map { .string("\($0.panel.frame)") } ?? .null,
             ]
             try? state.text.write(toFile: path, atomically: true, encoding: .utf8)
         case "close-settings": app.windows.first { $0.name == "settings" }?.window.close()

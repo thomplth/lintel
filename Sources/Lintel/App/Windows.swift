@@ -100,6 +100,7 @@ final class BarWindowController {
         }
         model.onDragChanged = { [weak self] translation in self?.drag(translation) }
         model.onDragEnded = { [weak self] _ in self?.endDrag() }
+        model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -224,6 +225,24 @@ final class BarWindowController {
         )
         if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
         if panel.frame != placement.frame { panel.setFrame(placement.frame, display: true) }
+        model.barWindowFrame = placement.frame
+    }
+
+    private lazy var carrier: FloatingPanel = {
+        let carrier = makeFloatingPanel(level: NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2))
+        carrier.ignoresMouseEvents = true
+        let hostingView = NSHostingView(rootView: CarrierView(model: model))
+        hostingView.sizingOptions = []
+        carrier.contentView = hostingView
+        return carrier
+    }()
+
+    private func showCarrier() {
+        guard model.rearrangement != nil, let screen else { return carrier.orderOut(nil) }
+        model.barWindowFrame = panel.frame
+        model.carrierWindowFrame = screen.frame
+        carrier.setFrame(screen.frame, display: false)
+        carrier.orderFrontRegardless()
     }
 
     private func drag(_ translation: CGSize) {

@@ -274,23 +274,62 @@ private func evaluate(_ script: String) -> JSValue {
     ]
 
     @Test func aPointerOnTheMiddleOfARowDropsBesideTheNearestChip() {
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: rows) == .row(0, index: 0))
-        #expect(BarDrop.resolve(at: CGPoint(x: 60, y: 14), in: rows) == .row(0, index: 1))
-        #expect(BarDrop.resolve(at: CGPoint(x: 85, y: 14), in: rows) == .row(0, index: 2))
-        #expect(BarDrop.resolve(at: CGPoint(x: 200, y: 40), in: rows) == .row(1, index: 1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: rows, moving: "z") == .row(0, index: 0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 60, y: 14), in: rows, moving: "z") == .row(0, index: 1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 85, y: 14), in: rows, moving: "z") == .row(0, index: 2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 80, y: 40), in: rows, moving: "z") == .row(1, index: 1))
     }
 
     @Test func aPointerOnARowsTopOrBottomEdgeOrBeyondTheBarOpensANewRow() {
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 5), in: rows) == .newRow(0))
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: -20), in: rows) == .newRow(0))
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 27), in: rows) == .newRow(1))
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 49), in: rows) == .newRow(2))
-        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 300), in: rows) == .newRow(2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 5), in: rows, moving: "z") == .newRow(0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: -20), in: rows, moving: "z") == .newRow(0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 27), in: rows, moving: "z") == .newRow(1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 49), in: rows, moving: "z") == .newRow(2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 70), in: rows, moving: "z") == .newRow(2))
     }
 
-    @Test func movingWithinARowCountsPositionsBeforeTheItemLeaves() {
+    @Test func carryingAModuleWellBelowTheBarRemovesIt() {
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 90), in: rows, moving: "z") == .remove)
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 300), in: rows, moving: "z") == .remove)
+    }
+
+    @Test func aModuleHeldInItsOwnNewRowBelowTheBarIsNotRemoved() {
+        let preview: [[BarDrop.Chip]] = [rows[0], [.init(key: "z", frame: CGRect(x: 0, y: 30, width: 40, height: 20))]]
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 70), in: preview, moving: "z") == .newRow(1))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 90), in: preview, moving: "z") == .remove)
+    }
+
+    @Test func carryingAModuleWellPastEitherEndOfTheBarRemovesIt() {
+        #expect(BarDrop.resolve(at: CGPoint(x: 130, y: 14), in: rows, moving: "z") == .row(0, index: 2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 150, y: 14), in: rows, moving: "z") == .remove)
+        #expect(BarDrop.resolve(at: CGPoint(x: -60, y: 14), in: rows, moving: "z") == .remove)
+    }
+
+    @Test func removingAModuleHidesItAndClosesItsGap() {
+        var layout = BarLayout(rows: [["a", "b"], ["c"]])
+        layout.move("c", to: .remove)
+        #expect(layout.rows == [["a", "b"]])
+        #expect(layout.hidden == ["c"])
+    }
+
+    @Test func theDraggedModulesOwnSpaceIsNotATargetSoItsPreviewHoldsStill() {
+        var layout = BarLayout(rows: [["a", "b"], ["c"]])
+        let drop = BarDrop.resolve(at: CGPoint(x: 80, y: 14), in: rows, moving: "b")
+        #expect(drop == .row(0, index: 1))
+        layout.move("b", to: drop!)
+        #expect(layout.rows == [["a", "b"], ["c"]])
+    }
+
+    @Test func aRowHoldingOnlyTheDraggedModuleIsAGapThatKeepsItsPlace() {
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 40), in: rows, moving: "c") == .newRow(1))
+        var layout = BarLayout(rows: [["a", "b"], ["c"]])
+        layout.move("c", to: .newRow(1))
+        #expect(layout.rows == [["a", "b"], ["c"]])
+    }
+
+    @Test func dropPositionsCountTheRowsAfterTheModuleLeaves() {
         var layout = BarLayout(rows: [["a", "b", "c"]])
-        layout.move("a", to: .row(0, index: 2))
+        layout.move("a", to: .row(0, index: 1))
         #expect(layout.rows == [["b", "a", "c"]])
         layout.move("c", to: .row(0, index: 0))
         #expect(layout.rows == [["c", "b", "a"]])
@@ -298,7 +337,7 @@ private func evaluate(_ script: String) -> JSValue {
 
     @Test func movingIntoAnotherRowDropsTheRowItLeavesEmpty() {
         var layout = BarLayout(rows: [["a"], ["b", "c"]])
-        layout.move("a", to: .row(1, index: 1))
+        layout.move("a", to: .row(0, index: 1))
         #expect(layout.rows == [["b", "a", "c"]])
     }
 
@@ -310,17 +349,13 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(layout.rows == [["c"], ["a"], ["b"]])
     }
 
-    @Test func aLoneItemDroppedIntoANewRowBesideItselfStaysPut() {
-        var layout = BarLayout(rows: [["a"], ["b"]])
-        layout.move("a", to: .newRow(1))
-        #expect(layout.rows == [["a"], ["b"]])
-    }
-
-    @Test func theMarkerIsAnUprightBarBetweenChipsOrALevelBarBetweenRows() {
-        #expect(BarDrop.row(0, index: 1).marker(in: rows) == CGRect(x: 44, y: 4, width: 2, height: 20))
-        #expect(BarDrop.row(0, index: 2).marker(in: rows) == CGRect(x: 91, y: 4, width: 2, height: 20))
-        #expect(BarDrop.newRow(1).marker(in: rows) == CGRect(x: 0, y: 26, width: 90, height: 2))
-        #expect(BarDrop.newRow(0).marker(in: rows) == CGRect(x: 0, y: 1, width: 90, height: 2))
+    @Test func applyingTheSameDropTwiceChangesNothingMore() {
+        var once = BarLayout(rows: [["a", "b"], ["c"]])
+        once.move("a", to: .row(1, index: 0))
+        var twice = once
+        twice.move("a", to: .row(1, index: 0))
+        #expect(once.rows == [["b"], ["a", "c"]])
+        #expect(twice.rows == once.rows)
     }
 }
 
