@@ -105,6 +105,30 @@ public enum Placement {
         return CGRect(x: x.rounded(), y: screen.visibleFrame.maxY - contentSize.height, width: contentSize.width, height: contentSize.height)
     }
 
+    /// The bar's window: a fixed area that holds the bar in its corner on the anchored side, so the window keeps still
+    /// while the bar grows and shrinks inside it. Its spare width is even, so a centred bar lands on whole points.
+    public static func canvas(around content: CGRect, width: CGFloat, height: CGFloat, anchor: BarAnchor) -> CGRect {
+        var width = max(width, content.width)
+        if anchor == .center, (width - content.width).truncatingRemainder(dividingBy: 2) != 0 { width += 1 }
+        let height = max(height, content.height)
+        let x: CGFloat = switch anchor {
+        case .left: content.minX
+        case .center: content.midX - width / 2
+        case .right: content.maxX - width
+        }
+        return CGRect(x: x, y: content.maxY - height, width: width, height: height)
+    }
+
+    /// Where a bar of the given size sits in its canvas.
+    public static func content(size: CGSize, in canvas: CGRect, anchor: BarAnchor) -> CGRect {
+        let x: CGFloat = switch anchor {
+        case .left: canvas.minX
+        case .center: canvas.midX - size.width / 2
+        case .right: canvas.maxX - size.width
+        }
+        return CGRect(x: x, y: canvas.maxY - size.height, width: size.width, height: size.height)
+    }
+
     /// AppKit frames grow upwards from the bottom of the main display; event taps and window lists use global display
     /// coordinates, which grow downwards from its top.
     public static func globalDisplayRect(_ frame: CGRect, mainScreenHeight: CGFloat) -> CGRect {

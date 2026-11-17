@@ -91,6 +91,7 @@ final class BarWindowController {
     var onMenuBarRowFrameChanged: (CGRect?) -> Void = { _ in }
     private var menuBarRowPress: Timer?
     private var dragOrigin: CGPoint?
+    private var mouseMonitors: [Any] = []
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
     var onActiveChanged: (Bool) -> Void = { _ in }
@@ -103,6 +104,7 @@ final class BarWindowController {
         self.model = model
         panel = makeFloatingPanel(level: .statusBar)
         panel.ignoresMouseEvents = true
+        panel.acceptsMouseMovedEvents = true
         let hostingView = FirstClickHostingView(rootView: BarView(model: model))
         // Left on, the hosting view resizes the window itself and moves it off the top edge.
         hostingView.sizingOptions = []
@@ -119,6 +121,11 @@ final class BarWindowController {
         model.onDragChanged = { [weak self] translation in self?.drag(translation) }
         model.onDragEnded = { [weak self] _ in self?.endDrag() }
         model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
+        let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.updateMouseCapture() } }
+        mouseMonitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved], handler: follow) as Any,
+            NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { follow($0); return $0 } as Any,
+        ]
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -180,7 +187,7 @@ final class BarWindowController {
         updateGuardedTopEdge()
         if isHidden { release() }
         panel.animator().alphaValue = isHidden || hasSteppedAside ? 0 : 1
-        panel.ignoresMouseEvents = isHidden || !activation.isActive
+        updateMouseCapture()
     }
 
     func yieldFocusForExternalMenu() {
@@ -208,7 +215,7 @@ final class BarWindowController {
         }
         let others = NSScreen.screens.filter { $0 != screen }.map(\.frame)
         guardedTopEdge = TopEdgeGuard.span(
-            of: panel.frame, on: screen.frame, besides: others, notchStripHeight: screen.safeAreaInsets.top
+            of: contentFrame, on: screen.frame, besides: others, notchStripHeight: screen.safeAreaInsets.top
         )
     }
 
@@ -225,7 +232,7 @@ final class BarWindowController {
         if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
         guard !hasSteppedAside, !model.isHiddenByUser, dragOrigin == nil, model.rearrangement == nil else { return }
         let pointer = NSEvent.mouseLocation
-        var isInside = panel.frame.insetBy(dx: -2, dy: -2).contains(pointer)
+        var isInside = contentFrame.insetBy(dx: -2, dy: -2).contains(pointer)
         if let menuBarRowFrame, menuBarRowFrame.contains(pointer) { isInside = true }
         if activation.isActive, let frame = panelFrame(), frame.insetBy(dx: -4, dy: -10).contains(pointer) { isInside = true }
         if !model.settings.hoverActivates, activation.state == .idle { isInside = false }
@@ -233,17 +240,42 @@ final class BarWindowController {
         if activation.state == .idle, NSEvent.pressedMouseButtons != 0 { isInside = false }
         activation.pointer(inside: isInside, at: ProcessInfo.processInfo.systemUptime)
         applyActivation()
+        updateMouseCapture()
     }
 
     private func applyActivation() {
         guard model.isActive != activation.isActive else { return }
         model.isActive = activation.isActive
-        panel.ignoresMouseEvents = !activation.isActive
+        updateMouseCapture()
         if !activation.isActive, panel.isKeyWindow { panel.resignKey() }
         onActiveChanged(activation.isActive)
     }
 
     var screen: NSScreen? { NSScreen.screens.first }
+
+    /// The bar within its window, which is a larger, fixed canvas.
+    var contentFrame: CGRect {
+        Placement.content(size: contentSize, in: panel.frame, anchor: model.settings.anchor)
+    }
+
+    /// The canvas would swallow clicks meant for the windows under it; it takes the pointer only over the open bar,
+    /// or while a press that began there is still held.
+    private func updateMouseCapture() {
+        let isPressing = !panel.ignoresMouseEvents && NSEvent.pressedMouseButtons != 0
+        let isOverBar = contentFrame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
+        let captures = !model.isHiddenByUser && activation.isActive
+            && (isOverBar || isPressing || dragOrigin != nil || model.rearrangement != nil)
+        if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
+    }
+
+    /// Wide enough for the widest row the bar may have, and deep enough for several, so the canvas rarely has to grow
+    /// while modules reflow; resizing the window mid-animation shifts every module for a frame.
+    private func canvas(around content: CGRect) -> CGRect {
+        Placement.canvas(
+            around: content, width: model.maxBarWidth + Placement.barSidePadding * 2,
+            height: max(360, (screen?.visibleFrame.height ?? 800) * 0.4), anchor: model.settings.anchor
+        )
+    }
 
     private var geometry: ScreenGeometry? {
         guard let screen else { return nil }
@@ -269,8 +301,9 @@ final class BarWindowController {
                 contentSize: contentSize, on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset
             )
             if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
-            if panel.frame != placement.frame { panel.setFrame(placement.frame, display: true) }
-            model.barWindowFrame = placement.frame
+            let canvas = canvas(around: placement.frame)
+            if panel.frame != canvas { panel.setFrame(canvas, display: true) }
+            model.barWindowFrame = canvas
         }
         updateGuardedTopEdge()
     }
@@ -320,7 +353,7 @@ final class BarWindowController {
             x: geometry.frame.maxX - menuBarRowSize.width, y: geometry.visibleFrame.maxY, width: menuBarRowSize.width, height: menuBarHeight
         )
         let size = CGSize(width: max(contentSize.width, 1), height: max(contentSize.height, 1))
-        let frame = Placement.rows(contentSize: size, under: item, on: geometry, anchor: model.settings.anchor)
+        let frame = canvas(around: Placement.rows(contentSize: size, under: item, on: geometry, anchor: model.settings.anchor))
         if model.topRowMinHeight != 0 { model.topRowMinHeight = 0 }
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         model.barWindowFrame = frame
@@ -391,14 +424,15 @@ final class BarWindowController {
     private func drag(_ translation: CGSize) {
         if dragOrigin == nil { dragOrigin = panel.frame.origin }
         guard let origin = dragOrigin, let screen else { return }
-        let x = min(max(origin.x + translation.width, screen.frame.minX), screen.frame.maxX - panel.frame.width)
-        panel.setFrameOrigin(CGPoint(x: x, y: origin.y))
+        let barOffset = contentFrame.minX - panel.frame.minX
+        let barX = min(max(origin.x + barOffset + translation.width, screen.frame.minX), screen.frame.maxX - contentFrame.width)
+        panel.setFrameOrigin(CGPoint(x: barX - barOffset, y: origin.y))
     }
 
     private func endDrag() {
         guard dragOrigin != nil, let geometry else { return }
         dragOrigin = nil
-        let anchor = Placement.anchor(forDropAt: panel.frame.midX, on: geometry)
+        let anchor = Placement.anchor(forDropAt: contentFrame.midX, on: geometry)
         if anchor != model.settings.anchor { onAnchorChanged(anchor) }
         place()
     }
@@ -437,7 +471,7 @@ final class PanelWindowController {
             MainActor.assumeIsolated {
                 guard let self, self.model.panel != nil else { return }
                 let pointer = NSEvent.mouseLocation
-                if !self.visibleFrame.contains(pointer), !self.bar.panel.frame.contains(pointer) { self.onClickOutside() }
+                if !self.visibleFrame.contains(pointer), !self.bar.contentFrame.contains(pointer) { self.onClickOutside() }
             }
         }
     }
@@ -462,8 +496,8 @@ final class PanelWindowController {
 
     func place() {
         guard let state = model.panel, let screen = bar.screen else { return }
-        let chip = bar.screenFrame(ofSlot: state.slotID) ?? bar.panel.frame
-        let frame = Placement.panel(size: contentSize, under: chip, on: screen.visibleFrame.union(bar.panel.frame), gap: 6)
+        let chip = bar.screenFrame(ofSlot: state.slotID) ?? bar.contentFrame
+        let frame = Placement.panel(size: contentSize, under: chip, on: screen.visibleFrame.union(bar.contentFrame), gap: 6)
         let padded = frame.insetBy(dx: -PanelView.margin, dy: -PanelView.margin)
         if panel.frame != padded { panel.setFrame(padded, display: true) }
     }

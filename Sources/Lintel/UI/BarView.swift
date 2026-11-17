@@ -16,7 +16,7 @@ struct BarView: View {
     @ObservedObject var model: BarModel
     var host = Host.window
     @State private var isMovingBar = false
-    @Namespace private var chipTravel
+
 
     private var looksActive: Bool {
         model.isActive || host == .menuBar
@@ -38,21 +38,20 @@ struct BarView: View {
         let material = material
         let hasCapsules = material == .glass || material == .solid
         let isInMenuBar = host == .menuBar
-        GlassEffectContainer(spacing: 0) {
-            VStack(alignment: model.alignment, spacing: max(theme.rowSpacing, hasCapsules ? 3 : 0)) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { row in
-                    WrappingRow(
-                        spacing: hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing,
-                        lineSpacing: max(theme.rowSpacing, hasCapsules ? 3 : 0), alignment: model.alignment,
-                        // A menu bar item cannot grow taller; one too wide goes behind the menu bar's overflow button.
-                        maxWidth: isInMenuBar ? .greatestFiniteMagnitude : model.maxBarWidth
-                    ) {
-                        ForEach(row.element) { slot in
-                            ChipView(slot: slot, model: model, material: material, travel: chipTravel)
-                        }
-                    }
-                    .frame(minHeight: row.offset == 0 && !isInMenuBar ? model.topRowMinHeight : 0)
-                }
+        let spacing = max(theme.rowSpacing, hasCapsules ? 3 : 0)
+        BarRows(flow: BarFlow(
+            spacing: hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing, rowSpacing: spacing,
+            alignment: BarFlow.Alignment(model.alignment),
+            // A menu bar item cannot grow taller; one too wide goes behind the menu bar's overflow button.
+            maxWidth: isInMenuBar ? .greatestFiniteMagnitude : model.maxBarWidth,
+            firstRowMinHeight: isInMenuBar ? 0 : model.topRowMinHeight
+        )) {
+            // One flat ForEach keyed by module: nested per row, a module changing rows would get a new identity and
+            // fade out of one row and into the other instead of sliding.
+            ForEach(rows.enumerated().flatMap { row, slots in slots.map { (row: row, slot: $0) } }, id: \.slot.id) { placed in
+                ChipView(slot: placed.slot, model: model, material: material)
+                    .layoutValue(key: BarRowIndex.self, value: placed.row)
+                    .transition(Arrival())
             }
         }
         .padding(.horizontal, isInMenuBar ? 4 : Placement.barSidePadding)
@@ -76,7 +75,7 @@ struct BarView: View {
         )
         .coordinateSpace(name: barSpace)
         .environment(\.isInMenuBar, isInMenuBar)
-        .animation(theme.motion == "full" ? .smooth(duration: 0.22) : nil, value: model.isActive)
+        .animation(theme.motion == "full" ? BarModel.reflow : nil, value: model.isActive)
         .environment(\.colorScheme, colorScheme(for: material) ?? systemScheme)
         .onExitCommand { model.onDismiss() }
     }
@@ -127,7 +126,6 @@ struct ChipView: View {
     @ObservedObject var model: BarModel
     @Environment(\.isInMenuBar) private var isInMenuBar
     let material: SurfaceMaterial
-    var travel: Namespace.ID?
     var isCarried = false
     @State private var isHovered = false
 
@@ -135,18 +133,12 @@ struct ChipView: View {
         model.panel?.slotID == slot.id
     }
 
+    private var isLeftForTheCarrier: Bool {
+        !isCarried && model.rearrangement?.key == slot.id
+    }
+
     var body: some View {
-        if !isCarried, let rearrangement = model.rearrangement, rearrangement.key == slot.id {
-            // GlassEffectContainer draws every chip's glass and content itself, so opacity(0) leaves the chip visible.
-            Color.clear
-                .frame(width: rearrangement.size.width, height: rearrangement.size.height)
-                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
-                    model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar)
-                })
-                .modifier(Travels(id: slot.id, namespace: travel))
-        } else {
-            chip
-        }
+        chip.opacity(isLeftForTheCarrier ? 0 : 1)
     }
 
     private var chip: some View {
@@ -164,6 +156,7 @@ struct ChipView: View {
                 }
             }
             .modifier(SurfaceBackground(context: context, material: material, shape: context.chipShape, isInteractive: isClickable))
+            .glassEffectTransition(.identity)
             .overlay {
                 if hasCapsule, isPanelOpen {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)
@@ -176,7 +169,6 @@ struct ChipView: View {
             .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
                 if !isCarried { model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar) }
             })
-            .modifier(Travels(id: slot.id, namespace: isCarried ? nil : travel))
             .help(isOpen ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
     }
@@ -239,18 +231,8 @@ struct CarrierView: View {
 
     var body: some View {
         if let rearrangement = model.rearrangement, let slot = model.slot(rearrangement.key) {
-            let carried = CGPoint(
-                x: model.carriedPointer.x - rearrangement.grabOffset.width, y: model.carriedPointer.y - rearrangement.grabOffset.height
-            )
-            let barTopLeft = rearrangement.phase == .landing ? model.slotFrames[slot.id]?.origin ?? carried : carried
-            let topLeft = model.barToCarrier(barTopLeft)
-            ChipView(slot: slot, model: model, material: SurfaceMaterial(active: model.theme.activeMaterial), isCarried: true)
-                .fixedSize()
-                .opacity(rearrangement.phase == .vanishing ? 0 : 1)
-                .scaleEffect(scale(of: rearrangement))
-                .blur(radius: rearrangement.phase == .vanishing ? 4 : 0)
-                .shadow(color: .black.opacity(rearrangement.phase == .carrying ? 0.3 : 0), radius: 10, y: 4)
-                .offset(x: topLeft.x, y: topLeft.y)
+            CarriedChip(slot: slot, rearrangement: rearrangement, model: model)
+                .id(slot.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .environment(\.colorScheme, colorScheme ?? systemScheme)
                 .allowsHitTesting(false)
@@ -266,87 +248,86 @@ struct CarrierView: View {
         default: nil
         }
     }
+}
 
-    private func scale(of rearrangement: Rearrangement) -> CGFloat {
-        switch rearrangement.phase {
-        case .carrying: 1.08
-        case .landing: 1
-        case .vanishing: 0.5
+/// Starts exactly over the module it lifts out of the bar, then rises under the pointer.
+private struct CarriedChip: View {
+    let slot: Slot
+    let rearrangement: Rearrangement
+    @ObservedObject var model: BarModel
+    @State private var isLifted = false
+
+    var body: some View {
+        let carried = CGPoint(
+            x: model.carriedPointer.x - rearrangement.grabOffset.width, y: model.carriedPointer.y - rearrangement.grabOffset.height
+        )
+        let barTopLeft = rearrangement.phase == .landing ? model.slotFrames[slot.id]?.origin ?? carried : carried
+        let topLeft = model.barToCarrier(barTopLeft)
+        let isRaised = isLifted && rearrangement.phase == .carrying
+        ChipView(slot: slot, model: model, material: SurfaceMaterial(active: model.theme.activeMaterial), isCarried: true)
+            .fixedSize()
+            .scaleEffect(rearrangement.phase == .vanishing ? 0.5 : isRaised ? 1.06 : 1, anchor: anchor)
+            .opacity(rearrangement.phase == .vanishing ? 0 : 1)
+            .shadow(color: .black.opacity(isRaised ? 0.3 : 0), radius: isRaised ? 10 : 0, y: isRaised ? 4 : 0)
+            .offset(x: topLeft.x, y: topLeft.y)
+            .onAppear { withAnimation(BarModel.lift) { isLifted = true } }
+    }
+
+    /// Scales about the grab point, so the module grows and shrinks around the pointer instead of sliding under it.
+    private var anchor: UnitPoint {
+        guard rearrangement.size.width > 0, rearrangement.size.height > 0 else { return .center }
+        return UnitPoint(x: rearrangement.grabOffset.width / rearrangement.size.width, y: rearrangement.grabOffset.height / rearrangement.size.height)
+    }
+}
+
+/// Modules arriving as the bar opens grow out of their place rather than materialising their glass from a blur.
+private struct Arrival: Transition {
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        // scaleEffect would also shrink the frame ChipView reports, and a frame read mid-transition stays the module's
+        // frame for drops and landings; a visual effect changes only what is drawn.
+        content
+            .opacity(phase.isIdentity ? 1 : 0)
+            .visualEffect { effect, _ in effect.scaleEffect(phase.isIdentity ? 1 : 0.82) }
+    }
+}
+
+private struct BarRowIndex: LayoutValueKey {
+    static let defaultValue = 0
+}
+
+extension BarFlow.Alignment {
+    init(_ alignment: HorizontalAlignment) {
+        switch alignment {
+        case .leading: self = .leading
+        case .center: self = .center
+        default: self = .trailing
         }
     }
 }
 
-/// Lets a chip glide between rows, which are separate containers, instead of vanishing from one and appearing in the other.
-private struct Travels: ViewModifier {
-    let id: String
-    let namespace: Namespace.ID?
+/// Every row of the bar in one layout, so a module moving to another row slides there as the same view.
+struct BarRows: Layout {
+    var flow: BarFlow
 
-    func body(content: Content) -> some View {
-        if let namespace { content.matchedGeometryEffect(id: id, in: namespace) } else { content }
-    }
-}
-
-/// One row of the bar. It stays on one line until it would be wider than the screen allows, then wraps.
-struct WrappingRow: Layout {
-    var spacing: CGFloat
-    var lineSpacing: CGFloat
-    var alignment: HorizontalAlignment
-    var maxWidth: CGFloat
-
-    private struct Line {
-        var indices: [Int] = []
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-    }
-
-    private func lines(_ subviews: Subviews) -> (lines: [Line], sizes: [CGSize]) {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        // The items nearest the anchored edge are the pinned ones; they must keep the first line when the row
-        // overflows, so a right-anchored row is filled from its end.
-        let fillsFromEnd = alignment == .trailing
-        let order = fillsFromEnd ? Array(sizes.indices.reversed()) : Array(sizes.indices)
-        var lines = [Line()]
-        for index in order {
-            let size = sizes[index]
-            var line = lines[lines.count - 1]
-            let extended = line.indices.isEmpty ? size.width : line.width + spacing + size.width
-            if extended > maxWidth, !line.indices.isEmpty {
-                lines.append(Line(indices: [index], width: size.width, height: size.height))
-                continue
-            }
-            line.indices.append(index)
-            line.width = extended
-            line.height = max(line.height, size.height)
-            lines[lines.count - 1] = line
-        }
-        if fillsFromEnd { lines = lines.map { Line(indices: $0.indices.reversed(), width: $0.width, height: $0.height) } }
-        return (lines, sizes)
+    private func placed(_ subviews: Subviews) -> (placed: BarFlow.Placed, members: [[Int]]) {
+        let rowCount = (subviews.map { $0[BarRowIndex.self] }.max() ?? -1) + 1
+        var members = Array(repeating: [Int](), count: rowCount)
+        for index in subviews.indices { members[subviews[index][BarRowIndex.self]].append(index) }
+        let sizes = members.map { $0.map { subviews[$0].sizeThatFits(.unspecified) } }
+        return (flow.place(sizes), members)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let lines = lines(subviews).lines
-        return CGSize(
-            width: lines.map(\.width).max() ?? 0,
-            height: lines.map(\.height).reduce(0, +) + lineSpacing * CGFloat(max(lines.count - 1, 0))
-        )
+        placed(subviews).placed.size
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let (lines, sizes) = lines(subviews)
-        var y = bounds.minY
-        for line in lines {
-            var x: CGFloat = switch alignment {
-            case .leading: bounds.minX
-            case .center: bounds.midX - line.width / 2
-            default: bounds.maxX - line.width
+        let (placed, members) = placed(subviews)
+        for (row, indices) in members.enumerated() {
+            for (position, index) in indices.enumerated() {
+                let frame = placed.frames[row][position].offsetBy(dx: bounds.minX, dy: bounds.minY)
+                subviews[index].place(at: frame.origin, proposal: ProposedViewSize(frame.size))
             }
-            for index in line.indices {
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y + (line.height - sizes[index].height) / 2), proposal: ProposedViewSize(sizes[index])
-                )
-                x += sizes[index].width + spacing
-            }
-            y += line.height + lineSpacing
         }
     }
 }

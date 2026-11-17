@@ -224,8 +224,9 @@ final class BarModel: ObservableObject {
         return [shown[0].compactMap { byID[$0] }] + shown.dropFirst().map { $0.compactMap { byID[$0] } }.filter { !$0.isEmpty }
     }
 
-    static let reflow = Animation.spring(duration: 0.28, bounce: 0.18)
-    static let vanish = Animation.easeIn(duration: 0.18)
+    static let reflow = Animation.spring(duration: 0.32, bounce: 0.12)
+    static let lift = Animation.spring(duration: 0.22, bounce: 0.2)
+    static let vanish = Animation.spring(duration: 0.22, bounce: 0)
 
     /// Splits the menu bar row by the widths its modules last had, wherever they were drawn.
     var menuBarFit: MenuBarFit {

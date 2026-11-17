@@ -177,7 +177,7 @@ final class ControlChannel {
                 "keyWindow": app.windows.first { $0.window.isKeyWindow }.map { .string($0.name) } ?? .null, "hidden": .bool(app.model.isHiddenByUser),
                 "theme": .object(app.model.theme.patch), "anchor": .string(app.model.settings.anchor.rawValue),
                 "carrying": app.model.rearrangement.map { .string("\($0.key) \($0.drop.map { "\($0)" } ?? "none") \($0.phase) at \(app.model.carriedPointer)") } ?? .null,
-                "barFrame": app.bar.map { .string("\($0.panel.frame)") } ?? .null,
+                "barFrame": app.bar.map { .string("\($0.contentFrame)") } ?? .null,
                 "guardedTopEdge": app.bar?.guardedTopEdge.map { .string("\($0)") } ?? .null,
                 "pointerTap": .bool(app.pointerTap.isRunning), "menuBarRowBudget": .number(Double(min(app.model.menuBarRowBudget, 99999))), "accessibility": .bool(AXIsProcessTrusted()),
             ]

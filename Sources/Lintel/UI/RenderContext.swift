@@ -180,32 +180,19 @@ struct RenderContext {
     }
 }
 
-/// The idle look: nothing behind the text but a dark halo, so it stays legible on any window or wallpaper.
-struct Halo: ViewModifier {
-    let theme: Theme
-
-    func body(content: Content) -> some View {
-        content.shadow(color: .black.opacity(theme.shadowOpacity), radius: Metrics(theme).haloShadowRadius)
-    }
-}
-
 struct SurfaceBackground<Outline: Shape>: ViewModifier {
     let context: RenderContext
     let material: SurfaceMaterial
     let shape: Outline
     var isInteractive = false
 
+    // One chain for every material rather than a switch: a switch gives each material its own view, so a chip whose
+    // material changes as the bar opens or closes would be replaced where it stands instead of moving with the bar.
     func body(content: Content) -> some View {
-        switch material {
-        case .glass:
-            content.glassEffect(isInteractive ? .regular.interactive() : .regular, in: shape)
-        case .solid:
-            content.background(context.surfaceFill, in: shape)
-                .overlay(shape.stroke(context.primary.opacity(0.1), lineWidth: 0.5))
-        case .halo:
-            content.modifier(Halo(theme: context.theme))
-        case .bare:
-            content
-        }
+        content
+            .shadow(color: .black.opacity(material == .halo ? context.theme.shadowOpacity : 0), radius: material == .halo ? Metrics(context.theme).haloShadowRadius : 0)
+            .background(material == .solid ? AnyShapeStyle(context.surfaceFill) : AnyShapeStyle(.clear), in: shape)
+            .overlay(shape.stroke(context.primary.opacity(material == .solid ? 0.1 : 0), lineWidth: 0.5))
+            .glassEffect(material == .glass ? isInteractive ? .regular.interactive() : .regular : .identity, in: shape)
     }
 }
