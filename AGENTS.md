@@ -47,6 +47,11 @@ Accessibility only if the user granted it to that build, and without it the top-
 stay off; to check those on the desktop, run `build/Lintel.app/Contents/MacOS/Lintel` from the terminal so it inherits
 the terminal's grant. Do not copy the app elsewhere or replace an installed copy unless the user supplies the command.
 
+The user keeps using whichever Lintel you launched last, so never leave it running from a worktree. Before removing a
+worktree, quit the Lintel launched from it, rebuild in the primary checkout after integrating into `main`, and launch
+`build/Lintel.app` from there. A running Lintel whose bundle was deleted keeps its modules only until it restarts, and
+then comes back with none. `lsappinfo list | grep -A3 '"Lintel"'` shows which bundle is running.
+
 ## Testing in the VM
 
 The developer works on the host desktop, so never synthesise input or take over the pointer there. Drags, clicks and

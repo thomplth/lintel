@@ -160,14 +160,29 @@ enum Resources {
         return FileManager.default.fileExists(atPath: nested.path) ? nested : bundle
     }()
 
+    // Deleting or rebuilding the bundle this process was launched from (a removed worktree's build/Lintel.app, say)
+    // takes these files away mid-run; without the snapshot the module watcher then drops every built-in module.
+    private static let snapshot = root.map(FileSnapshot.init(of:))
+
     static func files(in folder: String, extension fileExtension: String) -> [URL] {
-        guard let root else { return [] }
-        let found = (try? FileManager.default.contentsOfDirectory(at: root.appending(path: folder), includingPropertiesForKeys: nil)) ?? []
-        return found.filter { $0.pathExtension == fileExtension }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        guard let root, let snapshot else { return [] }
+        return snapshot.files(in: folder, extension: fileExtension).map { root.appending(path: $0.path) }
     }
 
     static func text(_ path: String) -> String? {
-        root.flatMap { try? String(contentsOf: $0.appending(path: path), encoding: .utf8) }
+        snapshot?.text(at: path)
+    }
+
+    static func bundled(_ file: URL) -> FileSnapshot.File? {
+        guard let root, let snapshot else { return nil }
+        let rootPath = root.standardizedFileURL.path + "/"
+        let filePath = file.standardizedFileURL.path
+        guard filePath.hasPrefix(rootPath) else { return nil }
+        return snapshot.file(at: String(filePath.dropFirst(rootPath.count)))
+    }
+
+    static func source(of file: URL) -> String? {
+        bundled(file)?.text ?? (try? String(contentsOf: file, encoding: .utf8))
     }
 }
 

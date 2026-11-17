@@ -67,7 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try? await Task.sleep(for: .seconds(1.5))
                 let listings = await app.host.listings()
                 guard arguments.count == 3, let listing = listings.first(where: { $0.id == arguments[1] }),
-                      let source = try? String(contentsOf: listing.file, encoding: .utf8)
+                      let source = Resources.source(of: listing.file)
                 else {
                     emit("usage: Lintel export <module id> <file>")
                     exit(1)

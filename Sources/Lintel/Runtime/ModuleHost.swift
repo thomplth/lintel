@@ -168,7 +168,7 @@ final class ModuleHost {
             for file in files {
                 let key = file.deletingPathExtension().lastPathComponent
                 if let only, !only.contains(key) { continue }
-                guard let stamp = AppHome.modificationDate(of: file) else { continue }
+                guard let stamp = Resources.bundled(file)?.modified ?? AppHome.modificationDate(of: file) else { continue }
                 sources[key] = Source(key: key, file: file, origin: origin, stamp: stamp)
             }
         }
@@ -189,7 +189,7 @@ final class ModuleHost {
     private func load(_ source: Source) {
         generation += 1
         let current = generation
-        let text = (try? String(contentsOf: source.file, encoding: .utf8)) ?? ""
+        let text = Resources.source(of: source.file) ?? ""
         loaded[source.key] = Loaded(source: source, text: text, generation: current)
         publish(source.key)
         updateNeeds()
@@ -537,9 +537,9 @@ final class ModuleHost {
 
     private func describe(_ file: URL) async -> ModuleDescription? {
         let key = file.deletingPathExtension().lastPathComponent
-        guard let stamp = AppHome.modificationDate(of: file) else { return nil }
+        guard let stamp = Resources.bundled(file)?.modified ?? AppHome.modificationDate(of: file) else { return nil }
         if let cached = libraryCache[key], cached.stamp == stamp { return cached.description }
-        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        guard let text = Resources.source(of: file) else { return nil }
         trialCount += 1
         let temporary = "describe-\(trialCount)"
         defer { runner.unload(key: temporary) }

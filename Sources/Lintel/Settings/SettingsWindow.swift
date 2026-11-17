@@ -646,7 +646,7 @@ private struct ModuleRow: View {
 enum ModuleSharing {
     @MainActor
     static func export(_ listing: ModuleListing, app: AppController) {
-        guard let source = try? String(contentsOf: listing.file, encoding: .utf8) else { return }
+        guard let source = Resources.source(of: listing.file) else { return }
         let bundle = ModuleBundle(id: listing.id, title: listing.title, permissions: listing.permissions, prompt: app.host.prompt(of: listing.id), source: source)
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "\(listing.id).\(ModuleBundle.fileExtension)"
