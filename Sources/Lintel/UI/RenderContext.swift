@@ -77,6 +77,21 @@ struct RenderContext {
         }
     }
 
+    var look: Look {
+        switch material {
+        case .halo: .halo
+        case .glass: .glass
+        case .solid: .solid
+        case .bare: .none
+        }
+    }
+
+    /// A module's tone for this look drawn as text or a line. A tone the module named for this look is drawn exactly.
+    func color(_ choice: ToneChoice?, fallback: Color? = nil) -> Color {
+        guard let resolved = choice?.resolved(for: look) else { return fallback ?? primary }
+        return resolved.isChosenForLook ? fillColor(resolved.tone) : color(resolved.tone)
+    }
+
     /// A tone drawn as text or a line. Over the dark halo, coloured tones are lifted to the text's lightness so they
     /// stand out from the halo as plainly as the text does.
     func color(_ tone: Tone?, fallback: Color? = nil) -> Color {

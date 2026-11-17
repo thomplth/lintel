@@ -20,7 +20,7 @@ public struct ViewNode: Equatable, Sendable {
     public func string(_ name: String) -> String? { props[name]?.string }
     public func number(_ name: String) -> Double? { props[name]?.number }
     public func bool(_ name: String) -> Bool { props[name]?.bool ?? false }
-    public func tone(_ name: String = "tone") -> Tone? { props[name]?.string.flatMap(Tone.init(name:)) }
+    public func tone(_ name: String = "tone") -> ToneChoice? { props[name].flatMap(ToneChoice.init) }
     public func numbers(_ name: String) -> [Double] { props[name]?.array?.compactMap(\.number) ?? [] }
     public func strings(_ name: String) -> [String] { props[name]?.array?.compactMap(\.string) ?? [] }
 
@@ -35,7 +35,7 @@ public struct ViewNode: Equatable, Sendable {
             }
         }
         let values = numbers("values")
-        return values.isEmpty ? [] : [ChartSeries(label: "", values: values, tone: tone())]
+        return values.isEmpty ? [] : [ChartSeries(label: "", values: values, tone: tone()?.otherwise)]
     }
 
     public var descendants: [ViewNode] {
@@ -173,11 +173,12 @@ extension ViewNode {
             }
             return .string(text)
         case .tone:
-            guard let text = raw.string, let tone = Tone(name: text) else {
-                problems.append(.error("\(component).\(name) must be a tone (\(Tone.semantic.map(\.rawValue).joined(separator: ", ")) or a colour name such as blue); raw colours like \(raw.text.prefix(20)) are not allowed"))
+            let toneProblems = ToneChoice.problems(in: raw, prop: "\(component).\(name)")
+            guard toneProblems.isEmpty, let choice = ToneChoice(raw) else {
+                problems += toneProblems.map(ViewProblem.error)
                 return nil
             }
-            return .string(tone.rawValue)
+            return choice.json
         case .series:
             guard let entries = raw.array, entries.allSatisfy({ $0["values"].array != nil }) else {
                 return reject("an array of { label, values, tone }")

@@ -28,6 +28,19 @@ public enum DesignGuide {
         return block("Allowed in the bar item and in panels:", chip) + "\n\n" + block("Panels only:", panel)
     }
 
+    /// What the assistant needs to know about how the current theme's looks treat colour, or nil when nothing.
+    public static func lookNote(for theme: Theme) -> String? {
+        let states = [(theme.idleLook, "idle"), (theme.activeLook, "open")].filter { $0.0 == .halo }.map(\.1)
+        guard !states.isEmpty, theme.haloToneLightness != nil else { return nil }
+        return """
+            This theme draws the bar on the halo look while \(states.joined(separator: " and ")): plain text with a dark \
+            shadow. There, coloured tones on text, icons and lines are lightened to the text colour so they stay legible \
+            over pale windows, and badges keep their exact colour. A paler colour there is intended. To show a different \
+            colour on the halo, give a per-look tone such as { halo: 'warn', otherwise: 'orange' }; a tone named for \
+            halo is drawn exactly as named.
+            """
+    }
+
     public static var reference: String {
         """
         # Writing a Lintel module
@@ -78,8 +91,8 @@ public enum DesignGuide {
         Tones: primary, secondary, tertiary, accent, good, warn, bad, info, or a hue: red, orange, yellow, green, mint,
         teal, cyan, blue, indigo, purple, pink, brown, gray. Hex colours are rejected. Use good/warn/bad for meaning
         (thresholds, pass/fail), accent for emphasis, secondary for supporting text. Most things need no tone at all.
-        On the halo look, coloured tones on text, icons and lines are drawn as light as the text so they stay legible
-        over pale windows; badges keep the exact colour. A paler orange there is intended, not a theme to correct.
+        A tone can differ by look, the material a surface is drawn on: { halo: 'secondary', otherwise: 'orange' }.
+        Looks are halo, glass, solid and none; otherwise covers the rest, and a look with no tone gets none.
 
         ## Host API
 

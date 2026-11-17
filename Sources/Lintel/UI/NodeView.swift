@@ -15,7 +15,7 @@ struct NodeView: View {
         case .dot:
             Circle().fill(context.color(node.tone(), fallback: context.secondary))
                 .frame(width: context.metrics.fontSize(role: nil) * 0.5, height: context.metrics.fontSize(role: nil) * 0.5)
-        case .badge: badgeView(node.string("value") ?? "", tone: node.tone())
+        case .badge: badgeView(node.string("value") ?? "", tone: node.tone()?.resolved(for: context.look)?.tone)
         case .gauge: LevelBar(fraction: node.number("value") ?? 0, color: context.color(node.tone()), track: context.strongFill)
             .frame(width: context.theme.fontSize * 2.2, height: max(4, context.theme.fontSize * 0.36))
         case .ring: ringView
@@ -103,7 +103,7 @@ struct NodeView: View {
         }
     }
 
-    private func iconView(_ name: String, tone: Tone?, size: String? = nil, role: String? = nil) -> some View {
+    private func iconView(_ name: String, tone: ToneChoice?, size: String? = nil, role: String? = nil) -> some View {
         let scale: Double = switch size {
         case "small": 0.8
         case "large": 1.5
@@ -188,7 +188,7 @@ struct NodeView: View {
     private var statView: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: context.metrics.unit) {
-                if let name = node.string("icon") { iconView(name, tone: .secondary, role: "caption") }
+                if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "caption") }
                 Text(node.string("label") ?? "").font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -219,7 +219,7 @@ struct NodeView: View {
     private var meterView: some View {
         VStack(spacing: context.metrics.unit) {
             HStack(spacing: context.metrics.unit * 1.5) {
-                if let name = node.string("icon") { iconView(name, tone: .secondary, role: "label") }
+                if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "label") }
                 Text(node.string("label") ?? "").font(context.font(role: "label", weight: context.theme.fontWeight)).foregroundStyle(context.primary).lineLimit(1)
                 Spacer(minLength: 8)
                 if let value = node.string("value") {
@@ -278,7 +278,7 @@ struct NodeView: View {
 
     private var noteView: some View {
         HStack(alignment: .firstTextBaseline, spacing: context.metrics.unit * 1.5) {
-            if let name = node.string("icon") { iconView(name, tone: node.tone() ?? .secondary, role: "caption") }
+            if let name = node.string("icon") { iconView(name, tone: node.tone() ?? ToneChoice(.secondary), role: "caption") }
             Text(node.string("value") ?? "")
                 .font(context.font(role: "caption"))
                 .foregroundStyle(context.color(node.tone(), fallback: context.secondary))

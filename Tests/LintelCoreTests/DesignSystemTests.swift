@@ -44,7 +44,7 @@ private func evaluate(_ script: String) -> JSValue {
 
     @Test func toneAliasesResolveToTheSemanticTone() {
         let parsed = ViewNode.parse(["type": "text", "value": "x", "tone": "danger"])
-        #expect(parsed.node?.tone() == .bad)
+        #expect(parsed.node?.tone() == ToneChoice(.bad))
     }
 
     @Test func aFractionOutsideZeroToOneIsClampedWithAWarning() {

@@ -281,6 +281,7 @@ final class ChatController {
             Glass capsules always; ink = solid dark capsules and panels; paper = solid light, serif; terminal = \
             monospaced green on solid near-black squares.
             Current theme: \(JSONValue.object(app.model.theme.patch).text)
+            \(DesignGuide.lookNote(for: app.model.theme) ?? "")
 
             ## Layout
             {"rows": [[item, ...], ...], "hidden": [item], "pinned": {item: bool}, "symbols": {item: sfSymbolName}}
