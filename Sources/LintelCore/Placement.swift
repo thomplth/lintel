@@ -74,6 +74,24 @@ public enum Placement {
         return .center
     }
 
+    /// The bar's own padding either side of its rows.
+    public static let barSidePadding: CGFloat = 8
+
+    /// How wide a row may grow before it wraps. Beside a notch, while the menu bar hides, rows wrap to the space beside
+    /// the notch so the bar's first line stays in the strip at the top of the screen instead of the whole bar
+    /// dropping below it.
+    public static func widestRow(
+        on screen: ScreenGeometry, anchor: BarAnchor, edgeInset: CGFloat = 0, otherwise: CGFloat
+    ) -> CGFloat {
+        let strip: CGRect? = switch anchor {
+        case .left: screen.areaLeftOfNotch
+        case .right: screen.areaRightOfNotch
+        case .center: nil
+        }
+        guard screen.menuBarAutoHides, screen.notchStripHeight > 0, let strip else { return otherwise }
+        return min(otherwise, strip.width - edgeInset - barSidePadding * 2)
+    }
+
     /// The bar's rows after the first, hanging under the menu bar item that holds the first row, aligned to the
     /// side the bar is anchored to and kept on screen.
     public static func rows(contentSize: CGSize, under item: CGRect, on screen: ScreenGeometry, anchor: BarAnchor) -> CGRect {

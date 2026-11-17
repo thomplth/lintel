@@ -477,6 +477,27 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(wide.frame.maxY == 568)
     }
 
+    @Test func besideANotchTheBarWrapsToTheSpaceBesideItSoItsFirstLineStaysInTheStrip() {
+        var screen = plain
+        screen.notchStripHeight = 32
+        screen.areaRightOfNotch = CGRect(x: 600, y: 568, width: 400, height: 32)
+        screen.areaLeftOfNotch = CGRect(x: 0, y: 568, width: 400, height: 32)
+        #expect(Placement.widestRow(on: screen, anchor: .right, edgeInset: 10, otherwise: 900) == 374)
+        #expect(Placement.widestRow(on: screen, anchor: .left, otherwise: 900) == 384)
+        #expect(Placement.widestRow(on: screen, anchor: .center, otherwise: 900) == 900)
+        let wrapped = Placement.bar(contentSize: CGSize(width: 384, height: 60), on: screen, anchor: .right)
+        #expect(wrapped.frame.maxY == 600)
+    }
+
+    @Test func withoutANotchOrWithAMenuBarThatShowsTheBarKeepsItsUsualWidth() {
+        #expect(Placement.widestRow(on: plain, anchor: .right, otherwise: 900) == 900)
+        var shown = plain
+        shown.menuBarAutoHides = false
+        shown.notchStripHeight = 32
+        shown.areaRightOfNotch = CGRect(x: 600, y: 568, width: 400, height: 32)
+        #expect(Placement.widestRow(on: shown, anchor: .right, otherwise: 900) == 900)
+    }
+
     @Test func aCentredBarOnANotchedScreenGoesBelowTheNotch() {
         var screen = plain
         screen.notchStripHeight = 32

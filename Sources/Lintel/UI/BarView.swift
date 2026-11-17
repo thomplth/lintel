@@ -55,7 +55,7 @@ struct BarView: View {
                 }
             }
         }
-        .padding(.horizontal, isInMenuBar ? 4 : 8)
+        .padding(.horizontal, isInMenuBar ? 4 : Placement.barSidePadding)
         .padding(.top, model.topRowMinHeight > 0 || isInMenuBar ? 0 : 4)
         .padding(.bottom, isInMenuBar ? 0 : 4)
         .frame(minWidth: isInMenuBar ? 16 : 0)

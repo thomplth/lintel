@@ -24,7 +24,8 @@ xcrun --sdk macosx swift test
 
 Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides it. Settings are behind the gear in any panel.
 With the menu bar set to hide automatically, the top edge above the bar no longer brings the menu bar in; hold ⌥ there,
-or use the rest of the top edge (needs Accessibility; Settings › General turns it off).
+or use the rest of the top edge (needs Accessibility; Settings › General turns it off). Beside a notch the opened bar
+wraps to the space beside it, so its first line stays at the top of the screen.
 With the menu bar always shown, the bar's first row lives in the menu bar beside other apps' icons and the rows after it
 hang below; modules that do not fit beside the notch lead the second row. ⌘-dragging a module there moves it within
 Lintel, not among other apps' items (needs Accessibility; without it macOS moves the whole row instead).

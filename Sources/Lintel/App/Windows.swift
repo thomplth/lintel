@@ -254,7 +254,10 @@ final class BarWindowController {
 
     func place() {
         guard let geometry, dragOrigin == nil else { return }
-        let widest = max(geometry.frame.width * 0.62 - 16, 320)
+        let widest = Placement.widestRow(
+            on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset,
+            otherwise: max(geometry.frame.width * 0.62 - 16, 320)
+        )
         if model.maxBarWidth != widest { model.maxBarWidth = widest }
         updateMenuBarRow(wanted: !geometry.menuBarAutoHides)
         if let menuBarRow {
