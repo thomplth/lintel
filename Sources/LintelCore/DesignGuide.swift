@@ -121,7 +121,9 @@ public enum DesignGuide {
         Formatting helpers (use them so every module reads the same way):
           host.format.bytes(n) '1.2 GB' · rate(n) '3.4 MB/s' · percent(fraction) '42%' · number(n) '12,345' ·
           compact(n) '1.2k' · duration(seconds) '1h 05m' · timer(seconds) '4:05' · ago(dateOrMs) '5 min ago' ·
-          time(date?, { seconds? }) '14:05' · date(date?, 'long'?) 'Mon 16 Nov' · truncate(text, max)
+          time(date?, { seconds?, twelveHour? }) '14:05' / '2:05 PM' · truncate(text, max) ·
+          date(date?, { order?: 'day-month' | 'month-day' | 'dmy' | 'mdy' | 'iso', weekday? (default true), year? })
+          'Mon 16 Nov' · 'Mon Nov 16, 2026' · '16/11' · '2026-11-16'
 
         ## Rules the app enforces (a module that breaks one is rejected and sent back)
 

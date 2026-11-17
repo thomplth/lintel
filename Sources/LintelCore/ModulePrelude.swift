@@ -172,14 +172,26 @@ public enum ModulePrelude {
         },
         time: function (when, options) {
           var date = when ? new Date(when) : new Date(), o = __options(options);
-          return __pad(date.getHours()) + ':' + __pad(date.getMinutes()) + (o.seconds ? ':' + __pad(date.getSeconds()) : '');
+          var hours = o.twelveHour ? (date.getHours() + 11) % 12 + 1 : __pad(date.getHours());
+          var clock = hours + ':' + __pad(date.getMinutes()) + (o.seconds ? ':' + __pad(date.getSeconds()) : '');
+          return o.twelveHour ? clock + (date.getHours() < 12 ? ' AM' : ' PM') : clock;
         },
-        date: function (when, style) {
+        date: function (when, options) {
           var date = when ? new Date(when) : new Date();
+          var o = options === 'long' ? { year: true } : __options(options);
           var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
           var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          var short = days[date.getDay()] + ' ' + date.getDate() + ' ' + months[date.getMonth()];
-          return style === 'long' ? short + ' ' + date.getFullYear() : short;
+          var day = date.getDate(), month = date.getMonth(), year = date.getFullYear();
+          var dd = __pad(day), mm = __pad(month + 1);
+          var formats = {
+            'day-month': [day + ' ' + months[month], day + ' ' + months[month] + ' ' + year],
+            'month-day': [months[month] + ' ' + day, months[month] + ' ' + day + ', ' + year],
+            dmy: [dd + '/' + mm, dd + '/' + mm + '/' + year],
+            mdy: [mm + '/' + dd, mm + '/' + dd + '/' + year],
+            iso: [mm + '-' + dd, year + '-' + mm + '-' + dd],
+          };
+          var body = (formats[o.order] || formats['day-month'])[o.year ? 1 : 0];
+          return o.weekday === false ? body : days[date.getDay()] + ' ' + body;
         },
         truncate: function (value, max) {
           value = __string(value); max = max || 24;

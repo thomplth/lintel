@@ -647,6 +647,29 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(evaluate("host.format.truncate('abcdefghij', 5)").toString() == "abcd…")
     }
 
+    @Test func timeReadsInTwentyFourOrTwelveHours() {
+        let afternoon = "new Date(2026, 10, 18, 14, 5, 9)"
+        #expect(evaluate("host.format.time(\(afternoon))").toString() == "14:05")
+        #expect(evaluate("host.format.time(\(afternoon), { seconds: true })").toString() == "14:05:09")
+        #expect(evaluate("host.format.time(\(afternoon), { twelveHour: true })").toString() == "2:05 PM")
+        #expect(evaluate("host.format.time(\(afternoon), { twelveHour: true, seconds: true })").toString() == "2:05:09 PM")
+        #expect(evaluate("host.format.time(new Date(2026, 10, 18, 0, 5), { twelveHour: true })").toString() == "12:05 AM")
+        #expect(evaluate("host.format.time(new Date(2026, 10, 18, 12, 0), { twelveHour: true })").toString() == "12:00 PM")
+    }
+
+    @Test func dateReadsInTheChosenOrderWithOptionalWeekdayAndYear() {
+        func date(_ options: String) -> String? { evaluate("host.format.date(new Date(2026, 2, 4), \(options))").toString() }
+        #expect(date("undefined") == "Wed 4 Mar")
+        #expect(date("'long'") == "Wed 4 Mar 2026")
+        #expect(date("{ order: 'day-month' }") == "Wed 4 Mar")
+        #expect(date("{ order: 'month-day', year: true }") == "Wed Mar 4, 2026")
+        #expect(date("{ order: 'dmy', weekday: false }") == "04/03")
+        #expect(date("{ order: 'mdy', weekday: false, year: true }") == "03/04/2026")
+        #expect(date("{ order: 'iso', year: true }") == "Wed 2026-03-04")
+        #expect(date("{ order: 'iso', weekday: false }") == "03-04")
+        #expect(date("{ weekday: false, year: true }") == "4 Mar 2026")
+    }
+
     @Test func historyKeepsARollingSeriesPerKey() {
         #expect(evaluate("host.history('a', 1, 3); host.history('a', 2, 3); host.history('a', 3, 3); host.history('a', 4, 3).join(',')").toString() == "2,3,4")
         #expect(evaluate("host.history('a', 1); host.history('a').length").toInt32() == 1)
