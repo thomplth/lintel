@@ -249,8 +249,9 @@ private struct GeneralPane: View {
             .pickerStyle(.segmented)
             LabeledSlider(title: "Distance from the screen edge", value: settingBinding(app, \.edgeInset), range: 0...400, unit: "pt")
         }
-        Card(title: "Opening the bar") {
+        Card(title: "Opening the bar", footer: "With the menu bar set to hide, the top edge above the bar no longer brings it in. Hold ⌥ there to reach it, or use the rest of the top edge.") {
             Toggle("Open when the pointer rests on it", isOn: settingBinding(app, \.hoverActivates))
+            Toggle("Keep the hidden menu bar from sliding in above the bar", isOn: settingBinding(app, \.guardsTopEdge))
             LabeledSlider(title: "Rest time before it opens", value: settingBinding(app, \.dwell), range: 0...1.5, unit: "s", digits: 2)
             LabeledSlider(title: "Stays open after the pointer leaves", value: settingBinding(app, \.grace), range: 0.1...3, unit: "s", digits: 1)
             Divider()

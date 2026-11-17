@@ -19,6 +19,7 @@ final class AppController {
     private(set) var panelWindow: PanelWindowController?
     private var settingsWindow: SettingsWindowController?
     private var control: ControlChannel?
+    let topEdge = TopEdgeTap()
 
     init(home: AppHome) {
         self.home = home
@@ -86,6 +87,9 @@ final class AppController {
             if !isActive { self?.closePanel(releasing: false) }
         }
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
+        bar.onGuardedTopEdgeChanged = { [weak self] span in self?.topEdge.guardSpan(span) }
+        topEdge.guardSpan(bar.guardedTopEdge)
+        topEdge.start()
         panelWindow.onClickOutside = { [weak self] in self?.closePanel() }
         installEscapeHandling()
         adoption.start()

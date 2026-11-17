@@ -42,7 +42,10 @@ Scripts/bundle.sh
 open build/Lintel.app
 ```
 
-Quit any running instance first (`build/Lintel.app/Contents/MacOS/Lintel ctl '{"cmd":"quit"}'`). Do not copy the app elsewhere or replace an installed copy unless the user supplies the command.
+Quit any running instance first (`build/Lintel.app/Contents/MacOS/Lintel ctl '{"cmd":"quit"}'`). A bundle opened with `open` has
+Accessibility only if the user granted it to that build, and without it the top-edge event tap and menu bar scans
+stay off; to check those on the desktop, run `build/Lintel.app/Contents/MacOS/Lintel` from the terminal so it inherits
+the terminal's grant. Do not copy the app elsewhere or replace an installed copy unless the user supplies the command.
 
 ## Testing in the VM
 

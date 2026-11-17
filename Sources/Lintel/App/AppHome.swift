@@ -12,6 +12,7 @@ struct AppSettings: Codable, Equatable {
     var anchor = BarAnchor.right
     var edgeInset = 0.0
     var hoverActivates = true
+    var guardsTopEdge = true
     var dwell = 0.3
     var grace = 0.6
     var engine = "auto"
@@ -40,6 +41,7 @@ struct AppSettings: Codable, Equatable {
         anchor = value("anchor", defaults.anchor)
         edgeInset = value("edgeInset", defaults.edgeInset)
         hoverActivates = value("hoverActivates", defaults.hoverActivates)
+        guardsTopEdge = value("guardsTopEdge", defaults.guardsTopEdge)
         dwell = min(max(value("dwell", defaults.dwell), 0), 3)
         grace = min(max(value("grace", defaults.grace), 0.1), 5)
         engine = value("engine", defaults.engine)

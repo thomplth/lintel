@@ -23,6 +23,8 @@ xcrun --sdk macosx swift test
 ```
 
 Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides it. Settings are behind the gear in any panel.
+With the menu bar set to hide automatically, the top edge above the bar no longer brings the menu bar in; hold ⌥ there,
+or use the rest of the top edge (needs Accessibility; Settings › General turns it off).
 Drag the open bar to move it to the left, centre or right of the screen; hold ⌘ and drag a module to move it beside
 another, into another row, or onto a row's top or bottom edge (or just below the bar) to start a new row there. Carry it
 well away from the bar until the pointer shows ✕ and let go to remove it; Settings › Bar Items brings it back.

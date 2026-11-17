@@ -76,6 +76,11 @@ final class BarWindowController {
     private var pointerTimer: Timer?
     private var hotkeys: [Hotkey] = []
     private var hasSteppedAside = false
+    /// The stretch of the top edge kept from revealing the system menu bar.
+    private(set) var guardedTopEdge: ClosedRange<CGFloat>? {
+        didSet { if guardedTopEdge != oldValue { onGuardedTopEdgeChanged(guardedTopEdge) } }
+    }
+    var onGuardedTopEdgeChanged: (ClosedRange<CGFloat>?) -> Void = { _ in }
     private var dragOrigin: CGPoint?
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
@@ -156,6 +161,7 @@ final class BarWindowController {
 
     func setHidden(_ isHidden: Bool) {
         model.isHiddenByUser = isHidden
+        updateGuardedTopEdge()
         if isHidden { release() }
         panel.animator().alphaValue = isHidden || hasSteppedAside ? 0 : 1
         panel.ignoresMouseEvents = isHidden || !activation.isActive
@@ -171,11 +177,23 @@ final class BarWindowController {
 
     private func stepAsideForSystemMenuBar() {
         let isRevealed = menuBarAutoHides && MenuBarItems.isSystemMenuBarRevealed()
+        defer { updateGuardedTopEdge() }
         guard isRevealed != hasSteppedAside else { return }
         hasSteppedAside = isRevealed
         panel.animator().alphaValue = isRevealed || model.isHiddenByUser ? 0 : 1
         if isRevealed, !isPanelOpen() { release() }
         if isRevealed { onSystemMenuBarRevealed() }
+    }
+
+    private func updateGuardedTopEdge() {
+        guard model.settings.guardsTopEdge, menuBarAutoHides, !hasSteppedAside, !model.isHiddenByUser, let screen else {
+            guardedTopEdge = nil
+            return
+        }
+        let others = NSScreen.screens.filter { $0 != screen }.map(\.frame)
+        guardedTopEdge = TopEdgeGuard.span(
+            of: panel.frame, on: screen.frame, besides: others, notchStripHeight: screen.safeAreaInsets.top
+        )
     }
 
     private var pointerTicks = 0
@@ -226,6 +244,7 @@ final class BarWindowController {
         if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
         if panel.frame != placement.frame { panel.setFrame(placement.frame, display: true) }
         model.barWindowFrame = placement.frame
+        updateGuardedTopEdge()
     }
 
     private lazy var carrier: FloatingPanel = {
