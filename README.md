@@ -6,12 +6,13 @@ Everything in it is a module; modules are built, restyled and arranged by chatti
 ## Run
 
 ```sh
-Scripts/bundle.sh            # builds build/Lintel.app (release, signed with your Apple Development identity)
+Scripts/bundle.sh            # builds build/Lintel.app (release, signed with a code-signing identity from your login keychain)
 open build/Lintel.app
 ```
 
-The bundle is signed with the first Apple Development identity in your keychain, so a rebuilt app keeps its keychain
-access; set `LINTEL_SIGN_IDENTITY` to pick another identity, or `-` for ad-hoc (macOS then asks for the login password
+The bundle is signed with an identity from your login keychain (an Apple Development one if there is one, otherwise the
+first valid one), so a rebuilt app keeps its keychain access. Other keychains are skipped because codesign would stop on
+their password prompt; set `LINTEL_SIGN_IDENTITY` to pick another identity, or `-` for ad-hoc (macOS then asks for the login password
 after every rebuild).
 
 For development, run the binary directly; it then inherits the terminal's Accessibility and Screen Recording grants:

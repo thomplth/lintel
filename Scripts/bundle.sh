@@ -50,6 +50,12 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 PLIST
 # An ad-hoc signature changes with every build, so the keychain treats each rebuild as a new app and asks for the
 # login password again before Lintel can read its saved API keys. A certificate identity stays the same across builds.
-identity=${LINTEL_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)}
+# Only the login keychain is searched: an identity in another keychain, such as a CI keychain, makes codesign stop
+# on a password prompt for that keychain.
+login_identities=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db)
+identity=${LINTEL_SIGN_IDENTITY:-$( {
+    print -r -- "$login_identities" | sed -n 's/.*) \([0-9A-F]\{40\}\) "Apple Development: .*/\1/p'
+    print -r -- "$login_identities" | sed -n 's/.*) \([0-9A-F]\{40\}\) ".*/\1/p'
+} | head -1)}
 codesign --force --deep --sign "${identity:--}" "$app" >/dev/null
 print "$app"
