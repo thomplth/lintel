@@ -2,8 +2,8 @@ import Foundation
 
 public struct Theme: Equatable, Encodable, Sendable {
     public var preset = "halo"
-    public var fontSize = 14.0
-    public var fontWeight = "medium"
+    public var fontSize = 18.0
+    public var fontWeight = "regular"
     public var fontDesign = "default"
     public var textColor = "#FFFFFF"
     public var accentColor = "#0A84FF"
@@ -17,7 +17,7 @@ public struct Theme: Equatable, Encodable, Sendable {
     public var surfaceOpacity = 0.9
     public var cornerStyle = "capsule"
     public var shadowBlur = 3.0
-    public var shadowOpacity = 0.9
+    public var shadowOpacity = 1.0
     public var idleOpacity = 1.0
     public var colorScheme = "auto"
     public var symbolStyle = "monochrome"
@@ -82,9 +82,13 @@ public struct Theme: Equatable, Encodable, Sendable {
         case "halo":
             break
         case "glass":
+            theme.fontSize = 14
+            theme.fontWeight = "medium"
             theme.idleMaterial = "glass"
             theme.moduleSpacing = 8
         case "ink":
+            theme.fontSize = 14
+            theme.fontWeight = "medium"
             theme.idleMaterial = "solid"
             theme.activeMaterial = "solid"
             theme.panelMaterial = "solid"
@@ -94,6 +98,8 @@ public struct Theme: Equatable, Encodable, Sendable {
             theme.moduleSpacing = 8
             theme.fontDesign = "rounded"
         case "paper":
+            theme.fontSize = 14
+            theme.fontWeight = "medium"
             theme.idleMaterial = "solid"
             theme.activeMaterial = "solid"
             theme.panelMaterial = "solid"
@@ -221,6 +227,9 @@ public struct Metrics: Equatable, Sendable {
         default: unit * 2
         }
     }
+
+    /// SwiftUI's shadow radius spreads about twice as far as NSShadow's blur radius of the same number.
+    public var haloShadowRadius: Double { theme.shadowBlur / 2 }
 
     public var chipPaddingHorizontal: Double { unit * 2.5 }
     public var chipPaddingVertical: Double { unit }

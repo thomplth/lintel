@@ -185,9 +185,7 @@ struct Halo: ViewModifier {
     let theme: Theme
 
     func body(content: Content) -> some View {
-        content
-            .shadow(color: .black.opacity(theme.shadowOpacity), radius: theme.shadowBlur)
-            .shadow(color: .black.opacity(theme.shadowOpacity), radius: theme.shadowBlur / 2)
+        content.shadow(color: .black.opacity(theme.shadowOpacity), radius: Metrics(theme).haloShadowRadius)
     }
 }
 

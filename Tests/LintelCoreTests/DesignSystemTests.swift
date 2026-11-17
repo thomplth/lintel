@@ -152,7 +152,7 @@ private func evaluate(_ script: String) -> JSValue {
     @Test func outOfRangeNumbersAreClampedAndUnknownChoicesIgnored() {
         let theme = Theme().applying(["fontSize": 300, "fontWeight": "ultra", "textColor": "red", "idleOpacity": 0])
         #expect(theme.fontSize == 32)
-        #expect(theme.fontWeight == "medium")
+        #expect(theme.fontWeight == Theme().fontWeight)
         #expect(theme.textColor == "#FFFFFF")
         #expect(theme.idleOpacity == 0.2)
     }
@@ -167,6 +167,27 @@ private func evaluate(_ script: String) -> JSValue {
         let theme = try JSONDecoder().decode(Theme.self, from: Data(stored.utf8))
         #expect(theme.fontSize == Theme().fontSize)
         #expect(theme.cornerStyle == "square")
+    }
+
+    @Test func theDefaultHaloMatchesMeridiansClock() {
+        let theme = Theme()
+        #expect(theme.fontSize == 18)
+        #expect(theme.fontWeight == "regular")
+        #expect(theme.textColor == "#FFFFFF")
+        #expect(theme.shadowBlur == 3)
+        #expect(theme.shadowOpacity == 1)
+    }
+
+    @Test func onlyTheHaloPresetTakesMeridiansLargerRegularText() {
+        for name in ["glass", "ink", "paper"] {
+            #expect(Theme.preset(name)?.fontSize == 14)
+            #expect(Theme.preset(name)?.fontWeight == "medium")
+        }
+    }
+
+    @Test func theHaloShadowRadiusIsHalfTheBlurSoItMatchesAnAppKitShadowOfThatBlur() {
+        #expect(Metrics(Theme()).haloShadowRadius == 1.5)
+        #expect(Metrics(Theme().applying(["shadowBlur": 8])).haloShadowRadius == 4)
     }
 
     @Test func densityScalesSpacingAndFontRolesScaleFromTheBaseSize() {
