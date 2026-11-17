@@ -51,6 +51,7 @@ struct BarView: View {
             // fade out of one row and into the other instead of sliding.
             ForEach(rows.enumerated().flatMap { row, slots in slots.map { (row: row, slot: $0) } }, id: \.slot.id) { placed in
                 ChipView(slot: placed.slot, model: model, material: material)
+                    .equatable()
                     .layoutValue(key: BarRowIndex.self, value: placed.row)
                     .transition(Arrival())
             }
@@ -122,20 +123,43 @@ extension EnvironmentValues {
     @Entry var isInMenuBar = false
 }
 
-struct ChipView: View {
+/// Takes from the model only what it draws, so `.equatable()` can skip chips a change of the model did not touch;
+/// observing the whole model, every chip in the bar redrew whenever any one module updated.
+struct ChipView: View, Equatable {
     let slot: Slot
-    @ObservedObject var model: BarModel
-    @Environment(\.isInMenuBar) private var isInMenuBar
+    /// For callbacks and frame reports only; reading its state in `body` would go stale, since the model is not observed.
+    let model: BarModel
+    let theme: Theme
     let material: SurfaceMaterial
-    var isCarried = false
+    let isActive: Bool
+    let isPanelOpen: Bool
+    let isLeftForTheCarrier: Bool
+    let isPinned: Bool
+    let pinsOnTheLeft: Bool
+    let isCarried: Bool
+    @Environment(\.isInMenuBar) private var isInMenuBar
     @State private var isHovered = false
 
-    private var isPanelOpen: Bool {
-        model.panel?.slotID == slot.id
+    init(slot: Slot, model: BarModel, material: SurfaceMaterial, isCarried: Bool = false) {
+        self.slot = slot
+        self.model = model
+        self.material = material
+        self.isCarried = isCarried
+        theme = model.theme
+        isActive = model.isActive
+        isPanelOpen = model.panel?.slotID == slot.id
+        isLeftForTheCarrier = !isCarried && model.rearrangement?.key == slot.id
+        isPinned = model.layout.isPinned(slot.id, default: slot.isPinned)
+        pinsOnTheLeft = model.alignment == .leading
     }
 
-    private var isLeftForTheCarrier: Bool {
-        !isCarried && model.rearrangement?.key == slot.id
+    nonisolated static func == (lhs: ChipView, rhs: ChipView) -> Bool {
+        MainActor.assumeIsolated {
+            lhs.model === rhs.model && lhs.slot == rhs.slot && lhs.theme == rhs.theme && lhs.material == rhs.material
+                && lhs.isActive == rhs.isActive && lhs.isPanelOpen == rhs.isPanelOpen
+                && lhs.isLeftForTheCarrier == rhs.isLeftForTheCarrier && lhs.isPinned == rhs.isPinned
+                && lhs.pinsOnTheLeft == rhs.pinsOnTheLeft && lhs.isCarried == rhs.isCarried
+        }
     }
 
     var body: some View {
@@ -151,7 +175,7 @@ struct ChipView: View {
 
     /// Drawn as wide as a grab needs, since drags pick what they carry by the frames chips report.
     private var pinDivider: some View {
-        let context = RenderContext(theme: model.theme, surface: .chip, material: material, moduleID: slot.id)
+        let context = RenderContext(theme: theme, surface: .chip, material: material, moduleID: slot.id)
         let height = context.metrics.fontSize(role: nil) * 1.3 + context.metrics.chipPaddingVertical * 2
         return Capsule()
             .fill(context.accent.opacity(0.28))
@@ -165,14 +189,14 @@ struct ChipView: View {
             .frame(width: 11, height: height)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
-            .help("Modules on the \(model.alignment == .leading ? "left" : "right") of this divider stay in the bar while it is closed. ⌘-drag modules or the divider to change which.")
+            .help("Modules on the \(pinsOnTheLeft ? "left" : "right") of this divider stay in the bar while it is closed. ⌘-drag modules or the divider to change which.")
             .accessibilityLabel("Pin divider")
     }
 
     private var chip: some View {
-        let context = RenderContext(theme: model.theme, surface: .chip, material: material, moduleID: slot.id)
+        let context = RenderContext(theme: theme, surface: .chip, material: material, moduleID: slot.id)
         let hasCapsule = material == .glass || material == .solid
-        let isOpen = model.isActive || isInMenuBar
+        let isOpen = isActive || isInMenuBar
         let isClickable = isOpen && slot.isClickable
         return content(context)
             .frame(minHeight: context.metrics.fontSize(role: nil) * 1.3)
@@ -233,7 +257,6 @@ struct ChipView: View {
 
     @ViewBuilder private var menu: some View {
         if slot.kind != .assistant {
-            let isPinned = model.layout.isPinned(slot.id, default: slot.isPinned)
             Button(isPinned ? "Show Only When Active" : "Always Show") { model.onSlotSecondaryAction(slot, "pin") }
             Button("Hide from Bar") { model.onSlotSecondaryAction(slot, "hide") }
             Divider()
@@ -256,7 +279,7 @@ struct CarrierView: View {
 
     var body: some View {
         if let rearrangement = model.rearrangement, let slot = model.slot(rearrangement.key) {
-            CarriedChip(slot: slot, rearrangement: rearrangement, model: model)
+            CarriedChip(slot: slot, rearrangement: rearrangement, model: model, pointer: model.carried)
                 .id(slot.id)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .environment(\.colorScheme, colorScheme ?? systemScheme)
@@ -280,16 +303,18 @@ private struct CarriedChip: View {
     let slot: Slot
     let rearrangement: Rearrangement
     @ObservedObject var model: BarModel
+    @ObservedObject var pointer: CarriedPointer
     @State private var isLifted = false
 
     var body: some View {
         let carried = CGPoint(
-            x: model.carriedPointer.x - rearrangement.grabOffset.width, y: model.carriedPointer.y - rearrangement.grabOffset.height
+            x: pointer.point.x - rearrangement.grabOffset.width, y: pointer.point.y - rearrangement.grabOffset.height
         )
         let barTopLeft = rearrangement.phase == .landing ? model.slotFrames[slot.id]?.origin ?? carried : carried
         let topLeft = model.barToCarrier(barTopLeft)
         let isRaised = isLifted && rearrangement.phase == .carrying
         ChipView(slot: slot, model: model, material: SurfaceMaterial(active: model.theme.activeMaterial), isCarried: true)
+            .equatable()
             .fixedSize()
             .scaleEffect(rearrangement.phase == .vanishing ? 0.5 : isRaised ? 1.06 : 1, anchor: anchor)
             .opacity(rearrangement.phase == .vanishing ? 0 : 1)

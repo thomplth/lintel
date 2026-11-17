@@ -52,6 +52,13 @@ worktree, quit the Lintel launched from it, rebuild in the primary checkout afte
 `build/Lintel.app` from there. A running Lintel whose bundle was deleted keeps its modules only until it restarts, and
 then comes back with none. `lsappinfo list | grep -A3 '"Lintel"'` shows which bundle is running.
 
+## Performance
+
+Local and debug builds log metrics once a minute to `Metrics/metrics-<day>.jsonl` in the data folder, tagged with the
+build's commit (README, "Performance metrics"). Compare those lines, or `Lintel metrics`, before and after a change that
+could cost CPU. Views in the bar must not observe `BarModel` per chip: `ChipView` takes plain values and is compared with
+`.equatable()`, and state that changes every frame, like the dragged module's pointer, lives outside the model.
+
 ## Testing in the VM
 
 The developer works on the host desktop, so never synthesise input or take over the pointer there. Drags, clicks and

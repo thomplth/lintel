@@ -98,7 +98,7 @@ final class ModuleHost {
     }
 
     static func symbolExists(_ name: String) -> Bool {
-        NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+        SymbolNames.exists(name)
     }
 
     func start(watching: Bool = true) {

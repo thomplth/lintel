@@ -176,7 +176,7 @@ struct RenderContext {
     }
 
     static func symbol(_ name: String) -> String {
-        NSImage(systemSymbolName: name, accessibilityDescription: nil) == nil ? "questionmark.square.dashed" : name
+        SymbolNames.exists(name) ? name : "questionmark.square.dashed"
     }
 }
 

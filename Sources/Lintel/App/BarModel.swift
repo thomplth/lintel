@@ -90,6 +90,11 @@ struct ChatMessage: Identifiable, Equatable, Codable {
 }
 
 @MainActor
+final class CarriedPointer: ObservableObject {
+    @Published var point = CGPoint.zero
+}
+
+@MainActor
 final class BarModel: ObservableObject {
     @Published var theme = Theme()
     @Published var layout = BarLayout()
@@ -113,7 +118,9 @@ final class BarModel: ObservableObject {
     @Published var rearrangement: Rearrangement? {
         didSet { if (oldValue == nil) != (rearrangement == nil) { onRearrangingChanged() } }
     }
-    @Published var carriedPointer = CGPoint.zero
+    /// Kept outside the model's own changes: the pointer moves every frame of a drag, and every view observing the
+    /// model would otherwise be rebuilt each time.
+    let carried = CarriedPointer()
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
     @Published var showsPinDividers = false
 
@@ -194,7 +201,7 @@ final class BarModel: ObservableObject {
 
     func beginRearranging(_ key: String, grabbedAt point: CGPoint) {
         guard let frame = slotFrames[key] else { return }
-        carriedPointer = point
+        carried.point = point
         withAnimation(Self.reflow) {
             rearrangement = Rearrangement(
                 key: key, grabOffset: CGSize(width: point.x - frame.minX, height: point.y - frame.minY), size: frame.size,
@@ -211,7 +218,7 @@ final class BarModel: ObservableObject {
     private func carrying(to point: CGPoint) {
         guard isCarrying, let rearrangement else { return }
         let key = rearrangement.key
-        carriedPointer = point
+        carried.point = point
         // A row the carried module leaves holding only its divider closes, as PinDividers.moving closes it.
         let rows = chipRows.map { row in
             row.allSatisfy { $0.key == key || PinDividers.isDivider($0.key) } ? row.filter { $0.key == key } : row
