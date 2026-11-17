@@ -6,8 +6,9 @@ import IOKit
 import IOKit.ps
 import LintelCore
 
-/// Reads everything `host.system()`, `host.network()` and friends return. Cheap counters are sampled on the caller's
-/// thread; anything that spawns a tool runs on a background queue and is merged into the next snapshot.
+/// Reads everything `host.system()`, `host.network()` and friends return. Snapshots are taken one at a time on their own
+/// queue, since IOKit, CoreAudio and CoreWLAN reads can take tens of milliseconds; anything that spawns a tool runs on
+/// a background queue and is merged into the next snapshot.
 final class SystemSampler {
     struct Needs: Equatable {
         var network = false
@@ -28,9 +29,18 @@ final class SystemSampler {
         }
     }
 
-    var needs = Needs()
+    var needs: Needs {
+        get { lock.withLock { wanted } }
+        set { lock.withLock { wanted = newValue } }
+    }
     /// The process list costs a `ps` run, so it is only kept fresh while a panel is there to show it.
-    var isPanelOpen = false
+    var isPanelOpen: Bool {
+        get { lock.withLock { isPanelShown } }
+        set { lock.withLock { isPanelShown = newValue } }
+    }
+    private var wanted = Needs()
+    private var isPanelShown = false
+    private let sampling = DispatchQueue(label: "lintel.sampler.snapshot", qos: .userInitiated)
 
     private var previousTicks: [(busy: UInt64, total: UInt64)] = []
     private var previousNetwork: (at: TimeInterval, received: UInt64, sent: UInt64)?
@@ -46,6 +56,19 @@ final class SystemSampler {
     private var tick = 0
 
     func snapshot() -> JSONValue {
+        sampling.sync { takeSnapshot() }
+    }
+
+    func snapshot(then completion: @escaping @MainActor (JSONValue) -> Void) {
+        sampling.async {
+            let data = Perf.measure("sampler.snapshot") { self.takeSnapshot() }
+            DispatchQueue.main.async { MainActor.assumeIsolated { completion(data) } }
+        }
+    }
+
+    private func takeSnapshot() -> JSONValue {
+        let needs = needs
+        let isPanelOpen = isPanelOpen
         let now = ProcessInfo.processInfo.systemUptime
         tick += 1
         var data: [String: JSONValue] = ["system": system(), "appearance": ["dark": .bool(Self.isDark)]]

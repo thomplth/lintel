@@ -122,7 +122,7 @@ final class ModuleHost {
     }
 
     private func pushData() {
-        runner.setData(Perf.measure("sampler.snapshot") { sampler.snapshot() })
+        sampler.snapshot { [weak self] data in self?.runner.setData(data) }
     }
 
     // MARK: Discovery
