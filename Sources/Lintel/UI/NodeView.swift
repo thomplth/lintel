@@ -174,7 +174,7 @@ struct NodeView: View {
                     ForEach(0..<columns, id: \.self) { index in
                         if index < row.element.count {
                             NodeView(node: row.element[index], context: context)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: row.element[index].component == .text ? .center : .topLeading)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: [.text, .badge].contains(row.element[index].component) ? .center : .topLeading)
                         } else {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
                         }
@@ -468,7 +468,11 @@ private struct ItemRow: View {
                     .padding(.vertical, 1)
                     .background(context.color(node.tone(), fallback: context.accent).opacity(0.16), in: Capsule())
             }
-            if isClickable {
+            if let accessory = node.string("accessoryAction") {
+                ItemAccessory(
+                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"), context: context
+                ) { context.perform(accessory, node.props["payload"] ?? .null) }
+            } else if isClickable {
                 Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
                     .font(.system(size: context.metrics.fontSize(role: "caption") * 0.9, weight: .semibold))
                     .foregroundStyle(context.tertiary)
@@ -487,6 +491,28 @@ private struct ItemRow: View {
                 NSWorkspace.shared.open(url)
             }
         }
+    }
+}
+
+private struct ItemAccessory: View {
+    let symbol: String
+    let label: String?
+    let context: RenderContext
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: RenderContext.symbol(isHovered ? symbol + ".fill" : symbol))
+                .font(.system(size: context.metrics.fontSize(role: "label")))
+                .foregroundStyle(isHovered ? Color.red : context.tertiary)
+                .frame(width: context.theme.fontSize * 1.4, height: context.theme.fontSize * 1.4)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(label ?? "")
+        .accessibilityLabel(label ?? "")
     }
 }
 
@@ -606,8 +632,27 @@ private struct FieldControl: View {
     let node: ViewNode
     let context: RenderContext
     @State private var draft = ""
+    @State private var suggestions: [FieldSuggestion] = []
+    @State private var highlighted = 0
+    @State private var hoveredSuggestion: FieldSuggestion.ID?
 
     var body: some View {
+        VStack(spacing: 0) {
+            input
+            if !suggestions.isEmpty {
+                Rectangle().fill(context.separator).frame(height: 1)
+                ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                    suggestionRow(suggestion, isHighlighted: index == highlighted)
+                }
+            }
+        }
+        .background(context.fill, in: context.tileShape)
+        .clipShape(context.tileShape)
+        .onAppear { draft = node.string("value") ?? "" }
+        .task(id: draft) { await refreshSuggestions() }
+    }
+
+    private var input: some View {
         HStack(spacing: context.metrics.unit * 2) {
             if let name = node.string("icon") {
                 Image(systemName: RenderContext.symbol(name)).foregroundStyle(context.secondary)
@@ -618,7 +663,14 @@ private struct FieldControl: View {
                 .font(context.font(role: "label"))
                 .foregroundStyle(context.primary)
                 .onSubmit(submit)
-            if !draft.isEmpty {
+                .onKeyPress(.downArrow) { moveHighlight(by: 1) }
+                .onKeyPress(.upArrow) { moveHighlight(by: -1) }
+                .onKeyPress(.escape) {
+                    guard !draft.isEmpty else { return .ignored }
+                    draft = ""
+                    return .handled
+                }
+            if !draft.isEmpty && suggestions.isEmpty {
                 Button(node.string("submitLabel") ?? "Add", action: submit)
                     .buttonStyle(.plain)
                     .font(context.font(role: "caption", weight: "semibold"))
@@ -627,11 +679,58 @@ private struct FieldControl: View {
         }
         .padding(.horizontal, context.metrics.tilePadding)
         .padding(.vertical, context.metrics.unit * 2)
-        .background(context.fill, in: context.tileShape)
-        .onAppear { draft = node.string("value") ?? "" }
+    }
+
+    private func suggestionRow(_ suggestion: FieldSuggestion, isHighlighted: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: context.metrics.unit * 2) {
+            Text(suggestion.title).font(context.font(role: "label", weight: context.theme.fontWeight))
+                .foregroundStyle(isHighlighted ? context.onAccent : context.primary).lineLimit(1)
+            Spacer(minLength: 8)
+            if let subtitle = suggestion.subtitle {
+                Text(subtitle).font(context.font(role: "caption", mono: true))
+                    .foregroundStyle(isHighlighted ? context.onAccent.opacity(0.8) : context.secondary).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, context.metrics.tilePadding)
+        .padding(.vertical, context.metrics.unit * 1.75)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isHighlighted ? context.accent : hoveredSuggestion == suggestion.id ? context.fill : .clear)
+        .contentShape(Rectangle())
+        .onHover { hoveredSuggestion = $0 ? suggestion.id : nil }
+        .onTapGesture { choose(suggestion) }
+    }
+
+    private func refreshSuggestions() async {
+        guard let suggest = node.string("suggest") else { return }
+        let query = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else {
+            suggestions = []
+            return
+        }
+        let reply = await context.performForResult(suggest, .string(query))
+        guard !Task.isCancelled else { return }
+        suggestions = FieldSuggestion.list(from: reply)
+        highlighted = 0
+    }
+
+    private func moveHighlight(by step: Int) -> KeyPress.Result {
+        guard !suggestions.isEmpty else { return .ignored }
+        highlighted = (highlighted + step + suggestions.count) % suggestions.count
+        return .handled
+    }
+
+    private func choose(_ suggestion: FieldSuggestion) {
+        guard let action = node.string("action") else { return }
+        draft = ""
+        suggestions = []
+        context.perform(action, .string(suggestion.value))
     }
 
     private func submit() {
+        if suggestions.indices.contains(highlighted) {
+            choose(suggestions[highlighted])
+            return
+        }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let action = node.string("action") else { return }
         draft = ""

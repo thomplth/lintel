@@ -211,11 +211,12 @@ public enum Catalog {
             props: [
                 PropSpec("title", .string, required: true), PropSpec("subtitle", .string), PropSpec("icon", .symbol),
                 PropSpec("value", .string), PropSpec("badge", .string), PropSpec("tone", .tone), PropSpec("action", .action),
-                PropSpec("payload", .any), PropSpec("url", .url),
+                PropSpec("payload", .any), PropSpec("url", .url), PropSpec("accessoryIcon", .symbol),
+                PropSpec("accessoryAction", .action), PropSpec("accessoryLabel", .string),
             ],
             hasChildren: false,
-            signature: "item(title, { subtitle?, icon?, value?, badge?, tone?, action?, payload?, url? })",
-            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. action runs a module action on click; url opens an https link in the browser instead."
+            signature: "item(title, { subtitle?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
+            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
         ),
         ComponentSpec(
             component: .keyValue, surfaces: panel,
@@ -273,10 +274,11 @@ public enum Catalog {
             props: [
                 PropSpec("placeholder", .string, required: true), PropSpec("action", .action, required: true),
                 PropSpec("value", .string), PropSpec("icon", .symbol), PropSpec("submitLabel", .string),
+                PropSpec("suggest", .action),
             ],
             hasChildren: false,
-            signature: "field(placeholder, action, { value?, icon?, submitLabel? })",
-            doc: "A one-line text input. The action receives the text when the user presses Return."
+            signature: "field(placeholder, action, { value?, icon?, submitLabel?, suggest? })",
+            doc: "A one-line text input. The action receives the text when the user presses Return. suggest names an action that receives the text as it is typed and returns completions, [{ title, subtitle?, value? }] or strings; they drop down under the field, the arrow keys move between them, and picking one sends its value (or title) to action. Return the best matches first, at most six."
         ),
         ComponentSpec(
             component: .divider, surfaces: panel, props: [], hasChildren: false,

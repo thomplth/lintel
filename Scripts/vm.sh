@@ -7,7 +7,7 @@
 #                                hold the bar open.
 #   Scripts/vm.sh run '<cmd>'    Run a shell command in the guest's logged-in session.
 #   Scripts/vm.sh lintel '<json>'  Send a `Lintel ctl` command; `state` prints the reply.
-#   Scripts/vm.sh input <args>   Synthesise pointer input in the guest (see Scripts/vm-input.swift).
+#   Scripts/vm.sh input <args>   Synthesise pointer and keyboard input in the guest (see Scripts/vm-input.swift).
 #   Scripts/vm.sh shot <name>    Screenshot the guest (pointer included) and print the host path of the PNG.
 #   Scripts/vm.sh stop           Stop the guest and leave the queue.
 set -euo pipefail

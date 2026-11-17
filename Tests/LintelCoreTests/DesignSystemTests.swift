@@ -603,6 +603,20 @@ private func evaluate(_ script: String) -> JSValue {
     }
 }
 
+@Suite struct AccessoryAndSuggestionLint {
+    @Test func anItemAccessoryMustNameAnExistingAction() throws {
+        let panel: JSONValue = ["type": "list", "children": [["type": "item", "title": "Tokyo", "accessoryIcon": "minus.circle", "accessoryAction": "remove"]]]
+        #expect(try lint(chip: ["type": "dot"], panel: panel, actions: []).contains { $0.contains("'remove'") })
+        #expect(try lint(chip: ["type": "dot"], panel: panel, actions: ["remove"]).isEmpty)
+    }
+
+    @Test func aFieldSuggestActionMustExist() throws {
+        let panel: JSONValue = ["type": "field", "placeholder": "Add", "action": "add", "suggest": "suggest"]
+        #expect(try lint(chip: ["type": "dot"], panel: panel, actions: ["add"]).contains { $0.contains("'suggest'") })
+        #expect(try lint(chip: ["type": "dot"], panel: panel, actions: ["add", "suggest"]).isEmpty)
+    }
+}
+
 @Suite struct Prelude {
     @Test func everyComponentInTheCatalogHasAFunctionThatBuildsIt() {
         for spec in Catalog.all {
@@ -628,6 +642,18 @@ private func evaluate(_ script: String) -> JSValue {
         let parsed = ViewNode.parse(json: json)
         #expect(parsed.problems.isEmpty, "\(parsed.problems)")
         #expect(parsed.node?.children.count == 21)
+    }
+
+    @Test func anItemCarriesATrailingAccessoryButton() {
+        let built = evaluate("JSON.stringify(item('Tokyo', { accessoryIcon: 'minus.circle', accessoryAction: 'remove', accessoryLabel: 'Remove Tokyo', payload: 'Asia/Tokyo' }))").toString()!
+        let node = ViewNode.parse(json: built).node
+        #expect(node?.string("accessoryIcon") == "minus.circle")
+        #expect(node?.string("accessoryAction") == "remove")
+        #expect(node?.string("accessoryLabel") == "Remove Tokyo")
+    }
+
+    @Test func aFieldNamesTheActionThatSuggestsCompletions() {
+        #expect(evaluate("field('Add a city', 'add', { suggest: 'suggestCities' }).suggest").toString() == "suggestCities")
     }
 
     @Test func theLegacyColorOptionMapsToTone() {

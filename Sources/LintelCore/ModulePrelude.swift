@@ -51,7 +51,8 @@ public enum ModulePrelude {
     function item(title, options) {
       var o = __options(options);
       return __node('item', { title: __string(title), subtitle: o.subtitle, icon: o.icon, value: o.value, badge: o.badge,
-        tone: o.tone || o.color, action: o.action, payload: o.payload, url: o.url });
+        tone: o.tone || o.color, action: o.action, payload: o.payload, url: o.url,
+        accessoryIcon: o.accessoryIcon || (o.accessoryAction ? 'minus.circle' : undefined), accessoryAction: o.accessoryAction, accessoryLabel: o.accessoryLabel });
     }
     function keyValue(label, value, options) { var o = __options(options); return __node('keyValue', { label: __string(label), value: __string(value), tone: o.tone || o.color, mono: o.mono }); }
     function button(label, action, options) {
@@ -67,7 +68,7 @@ public enum ModulePrelude {
     }
     function field(placeholder, action, options) {
       var o = __options(options);
-      return __node('field', { placeholder: __string(placeholder), action: action, value: o.value, icon: o.icon, submitLabel: o.submitLabel });
+      return __node('field', { placeholder: __string(placeholder), action: action, value: o.value, icon: o.icon, submitLabel: o.submitLabel, suggest: o.suggest });
     }
     function divider() { return __node('divider', {}); }
     function note(value, options) { var o = __options(options); return __node('note', { value: __string(value), tone: o.tone || o.color, icon: o.icon }); }

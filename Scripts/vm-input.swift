@@ -3,6 +3,8 @@ import AppKit
 // Synthesises pointer input inside the test VM. Coordinates are AppKit screen points (origin bottom-left).
 //   vm-input click X Y
 //   vm-input drag FROM_X FROM_Y TO_X TO_Y [--hold SECONDS] [--command [--lead SECONDS]] [--back]
+//   vm-input type TEXT          types into whatever has keyboard focus
+//   vm-input key NAME           presses return, escape, up, down, left, right, tab or delete
 // --lead holds ⌘ that long before the press, for what appears only while ⌘ is down.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -35,6 +37,19 @@ func postCommandKey(down: Bool) {
     usleep(100_000)
 }
 
+func press(_ virtualKey: CGKeyCode, text: String? = nil) {
+    for isDown in [true, false] {
+        let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: isDown)
+        if let text { event?.keyboardSetUnicodeString(stringLength: text.utf16.count, unicodeString: Array(text.utf16)) }
+        event?.post(tap: .cghidEventTap)
+        usleep(30_000)
+    }
+}
+
+let namedKeys: [String: CGKeyCode] = [
+    "return": 0x24, "escape": 0x35, "up": 0x7E, "down": 0x7D, "left": 0x7B, "right": 0x7C, "tab": 0x30, "delete": 0x33,
+]
+
 func glide(from start: CGPoint, to end: CGPoint) {
     for step in 1...25 {
         let t = Double(step) / 25
@@ -63,7 +78,11 @@ case "drag" where numbers.count >= 4:
     }
     post(.leftMouseUp, at: release)
     if holdsCommand { postCommandKey(down: false) }
+case "type" where arguments.count >= 2:
+    for character in arguments.dropFirst().joined(separator: " ") { press(0, text: String(character)) }
+case "key" where namedKeys[arguments[safe: 1] ?? ""] != nil:
+    press(namedKeys[arguments[1]]!)
 default:
-    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command [--lead S]] [--back]\n".utf8))
+    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command [--lead S]] [--back] | type TEXT | key NAME\n".utf8))
     exit(2)
 }
