@@ -52,6 +52,7 @@ final class AppController {
         host.onSettingsChanged = { [weak self] in
             self?.bar?.applySettings()
             self?.refreshAssistantSlot()
+            self?.applyDockPresence()
         }
     }
 
@@ -98,9 +99,47 @@ final class AppController {
         installEscapeHandling()
         adoption.start()
         control = ControlChannel(app: self)
+        applyDockPresence()
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.endDockHold() }
+        }
         if !model.settings.hasOnboarded {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showSettings(tab: .welcome) }
         }
+    }
+
+    // MARK: Dock
+
+    private var isHeldByDock = false
+
+    private func applyDockPresence() {
+        let policy: NSApplication.ActivationPolicy = model.settings.showsInDock ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return }
+        let settingsIsOpen = settingsWindow?.window?.isVisible == true
+        NSApp.setActivationPolicy(policy)
+        // Turning into an accessory app deactivates it, which would drop the Settings window the toggle sits in behind other apps.
+        if settingsIsOpen {
+            NSApp.activate(ignoringOtherApps: true)
+            settingsWindow?.window?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func dockClicked() {
+        switch DockClick.response(isBarOpen: model.isActive && !model.isHiddenByUser) {
+        case .openBar:
+            if model.isHiddenByUser { bar?.setHidden(false) }
+            isHeldByDock = true
+            bar?.hold()
+        case .openSettings:
+            endDockHold()
+            showSettings(tab: .general)
+        }
+    }
+
+    private func endDockHold() {
+        guard isHeldByDock else { return }
+        isHeldByDock = false
+        if model.panel == nil { bar?.unhold() }
     }
 
     private func refreshAssistantSlot() {
@@ -165,7 +204,7 @@ final class AppController {
         guard model.panel != nil else { return }
         host.closePanel()
         panelWindow?.hide()
-        if releasing { bar?.unhold() }
+        if releasing, !isHeldByDock { bar?.unhold() }
     }
 
     private func installEscapeHandling() {
@@ -180,7 +219,10 @@ final class AppController {
     }
 
     private func dismiss() {
-        if model.panel != nil { closePanel() } else { bar?.release() }
+        if model.panel != nil { closePanel() } else {
+            isHeldByDock = false
+            bar?.release()
+        }
     }
 
     private func panelCommand(_ command: String) {

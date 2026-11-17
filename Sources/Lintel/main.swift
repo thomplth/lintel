@@ -35,6 +35,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var app: AppController?
     private var stage: Stage?
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        app?.dockClicked()
+        return false
+    }
+
+    @objc func showSettings(_ sender: Any?) {
+        app?.showSettings(tab: .general)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let app = AppController(home: .standard)
         self.app = app

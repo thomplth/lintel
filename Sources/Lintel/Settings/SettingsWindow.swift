@@ -259,7 +259,7 @@ private struct GeneralPane: View {
             ShortcutRow(title: "Hide or show the whole bar", shortcut: settingBinding(app, \.hideShortcut))
             Toggle("Show the assistant button in the bar", isOn: settingBinding(app, \.showsAssistant))
         }
-        Card(title: "System", footer: "Private features use undocumented parts of macOS: hiding other apps' items from the system menu bar directly, and letting modules run command-line tools you approve.") {
+        Card(title: "System", footer: "Click the Dock icon to open the whole bar, and again to open Settings. Private features use undocumented parts of macOS: hiding other apps' items from the system menu bar directly, and letting modules run command-line tools you approve.") {
             Toggle("Open Lintel at login", isOn: Binding(get: { launchesAtLogin }, set: { isOn in
                 do {
                     if isOn { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -269,6 +269,7 @@ private struct GeneralPane: View {
                 }
             }))
             .disabled(Bundle.main.bundleIdentifier == nil)
+            Toggle("Show Lintel in the Dock", isOn: settingBinding(app, \.showsInDock))
             Toggle("Private features", isOn: Binding(get: { model.settings.isPrivateEdition }, set: { isOn in
                 var settings = model.settings
                 settings.edition = isOn ? "private" : "public"

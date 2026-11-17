@@ -11,6 +11,8 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$products/Lintel" "$app/Contents/MacOS/Lintel"
 cp -R "$products/Lintel_Lintel.bundle" "$app/Contents/Resources/"
+# No LSUIElement: Launch Services then never sends the reopen event that makes a Dock click open the bar. main.swift
+# starts Lintel as an accessory app, and AppController.applyDockPresence shows the Dock icon only when settings allow.
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -24,7 +26,6 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
-  <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSLocationUsageDescription</key><string>macOS shares the Wi-Fi network name only with apps allowed to use your location.</string>
   <key>CFBundleDocumentTypes</key>

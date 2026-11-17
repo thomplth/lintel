@@ -23,6 +23,8 @@ xcrun --sdk macosx swift test
 ```
 
 Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides it. Settings are behind the gear in any panel.
+Clicking Lintel's Dock icon opens the whole bar until you switch to another app; clicking it again while the bar is open
+shows Settings. Settings › General › Show Lintel in the Dock takes the icon away.
 With the menu bar set to hide automatically, the top edge above the bar no longer brings the menu bar in; hold ⌥ there,
 or use the rest of the top edge (needs Accessibility; Settings › General turns it off). Beside a notch the opened bar
 wraps to the space beside it, so its first line stays at the top of the screen.
@@ -56,7 +58,7 @@ Lintel import <file> [--approve]     # install one after the same checks
 Lintel items                         # list system menu bar items (needs Accessibility)
 Lintel stage --out <dir> --shots halo/idle,ink/panel:system [--size 900x620] [--backdrop photo|document|light|dark]
                                      # photograph the bar and a panel on a hidden stand-in desktop
-Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, chat, settings, state, quit
+Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, chat, settings, dock, state, quit
 ```
 
 ## Writing a module by hand

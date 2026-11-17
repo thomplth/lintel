@@ -144,6 +144,7 @@ final class ControlChannel {
         case "assistant": app.openAssistant(draft: command["draft"].string)
         case "chat": if let text = command["text"].string { app.openAssistant(); app.chat.submit(text) }
         case "hold": app.bar?.hold()
+        case "dock": app.dockClicked()
         case "release": app.closePanel(); app.bar?.release()
         case "settings": app.showSettings(tab: command["tab"].string.flatMap(SettingsTab.init(rawValue:)) ?? .general)
         case "action":

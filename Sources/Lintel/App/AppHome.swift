@@ -25,6 +25,7 @@ struct AppSettings: Codable, Equatable {
     var edition = "private"
     var hasOnboarded = false
     var showsAssistant = true
+    var showsInDock = true
     var adoptsPictures = true
     var toggleShortcut = Shortcut(keyCode: 11, modifiers: 0x1900, label: "⌃⌥⌘B")
     var hideShortcut = Shortcut(keyCode: 4, modifiers: 0x1900, label: "⌃⌥⌘H")
@@ -54,6 +55,7 @@ struct AppSettings: Codable, Equatable {
         edition = value("edition", defaults.edition)
         hasOnboarded = value("hasOnboarded", defaults.hasOnboarded)
         showsAssistant = value("showsAssistant", defaults.showsAssistant)
+        showsInDock = value("showsInDock", defaults.showsInDock)
         adoptsPictures = value("adoptsPictures", defaults.adoptsPictures)
         toggleShortcut = value("toggleShortcut", defaults.toggleShortcut)
         hideShortcut = value("hideShortcut", defaults.hideShortcut)

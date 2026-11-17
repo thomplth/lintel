@@ -31,7 +31,13 @@ public struct EditCommand: Sendable {
         let holder = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         holder.submenu = edit
         let main = NSMenu(title: "Main")
-        main.addItem(NSMenuItem(title: "Lintel", action: nil, keyEquivalent: ""))
+        let application = NSMenu(title: "Lintel")
+        application.addItem(NSMenuItem(title: "Settings…", action: NSSelectorFromString("showSettings:"), keyEquivalent: ","))
+        application.addItem(.separator())
+        application.addItem(NSMenuItem(title: "Quit Lintel", action: NSSelectorFromString("terminate:"), keyEquivalent: "q"))
+        let applicationHolder = NSMenuItem(title: "Lintel", action: nil, keyEquivalent: "")
+        applicationHolder.submenu = application
+        main.addItem(applicationHolder)
         main.addItem(holder)
         return main
     }
