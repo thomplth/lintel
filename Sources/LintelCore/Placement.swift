@@ -32,6 +32,9 @@ public struct BarPlacement: Equatable, Sendable {
 }
 
 public enum Placement {
+    /// Meridian's clock window height, which centres the text a little above the middle of the notch strip.
+    public static let stripRowHeight: CGFloat = 30
+
     public static func bar(
         contentSize: CGSize, on screen: ScreenGeometry, anchor: BarAnchor = .right, edgeInset: CGFloat = 0
     ) -> BarPlacement {
@@ -52,7 +55,7 @@ public enum Placement {
             case .center: nil
             }
             if let strip, contentSize.width + edgeInset <= strip.width {
-                topRowMinHeight = screen.notchStripHeight
+                topRowMinHeight = min(stripRowHeight, screen.notchStripHeight)
             } else {
                 top = screen.frame.maxY - screen.notchStripHeight
             }

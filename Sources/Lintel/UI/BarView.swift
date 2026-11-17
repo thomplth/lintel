@@ -32,7 +32,8 @@ struct BarView: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.top, model.topRowMinHeight > 0 ? 0 : 4)
+        .padding(.bottom, 4)
         .opacity(model.isActive ? 1 : theme.idleOpacity)
         .contentShape(Rectangle())
         .gesture(

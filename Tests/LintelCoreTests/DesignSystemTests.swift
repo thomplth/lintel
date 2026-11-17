@@ -398,11 +398,13 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(Placement.bar(contentSize: size, on: screen).frame.maxY == 576)
     }
 
-    @Test func besideANotchTheFirstRowIsAsTallAsTheStripWhenItFits() {
+    @Test func besideANotchTheFirstRowIsMeridiansThirtyPointStripAtTheTopOfTheScreen() {
         var screen = plain
         screen.notchStripHeight = 32
         screen.areaRightOfNotch = CGRect(x: 600, y: 568, width: 400, height: 32)
-        #expect(Placement.bar(contentSize: size, on: screen).topRowMinHeight == 32)
+        let placement = Placement.bar(contentSize: size, on: screen)
+        #expect(placement.topRowMinHeight == 30)
+        #expect(placement.frame.maxY == 600)
         let wide = Placement.bar(contentSize: CGSize(width: 500, height: 20), on: screen)
         #expect(wide.topRowMinHeight == 0)
         #expect(wide.frame.maxY == 568)
