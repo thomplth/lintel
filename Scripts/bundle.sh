@@ -56,6 +56,6 @@ login_identities=$(security find-identity -v -p codesigning ~/Library/Keychains/
 identity=${LINTEL_SIGN_IDENTITY:-$( {
     print -r -- "$login_identities" | sed -n 's/.*) \([0-9A-F]\{40\}\) "Apple Development: .*/\1/p'
     print -r -- "$login_identities" | sed -n 's/.*) \([0-9A-F]\{40\}\) ".*/\1/p'
-} | head -1)}
+} | sed -n 1p)}
 codesign --force --deep --sign "${identity:--}" "$app" >/dev/null
 print "$app"
