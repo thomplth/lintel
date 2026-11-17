@@ -31,14 +31,53 @@ public struct EditCommand: Sendable {
         let holder = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         holder.submenu = edit
         let main = NSMenu(title: "Main")
-        let application = NSMenu(title: "Lintel")
-        application.addItem(NSMenuItem(title: "Settings…", action: NSSelectorFromString("showSettings:"), keyEquivalent: ","))
-        application.addItem(.separator())
-        application.addItem(NSMenuItem(title: "Quit Lintel", action: NSSelectorFromString("terminate:"), keyEquivalent: "q"))
-        let applicationHolder = NSMenuItem(title: "Lintel", action: nil, keyEquivalent: "")
-        applicationHolder.submenu = application
-        main.addItem(applicationHolder)
+        main.addItem(holding(menu("Lintel", [
+            ("Settings…", "showSettings:", ",", .command),
+            nil,
+            ("Hide Lintel", "hide:", "h", .command),
+            ("Hide Others", "hideOtherApplications:", "h", [.command, .option]),
+            ("Show All", "unhideAllApplications:", "", .command),
+            nil,
+            ("Quit Lintel", "terminate:", "q", .command),
+        ])))
         main.addItem(holder)
+        main.addItem(holding(menu("Window", [
+            ("Close", "performClose:", "w", .command),
+            ("Minimize", "performMiniaturize:", "m", .command),
+            ("Zoom", "performZoom:", "", .command),
+            nil,
+            ("Enter Full Screen", "toggleFullScreen:", "f", [.command, .control]),
+            nil,
+            ("Bring All to Front", "arrangeInFront:", "", .command),
+        ])))
         return main
+    }
+
+    /// The menu to hand `NSApp.windowsMenu`, so AppKit lists open windows under it and retitles Enter/Exit Full Screen.
+    @MainActor
+    public static func windowsMenu(in main: NSMenu) -> NSMenu? {
+        main.items.first { $0.submenu?.title == "Window" }?.submenu
+    }
+
+    @MainActor
+    private static func menu(_ title: String, _ entries: [(title: String, action: String, key: String, modifiers: NSEvent.ModifierFlags)?]) -> NSMenu {
+        let menu = NSMenu(title: title)
+        for entry in entries {
+            guard let entry else {
+                menu.addItem(.separator())
+                continue
+            }
+            let item = NSMenuItem(title: entry.title, action: NSSelectorFromString(entry.action), keyEquivalent: entry.key)
+            item.keyEquivalentModifierMask = entry.modifiers
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @MainActor
+    private static func holding(_ menu: NSMenu) -> NSMenuItem {
+        let holder = NSMenuItem(title: menu.title, action: nil, keyEquivalent: "")
+        holder.submenu = menu
+        return holder
     }
 }

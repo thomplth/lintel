@@ -189,7 +189,9 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     let application = NSApplication.shared
     application.setActivationPolicy(.accessory)
-    application.mainMenu = EditCommand.makeMainMenu()
+    let mainMenu = EditCommand.makeMainMenu()
+    application.mainMenu = mainMenu
+    application.windowsMenu = EditCommand.windowsMenu(in: mainMenu)
     application.delegate = delegate
     application.run()
 }

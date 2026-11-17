@@ -64,9 +64,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             )
             window.title = "Lintel Settings"
             window.isReleasedWhenClosed = false
+            window.collectionBehavior.insert(.fullScreenPrimary)
             window.delegate = self
             window.contentView = NSHostingView(rootView: SettingsView(app: app, model: app.model, state: state))
-            window.center()
+            if !window.setFrameUsingName("LintelSettings") { window.center() }
+            window.setFrameAutosaveName("LintelSettings")
             self.window = window
         }
         app.adoption.wantsListing = true

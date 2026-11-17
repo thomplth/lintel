@@ -62,6 +62,8 @@ func makeFloatingPanel(level: NSWindow.Level) -> FloatingPanel {
     panel.backgroundColor = .clear
     panel.hasShadow = false
     panel.hidesOnDeactivate = false
+    // Lintel › Hide (⌘H) is meant for the Settings window; the bar stands in for the menu bar and must stay up.
+    panel.canHide = false
     panel.becomesKeyOnlyIfNeeded = true
     panel.isMovable = false
     return panel
