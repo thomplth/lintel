@@ -78,6 +78,8 @@ public enum DesignGuide {
         Tones: primary, secondary, tertiary, accent, good, warn, bad, info, or a hue: red, orange, yellow, green, mint,
         teal, cyan, blue, indigo, purple, pink, brown, gray. Hex colours are rejected. Use good/warn/bad for meaning
         (thresholds, pass/fail), accent for emphasis, secondary for supporting text. Most things need no tone at all.
+        On the halo look, coloured tones on text, icons and lines are drawn as light as the text so they stay legible
+        over pale windows; badges keep the exact colour. A paler orange there is intended, not a theme to correct.
 
         ## Host API
 

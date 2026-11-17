@@ -77,7 +77,25 @@ struct RenderContext {
         }
     }
 
+    /// A tone drawn as text or a line. Over the dark halo, coloured tones are lifted to the text's lightness so they
+    /// stand out from the halo as plainly as the text does.
     func color(_ tone: Tone?, fallback: Color? = nil) -> Color {
+        let exact = fillColor(tone, fallback: fallback)
+        guard material == .halo, let tone, tone.isColoured, let floor = theme.haloToneLightness else { return exact }
+        return Self.lifted(exact, toLightness: floor)
+    }
+
+    private static func lifted(_ color: Color, toLightness floor: Double) -> Color {
+        var darkScheme = EnvironmentValues()
+        darkScheme.colorScheme = .dark
+        let resolved = color.resolve(in: darkScheme)
+        let lifted = HexColor(red: Double(resolved.red), green: Double(resolved.green), blue: Double(resolved.blue))
+            .lifted(toLightness: floor)
+        return Color(red: lifted.red, green: lifted.green, blue: lifted.blue, opacity: Double(resolved.opacity))
+    }
+
+    /// A tone painted as a solid area, such as a badge, whose own text is chosen against its exact colour.
+    func fillColor(_ tone: Tone?, fallback: Color? = nil) -> Color {
         switch tone {
         case nil: fallback ?? primary
         case .primary: primary

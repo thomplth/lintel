@@ -11,6 +11,9 @@ public enum Tone: String, Sendable, CaseIterable {
 
     public static let semantic: [Tone] = [.primary, .secondary, .tertiary, .accent, .good, .warn, .bad, .info]
 
+    /// Whether the tone is a colour of its own rather than a shade of the text colour.
+    public var isColoured: Bool { ![.primary, .secondary, .tertiary].contains(self) }
+
     public init?(name: String) {
         let aliases = [
             "success": "good", "ok": "good", "positive": "good", "warning": "warn", "caution": "warn",

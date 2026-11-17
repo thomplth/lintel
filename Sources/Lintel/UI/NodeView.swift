@@ -116,7 +116,7 @@ struct NodeView: View {
     }
 
     private func badgeView(_ value: String, tone: Tone?) -> some View {
-        let color = context.color(tone, fallback: context.accent)
+        let color = context.fillColor(tone, fallback: context.accent)
         return Text(value)
             .font(context.font(role: "caption", weight: "semibold", mono: true))
             .foregroundStyle(context.textColor(on: tone))
