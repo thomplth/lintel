@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import LintelCore
 import SwiftUI
 
@@ -20,6 +21,8 @@ final class AppController {
     private var settingsWindow: SettingsWindowController?
     private var control: ControlChannel?
     let pointerTap = PointerTap()
+    private(set) lazy var perf = PerfRecorder(home: home, runnerPID: { [runner] in runner.processIdentifier })
+    private var modelChanges: AnyCancellable?
 
     init(home: AppHome) {
         self.home = home
@@ -99,6 +102,8 @@ final class AppController {
         installEscapeHandling()
         adoption.start()
         control = ControlChannel(app: self)
+        perf.start()
+        if Perf.isEnabled { modelChanges = model.objectWillChange.sink { Perf.count("model.change") } }
         applyDockPresence()
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.endDockHold() }

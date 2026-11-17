@@ -43,6 +43,7 @@ final class RunnerClient {
     private var buffer = Data()
 
     var isRunning: Bool { process?.isRunning ?? false }
+    var processIdentifier: pid_t? { process?.processIdentifier }
 
     func start() {
         guard process == nil else { return }

@@ -8,6 +8,7 @@ struct NodeView: View {
     let context: RenderContext
 
     var body: some View {
+        let _ = Perf.count("view.node")
         switch node.component {
         case .text: textView
         case .icon: iconView(node.string("name") ?? "", tone: node.tone(), size: node.string("size"))

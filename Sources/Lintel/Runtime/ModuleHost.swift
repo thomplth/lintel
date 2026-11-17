@@ -122,7 +122,7 @@ final class ModuleHost {
     }
 
     private func pushData() {
-        runner.setData(sampler.snapshot())
+        runner.setData(Perf.measure("sampler.snapshot") { sampler.snapshot() })
     }
 
     // MARK: Discovery
@@ -281,7 +281,10 @@ final class ModuleHost {
         slot.chip = chip ?? previous?.chip
         slot.isRaised = previous?.isRaised ?? false
         if let index = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
-            if model.slots[index] != slot { model.slots[index] = slot }
+            if model.slots[index] != slot {
+                Perf.count("module.publish")
+                model.slots[index] = slot
+            }
         } else {
             model.slots.append(slot)
         }
@@ -305,7 +308,7 @@ final class ModuleHost {
         loaded[key]?.isRenderingChip = true
         let current = entry.generation
         Task {
-            let result = await rendered(key, .chip)
+            let result = await Perf.measure("module.render.chip") { await rendered(key, .chip) }
             guard loaded[key]?.generation == current else { return }
             loaded[key]?.isRenderingChip = false
             loaded[key]?.failure = result.failure

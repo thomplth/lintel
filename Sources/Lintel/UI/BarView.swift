@@ -34,6 +34,7 @@ struct BarView: View {
     }
 
     var body: some View {
+        let _ = Perf.count("view.bar")
         let theme = model.theme
         let material = material
         let hasCapsules = material == .glass || material == .solid
@@ -138,6 +139,7 @@ struct ChipView: View {
     }
 
     var body: some View {
+        let _ = Perf.count("view.chip")
         Group {
             if slot.kind == .pinDivider { pinDivider } else { chip }
         }

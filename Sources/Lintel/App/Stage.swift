@@ -182,6 +182,9 @@ final class ControlChannel {
                 "pointerTap": .bool(app.pointerTap.isRunning), "menuBarRowBudget": .number(Double(min(app.model.menuBarRowBudget, 99999))), "accessibility": .bool(AXIsProcessTrusted()),
             ]
             try? state.text.write(toFile: path, atomically: true, encoding: .utf8)
+        case "metrics":
+            guard let path = command["path"].string, let line = try? app.perf.snapshot().line() else { return }
+            try? line.write(toFile: path, atomically: true, encoding: .utf8)
         case "close-settings": app.windows.first { $0.name == "settings" }?.window.close()
         case "reveal-menu-bar": app.adoption.reveal {}
         case "quit": NSApp.terminate(nil)

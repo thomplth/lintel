@@ -22,7 +22,7 @@ enum MenuBarItems {
 
     static func scan(_ completion: @escaping ([MenuBarItem]) -> Void) {
         queue.async {
-            let items = scanNow()
+            let items = Perf.measure("menubar.scan") { scanNow() }
             DispatchQueue.main.async { completion(items) }
         }
     }

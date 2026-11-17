@@ -205,6 +205,10 @@ final class BarModel: ObservableObject {
     }
 
     func carry(to point: CGPoint) {
+        Perf.measure("drag.carry") { carrying(to: point) }
+    }
+
+    private func carrying(to point: CGPoint) {
         guard isCarrying, let rearrangement else { return }
         let key = rearrangement.key
         carriedPointer = point

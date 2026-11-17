@@ -23,6 +23,19 @@ case "ctl":
     // Delivery is asynchronous; leaving at once can drop the notification.
     Thread.sleep(forTimeInterval: 0.2)
     exit(0)
+case "metrics":
+    let file = FileManager.default.temporaryDirectory.appending(path: "lintel-metrics-\(UUID().uuidString).json")
+    ControlChannel.post(#"{"cmd":"metrics","path":"\#(file.path)"}"#)
+    for _ in 0..<20 where !FileManager.default.fileExists(atPath: file.path) { Thread.sleep(forTimeInterval: 0.1) }
+    guard let data = try? Data(contentsOf: file), let record = try? JSONDecoder.metrics.decode(MetricsRecord.self, from: data) else {
+        FileHandle.standardError.write(Data("lintel: no running Lintel answered; metrics are only in debug and local builds\n".utf8))
+        exit(1)
+    }
+    try? FileManager.default.removeItem(at: file)
+    let encoder = JSONEncoder.metrics
+    encoder.outputFormatting.insert(.prettyPrinted)
+    emit(String(decoding: (try? encoder.encode(record)) ?? Data(), as: UTF8.self))
+    exit(0)
 case "guide":
     emit(DesignGuide.reference)
     exit(0)

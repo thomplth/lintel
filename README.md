@@ -64,6 +64,16 @@ Lintel stage --out <dir> --shots halo/idle,ink/panel:system [--size 900x620] [--
 Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, chat, settings, dock, state, quit
 ```
 
+## Performance metrics
+
+Debug builds and bundles from `Scripts/bundle.sh` (unless run with `LINTEL_METRICS=0`) record how much work the bar
+does: view updates (`view.bar`, `view.chip`, `view.node`), model changes, module updates, main-thread stalls of 100 ms
+or more, and timings of drags, menu bar scans and captures, module renders and system samples. Once a minute a JSON line
+with those numbers, the app's and module runtime's CPU, memory, and the build's commit goes to
+`~/Library/Application Support/Lintel/Metrics/metrics-<day>.jsonl`; fourteen days are kept. `Lintel metrics` prints the
+current minute so far. The same work is marked with signposts (subsystem `app.lintel`), so Instruments' Points of
+Interest track lines it up with a trace.
+
 ## Writing a module by hand
 
 Drop a `<id>.js` file into `~/Library/Application Support/Lintel/Modules`; it loads within two seconds and reloads on
