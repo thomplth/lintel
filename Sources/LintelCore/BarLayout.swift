@@ -42,7 +42,9 @@ public struct BarLayout: Equatable, Codable, Sendable {
     }
 
     /// `raised` holds items asking for attention; they show while idle whatever their pin says.
-    public func arranged(_ items: [Item], isActive: Bool, raised: Set<String> = []) -> [[String]] {
+    /// With `keepsFirstRow`, the first row lives in the system menu bar: it keeps all its items while idle and keeps
+    /// its place even when empty, so the rows below never rise into the menu bar.
+    public func arranged(_ items: [Item], isActive: Bool, raised: Set<String> = [], keepsFirstRow: Bool = false) -> [[String]] {
         let shown = items.filter { !hidden.contains($0.key) }
         let byKey = Dictionary(shown.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var placed = Set<String>()
@@ -59,9 +61,11 @@ public struct BarLayout: Equatable, Codable, Sendable {
         }
 
         if !isActive {
-            result = result.map { row in row.filter { raised.contains($0) || isPinned($0, default: byKey[$0]?.isPinned ?? false) } }
+            let showsWhileIdle = { (key: String) in raised.contains(key) || isPinned(key, default: byKey[key]?.isPinned ?? false) }
+            result = result.enumerated().map { index, row in keepsFirstRow && index == 0 ? row : row.filter(showsWhileIdle) }
         }
-        return result.filter { !$0.isEmpty }
+        guard keepsFirstRow, let first = result.first else { return result.filter { !$0.isEmpty } }
+        return [first] + result.dropFirst().filter { !$0.isEmpty }
     }
 
     public func isPinned(_ key: String, default fallback: Bool) -> Bool {
@@ -73,12 +77,14 @@ public struct BarLayout: Equatable, Codable, Sendable {
     }
 
     /// Makes the implicit arrangement explicit so that editing one item cannot reshuffle the others.
-    public mutating func materialise(_ items: [Item]) {
-        rows = arranged(items, isActive: true)
+    public mutating func materialise(_ items: [Item], keepsFirstRow: Bool = false) {
+        rows = arranged(items, isActive: true, keepsFirstRow: keepsFirstRow)
     }
 
-    public mutating func remove(_ key: String) {
-        rows = rows.map { $0.filter { $0 != key } }.filter { !$0.isEmpty }
+    public mutating func remove(_ key: String, keepsFirstRow: Bool = false) {
+        let kept = rows.map { $0.filter { $0 != key } }
+        guard keepsFirstRow, let first = kept.first else { return rows = kept.filter { !$0.isEmpty } }
+        rows = [first] + kept.dropFirst().filter { !$0.isEmpty }
     }
 
     public mutating func place(_ key: String, row: Int, at index: Int? = nil) {

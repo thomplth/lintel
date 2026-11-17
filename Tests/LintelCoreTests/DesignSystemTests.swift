@@ -261,6 +261,17 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(layout.arranged(items, isActive: false) == [["battery", "clock"]])
     }
 
+    @Test func aFirstRowInTheMenuBarStaysWholeWhileTheRowsBelowShowOnlyPinnedItems() {
+        let layout = BarLayout(rows: [["system", "battery"], ["clock"], ["menubar:x"]])
+        #expect(layout.arranged(items, isActive: false, keepsFirstRow: true) == [["system", "battery"], ["clock"]])
+        #expect(layout.arranged(items, isActive: true, keepsFirstRow: true) == [["system", "battery"], ["clock"], ["menubar:x"]])
+    }
+
+    @Test func anEmptyFirstRowInTheMenuBarKeepsItsPlaceSoTheSecondRowDoesNotRiseIntoIt() {
+        let layout = BarLayout(rows: [["system"], ["clock"]], hidden: ["system"])
+        #expect(layout.arranged(items, isActive: false, keepsFirstRow: true) == [[], ["clock", "battery"]])
+    }
+
     @Test func anOptInItemAppearsOnlyWhenARowNamesIt() {
         #expect(BarLayout(rows: [["menubar:x", "clock"]]).arranged(items, isActive: true).first == ["menubar:x", "clock", "system", "battery"])
     }
@@ -288,6 +299,28 @@ private func evaluate(_ script: String) -> JSValue {
     }
 }
 
+@Suite struct MenuBarFitting {
+    @Test func theModulesNearestTheEndStayInTheMenuBarAndTheRestOverflowBelow() {
+        let chips: [(key: String, width: CGFloat)] = [("a", 50), ("b", 40), ("clock", 60)]
+        let fit = MenuBarFit(chips: chips, spacing: 10, budget: 120)
+        #expect(fit.inMenuBar == ["b", "clock"])
+        #expect(fit.overflow == ["a"])
+        #expect(MenuBarFit(chips: chips, spacing: 10, budget: 500).overflow.isEmpty)
+    }
+
+    @Test func aModuleWiderThanTheWholeBudgetOverflows() {
+        let fit = MenuBarFit(chips: [("wide", 300)], spacing: 4, budget: 100)
+        #expect(fit.inMenuBar.isEmpty)
+        #expect(fit.overflow == ["wide"])
+    }
+
+    @Test func overflowedModulesLeadTheSecondRow() {
+        let fit = MenuBarFit(chips: [("a", 50), ("b", 40)], spacing: 10, budget: 45)
+        #expect(fit.rows(from: [["a", "b"], ["c"]]) == [["b"], ["a", "c"]])
+        #expect(fit.rows(from: [["a", "b"]]) == [["b"], ["a"]])
+    }
+}
+
 @Suite struct Rearranging {
     private let rows: [[BarDrop.Chip]] = [
         [.init(key: "a", frame: CGRect(x: 0, y: 4, width: 40, height: 20)), .init(key: "b", frame: CGRect(x: 50, y: 4, width: 40, height: 20))],
@@ -307,6 +340,40 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 27), in: rows, moving: "z") == .newRow(1))
         #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 49), in: rows, moving: "z") == .newRow(2))
         #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 70), in: rows, moving: "z") == .newRow(2))
+    }
+
+    private let menuBarStrip = CGRect(x: -100, y: -30, width: 200, height: 30)
+    private var menuBarRows: [[BarDrop.Chip]] {
+        [[.init(key: "a", frame: CGRect(x: -90, y: -25, width: 40, height: 20)), .init(key: "b", frame: CGRect(x: -40, y: -25, width: 40, height: 20))],
+         [.init(key: "c", frame: CGRect(x: 0, y: 4, width: 40, height: 20))]]
+    }
+
+    @Test func theMenuBarRowTakesADropAnywhereOnItsStripIncludingItsTopEdge() {
+        #expect(BarDrop.resolve(at: CGPoint(x: -80, y: -29), in: menuBarRows, moving: "z", firstRowBand: menuBarStrip) == .row(0, index: 0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 95, y: -15), in: menuBarRows, moving: "z", firstRowBand: menuBarStrip) == .row(0, index: 2))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: menuBarRows, moving: "z", firstRowBand: menuBarStrip) == .row(1, index: 0))
+    }
+
+    @Test func anEmptyMenuBarRowStillTakesADropAndKeepsItsIndex() {
+        let rows: [[BarDrop.Chip]] = [[], menuBarRows[1]]
+        #expect(BarDrop.resolve(at: CGPoint(x: 0, y: -15), in: rows, moving: "z", firstRowBand: menuBarStrip) == .row(0, index: 0))
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: rows, moving: "z", firstRowBand: menuBarStrip) == .row(1, index: 0))
+        let leaving: [[BarDrop.Chip]] = [[.init(key: "z", frame: CGRect(x: -90, y: -25, width: 40, height: 20))], menuBarRows[1]]
+        #expect(BarDrop.resolve(at: CGPoint(x: 10, y: 14), in: leaving, moving: "z", firstRowBand: menuBarStrip) == .row(1, index: 0))
+    }
+
+    @Test func movingTheLastModuleOutOfTheMenuBarRowLeavesItEmptyInPlace() {
+        var layout = BarLayout(rows: [["a"], ["b"]])
+        layout.move("a", to: .row(1, index: 0), keepsFirstRow: true)
+        #expect(layout.rows == [[], ["a", "b"]])
+        layout.move("b", to: .row(0, index: 0), keepsFirstRow: true)
+        #expect(layout.rows == [["b"], ["a"]])
+    }
+
+    @Test func makingTheArrangementExplicitKeepsAnEmptyMenuBarRow() {
+        var layout = BarLayout(rows: [[], ["c"]])
+        layout.materialise([BarLayout.Item(key: "c", isPinned: true, order: 1)], keepsFirstRow: true)
+        #expect(layout.rows == [[], ["c"]])
     }
 
     @Test func carryingAModuleWellBelowTheBarRemovesIt() {
@@ -415,6 +482,28 @@ private func evaluate(_ script: String) -> JSValue {
         screen.notchStripHeight = 32
         screen.areaRightOfNotch = CGRect(x: 600, y: 568, width: 400, height: 32)
         #expect(Placement.bar(contentSize: size, on: screen, anchor: .center).frame.maxY == 568)
+    }
+
+    @Test func rowsBelowAMenuBarItemHangUnderItAlignedToTheBarsAnchor() {
+        let item = CGRect(x: 600, y: 576, width: 200, height: 24)
+        let rows = CGSize(width: 300, height: 50)
+        #expect(Placement.rows(contentSize: rows, under: item, on: plain, anchor: .right) == CGRect(x: 500, y: 526, width: 300, height: 50))
+        #expect(Placement.rows(contentSize: rows, under: item, on: plain, anchor: .left).minX == 600)
+        #expect(Placement.rows(contentSize: rows, under: item, on: plain, anchor: .center).midX == 700)
+        let tallWindow = CGRect(x: 600, y: 570, width: 200, height: 39)
+        #expect(Placement.rows(contentSize: rows, under: tallWindow, on: plain, anchor: .right).maxY == 576)
+    }
+
+    @Test func rowsBelowAMenuBarItemStayOnScreen() {
+        let item = CGRect(x: 900, y: 576, width: 100, height: 24)
+        #expect(Placement.rows(contentSize: CGSize(width: 300, height: 50), under: item, on: plain, anchor: .left).maxX == 1000)
+        let nearLeft = CGRect(x: 10, y: 576, width: 100, height: 24)
+        #expect(Placement.rows(contentSize: CGSize(width: 300, height: 50), under: nearLeft, on: plain, anchor: .right).minX == 0)
+    }
+
+    @Test func anAppKitFrameFlipsIntoGlobalDisplayCoordinates() {
+        let flipped = Placement.globalDisplayRect(CGRect(x: 600, y: 576, width: 200, height: 24), mainScreenHeight: 600)
+        #expect(flipped == CGRect(x: 600, y: 0, width: 200, height: 24))
     }
 
     @Test func aDropSnapsToTheNearestThirdOfTheScreen() {

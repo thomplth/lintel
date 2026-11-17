@@ -288,7 +288,9 @@ final class ChatController {
             horizontal bar; one item per row is a vertical stack. Items are module ids or menu bar item keys. A module \
             not named in any row joins the last row; a menu bar item appears only if a row names it. "pinned" overrides \
             whether an item shows while the bar is idle (pinned) or only while it is active. "symbols" replaces a menu \
-            bar item's picture with an SF Symbol. Always return the complete layout, not a fragment.
+            bar item's picture with an SF Symbol. While the system menu bar always shows, the first row sits inside it \
+            and always shows all its items; those that do not fit beside other apps' icons lead the second row, and \
+            the rows after it hang below the menu bar. Always return the complete layout, not a fragment.
             Current layout: \(JSONValue(any: try? JSONSerialization.jsonObject(with: JSONEncoder().encode(app.model.layout))).text)
             Modules in the bar: \(installed)
             Available to switch on:

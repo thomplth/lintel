@@ -74,6 +74,25 @@ public enum Placement {
         return .center
     }
 
+    /// The bar's rows after the first, hanging under the menu bar item that holds the first row, aligned to the
+    /// side the bar is anchored to and kept on screen.
+    public static func rows(contentSize: CGSize, under item: CGRect, on screen: ScreenGeometry, anchor: BarAnchor) -> CGRect {
+        var x: CGFloat = switch anchor {
+        case .left: item.minX
+        case .center: item.midX - contentSize.width / 2
+        case .right: item.maxX - contentSize.width
+        }
+        x = min(max(x, screen.frame.minX), screen.frame.maxX - contentSize.width)
+        // The item's window reaches above and below the menu bar it sits in, so only the menu bar marks the top.
+        return CGRect(x: x.rounded(), y: screen.visibleFrame.maxY - contentSize.height, width: contentSize.width, height: contentSize.height)
+    }
+
+    /// AppKit frames grow upwards from the bottom of the main display; event taps and window lists use global display
+    /// coordinates, which grow downwards from its top.
+    public static func globalDisplayRect(_ frame: CGRect, mainScreenHeight: CGFloat) -> CGRect {
+        CGRect(x: frame.minX, y: mainScreenHeight - frame.maxY, width: frame.width, height: frame.height)
+    }
+
     /// A panel hangs under its chip, aligned to the chip's side of the screen and kept on screen.
     public static func panel(size: CGSize, under chip: CGRect, on screen: CGRect, gap: CGFloat = 6, margin: CGFloat = 8) -> CGRect {
         var x = chip.midX < screen.midX ? chip.minX : chip.maxX - size.width

@@ -81,6 +81,13 @@ final class BarWindowController {
         didSet { if guardedTopEdge != oldValue { onGuardedTopEdgeChanged(guardedTopEdge) } }
     }
     var onGuardedTopEdgeChanged: (ClosedRange<CGFloat>?) -> Void = { _ in }
+    private var menuBarRow: MenuBarRow?
+    private var menuBarRowSize = CGSize(width: 16, height: 22)
+    private var menuBarRowFrame: CGRect? {
+        didSet { if menuBarRowFrame != oldValue { onMenuBarRowFrameChanged(menuBarRowFrame) } }
+    }
+    var onMenuBarRowFrameChanged: (CGRect?) -> Void = { _ in }
+    private var menuBarRowPress: Timer?
     private var dragOrigin: CGPoint?
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
@@ -103,6 +110,10 @@ final class BarWindowController {
             self?.contentSize = CGSize(width: ceil(size.width), height: ceil(size.height))
             self?.place()
         }
+        model.onMenuBarRowContentSize = { [weak self] size in
+            self?.menuBarRowSize = CGSize(width: ceil(size.width), height: ceil(size.height))
+            self?.place()
+        }
         model.onDragChanged = { [weak self] translation in self?.drag(translation) }
         model.onDragEnded = { [weak self] _ in self?.endDrag() }
         model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
@@ -116,9 +127,11 @@ final class BarWindowController {
                 MainActor.assumeIsolated { self?.place() }
             }
         }
-        DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.place() } }
+        for name in ["com.apple.screenIsUnlocked", "AppleInterfaceMenuBarHidingChangedNotification"] {
+            DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.place() }
+            }
+        }
 
         pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.trackPointer() }
@@ -161,6 +174,7 @@ final class BarWindowController {
 
     func setHidden(_ isHidden: Bool) {
         model.isHiddenByUser = isHidden
+        menuBarRow?.setHidden(isHidden)
         updateGuardedTopEdge()
         if isHidden { release() }
         panel.animator().alphaValue = isHidden || hasSteppedAside ? 0 : 1
@@ -204,9 +218,13 @@ final class BarWindowController {
         // is at the top edge; elsewhere an occasional look is enough to notice it leaving.
         let isNearTop = NSEvent.mouseLocation.y > (screen?.frame.maxY ?? 0) - 48
         if isNearTop || hasSteppedAside || pointerTicks % 20 == 0 { stepAsideForSystemMenuBar() }
+        // Other apps' items come and go beside the menu bar row and push it along.
+        if let menuBarRow, menuBarRow.screenFrame != menuBarRowFrame { place() }
+        if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
         guard !hasSteppedAside, !model.isHiddenByUser, dragOrigin == nil, model.rearrangement == nil else { return }
         let pointer = NSEvent.mouseLocation
         var isInside = panel.frame.insetBy(dx: -2, dy: -2).contains(pointer)
+        if let menuBarRowFrame, menuBarRowFrame.contains(pointer) { isInside = true }
         if activation.isActive, let frame = panelFrame(), frame.insetBy(dx: -4, dy: -10).contains(pointer) { isInside = true }
         if !model.settings.hoverActivates, activation.state == .idle { isInside = false }
         // A pressed mouse button means a drag or selection is passing over the bar, not a visit to it.
@@ -238,13 +256,114 @@ final class BarWindowController {
         guard let geometry, dragOrigin == nil else { return }
         let widest = max(geometry.frame.width * 0.62 - 16, 320)
         if model.maxBarWidth != widest { model.maxBarWidth = widest }
-        let placement = Placement.bar(
-            contentSize: contentSize, on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset
-        )
-        if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
-        if panel.frame != placement.frame { panel.setFrame(placement.frame, display: true) }
-        model.barWindowFrame = placement.frame
+        updateMenuBarRow(wanted: !geometry.menuBarAutoHides)
+        if let menuBarRow {
+            placeUnderMenuBarRow(menuBarRow, on: geometry)
+        } else {
+            let placement = Placement.bar(
+                contentSize: contentSize, on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset
+            )
+            if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
+            if panel.frame != placement.frame { panel.setFrame(placement.frame, display: true) }
+            model.barWindowFrame = placement.frame
+        }
         updateGuardedTopEdge()
+    }
+
+    private func updateMenuBarRow(wanted: Bool) {
+        if wanted, menuBarRow == nil {
+            let row = MenuBarRow(model: model)
+            row.onPress = { [weak self] _ in self?.menuBarRowPressed() }
+            row.setHidden(model.isHiddenByUser)
+            menuBarRow = row
+            measureMenuBarRowBudget()
+        } else if !wanted, let row = menuBarRow {
+            row.remove()
+            menuBarRow = nil
+            menuBarRowFrame = nil
+        }
+        if model.isFirstRowInMenuBar != wanted { model.isFirstRowInMenuBar = wanted }
+    }
+
+    /// The menu bar row may use the space between the notch, or the middle of a screen without one, and the
+    /// leftmost of other apps' items; wider, macOS would hide the whole row behind the menu bar's overflow button.
+    private func measureMenuBarRowBudget() {
+        guard let screen else { return }
+        let ownBundle = Bundle.main.bundleIdentifier ?? "pid-\(ProcessInfo.processInfo.processIdentifier)"
+        let start = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
+        // Measured on macOS 27: an item's window is 16 pt wider than its length, other items' Accessibility frames sit
+        // 8 pt inside their windows, and macOS hides an item whose window comes within 18 pt of the notch. An item resized
+        // right at that limit flickers out of the menu bar while macOS lays it out again, hence a few points to spare.
+        let margin: CGFloat = 50
+        MenuBarItems.scan { [weak self] items in
+            guard let self else { return }
+            let others = items.filter { $0.owner != ownBundle && $0.frame.width > 0 && $0.frame.minX >= start }
+            let end = others.map(\.frame.minX).min() ?? screen.frame.maxX
+            // Without Accessibility other apps' items stay out of sight; a narrow row is likelier to fit beside them.
+            let budget = AXIsProcessTrusted() ? max(end - start - margin, 0) : 160
+            if self.model.menuBarRowBudget != budget { self.model.menuBarRowBudget = budget }
+        }
+    }
+
+    private func placeUnderMenuBarRow(_ row: MenuBarRow, on geometry: ScreenGeometry) {
+        // A drag previews modules arriving before the row is fitted again; wider than the free space, macOS would hide
+        // the whole item, so the row's leading modules, the ones that will overflow, are clipped meanwhile.
+        row.fit(width: min(menuBarRowSize.width, model.menuBarRowBudget))
+        menuBarRowFrame = row.screenFrame
+        let menuBarHeight = geometry.frame.maxY - geometry.visibleFrame.maxY
+        let item = menuBarRowFrame ?? CGRect(
+            x: geometry.frame.maxX - menuBarRowSize.width, y: geometry.visibleFrame.maxY, width: menuBarRowSize.width, height: menuBarHeight
+        )
+        let size = CGSize(width: max(contentSize.width, 1), height: max(contentSize.height, 1))
+        let frame = Placement.rows(contentSize: size, under: item, on: geometry, anchor: model.settings.anchor)
+        if model.topRowMinHeight != 0 { model.topRowMinHeight = 0 }
+        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        model.barWindowFrame = frame
+        let offset = CGSize(width: item.minX - frame.minX, height: frame.maxY - item.maxY)
+        model.menuBarRowOffset = offset
+        model.menuBarRowBand = CGRect(origin: CGPoint(x: offset.width, y: offset.height), size: item.size)
+    }
+
+    /// The bar window's top-left coordinates, which chip frames and drops are measured in.
+    private func barPoint(_ screenPoint: CGPoint) -> CGPoint {
+        CGPoint(x: screenPoint.x - panel.frame.minX, y: panel.frame.maxY - screenPoint.y)
+    }
+
+    /// A menu bar item receives the press and the release but none of the drags between them, so the menu bar row
+    /// follows each press itself: a click opens the module, and a ⌘-drag carries it.
+    private func menuBarRowPressed() {
+        let start = NSEvent.mouseLocation
+        guard model.rearrangement == nil, let pressed = model.slot(at: barPoint(start)) else { return }
+        // The press arrives without ⌘, which PointerTap took off so macOS would not drag the item itself, and the
+        // session's modifier state follows that press; only the keyboard's own state still has ⌘.
+        let canCarry = CGEventSource.flagsState(.hidSystemState).contains(.maskCommand) && pressed.kind != .assistant
+        if canCarry { hold() }
+        var hasMoved = false
+        menuBarRowPress?.invalidate()
+        let follow = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { return timer.invalidate() }
+                let pointer = NSEvent.mouseLocation
+                hasMoved = hasMoved || hypot(pointer.x - start.x, pointer.y - start.y) >= 4
+                guard NSEvent.pressedMouseButtons & 1 == 0 else {
+                    if canCarry, hasMoved, self.model.rearrangement == nil {
+                        self.model.beginRearranging(pressed.id, grabbedAt: self.barPoint(start))
+                    }
+                    self.model.carry(to: self.barPoint(pointer))
+                    return
+                }
+                timer.invalidate()
+                if self.model.rearrangement != nil {
+                    self.model.carry(to: self.barPoint(pointer))
+                    self.model.drop()
+                } else if !hasMoved, pressed.isClickable {
+                    self.model.onSlotClick(pressed)
+                }
+                if canCarry { self.unhold() }
+            }
+        }
+        RunLoop.main.add(follow, forMode: .common)
+        menuBarRowPress = follow
     }
 
     private lazy var carrier: FloatingPanel = {

@@ -178,7 +178,7 @@ final class ControlChannel {
                 "carrying": app.model.rearrangement.map { .string("\($0.key) \($0.drop.map { "\($0)" } ?? "none") \($0.phase) at \(app.model.carriedPointer)") } ?? .null,
                 "barFrame": app.bar.map { .string("\($0.panel.frame)") } ?? .null,
                 "guardedTopEdge": app.bar?.guardedTopEdge.map { .string("\($0)") } ?? .null,
-                "topEdgeTap": .bool(app.topEdge.isRunning), "accessibility": .bool(AXIsProcessTrusted()),
+                "pointerTap": .bool(app.pointerTap.isRunning), "menuBarRowBudget": .number(Double(min(app.model.menuBarRowBudget, 99999))), "accessibility": .bool(AXIsProcessTrusted()),
             ]
             try? state.text.write(toFile: path, atomically: true, encoding: .utf8)
         case "close-settings": app.windows.first { $0.name == "settings" }?.window.close()

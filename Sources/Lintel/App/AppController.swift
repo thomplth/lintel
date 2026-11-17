@@ -19,7 +19,7 @@ final class AppController {
     private(set) var panelWindow: PanelWindowController?
     private var settingsWindow: SettingsWindowController?
     private var control: ControlChannel?
-    let topEdge = TopEdgeTap()
+    let pointerTap = PointerTap()
 
     init(home: AppHome) {
         self.home = home
@@ -87,9 +87,13 @@ final class AppController {
             if !isActive { self?.closePanel(releasing: false) }
         }
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
-        bar.onGuardedTopEdgeChanged = { [weak self] span in self?.topEdge.guardSpan(span) }
-        topEdge.guardSpan(bar.guardedTopEdge)
-        topEdge.start()
+        bar.onGuardedTopEdgeChanged = { [weak self] span in self?.pointerTap.guardSpan(span) }
+        bar.onMenuBarRowFrameChanged = { [weak self] frame in
+            let height = NSScreen.screens.first?.frame.height ?? 0
+            self?.pointerTap.takeCommandOffPresses(in: frame.map { Placement.globalDisplayRect($0, mainScreenHeight: height) })
+        }
+        pointerTap.guardSpan(bar.guardedTopEdge)
+        pointerTap.start()
         panelWindow.onClickOutside = { [weak self] in self?.closePanel() }
         installEscapeHandling()
         adoption.start()
@@ -231,10 +235,13 @@ final class AppController {
 
     private func rearrange(_ key: String, to drop: BarDrop) {
         var layout = model.layout
+        let keepsFirstRow = model.isFirstRowInMenuBar
         layout.materialise(model.layoutItems.filter { item in
             !item.isOptIn || layout.rows.contains { $0.contains(item.key) }
-        })
-        layout.move(key, to: drop)
+        }, keepsFirstRow: keepsFirstRow)
+        // Drops count the rows as shown, where modules too wide for the menu bar already lead the second row.
+        if keepsFirstRow { layout.rows = model.menuBarFit.rows(from: layout.rows) }
+        layout.move(key, to: drop, keepsFirstRow: keepsFirstRow)
         host.update(layout)
         adoption.refreshSlots()
     }

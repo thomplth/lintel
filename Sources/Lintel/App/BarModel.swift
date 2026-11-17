@@ -29,6 +29,10 @@ struct Slot: Identifiable, Equatable {
     var isClickable: Bool {
         kind != .module || hasPanel || failure != nil || needsApproval
     }
+
+    var showsWhileIdle: Bool {
+        failure == nil && !needsApproval && kind != .assistant
+    }
 }
 
 struct PanelState: Equatable {
@@ -83,6 +87,10 @@ final class BarModel: ObservableObject {
     @Published var isActive = false
     @Published var isHiddenByUser = false
     @Published var topRowMinHeight: CGFloat = 0
+    /// The first row lives in a system menu bar item instead of the bar's window.
+    @Published var isFirstRowInMenuBar = false
+    /// The width free for the menu bar row beside other apps' items.
+    @Published var menuBarRowBudget = CGFloat.greatestFiniteMagnitude
     @Published var maxBarWidth: CGFloat = 1200
     @Published var panel: PanelState?
     @Published var chat: [ChatMessage] = []
@@ -96,7 +104,23 @@ final class BarModel: ObservableObject {
     }
     @Published var carriedPointer = CGPoint.zero
 
-    var slotFrames: [String: CGRect] = [:]
+    private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
+    /// Where the menu bar row's top-left corner lies in the bar window's top-left coordinates.
+    var menuBarRowOffset = CGSize.zero
+    /// The menu bar row's strip in the bar window's top-left coordinates, which takes drops even while empty.
+    var menuBarRowBand = CGRect.null
+
+    /// Chip frames in the bar window's top-left coordinates, including chips drawn in the menu bar row.
+    var slotFrames: [String: CGRect] {
+        reportedFrames.mapValues { reported in
+            reported.isInMenuBar ? reported.frame.offsetBy(dx: menuBarRowOffset.width, dy: menuBarRowOffset.height) : reported.frame
+        }
+    }
+
+    func report(frame: CGRect, of id: String, isInMenuBar: Bool) {
+        reportedFrames[id] = (frame, isInMenuBar)
+    }
+
     var barWindowFrame = CGRect.zero
     var carrierWindowFrame = CGRect.zero
 
@@ -108,6 +132,7 @@ final class BarModel: ObservableObject {
     }
 
     var onContentSize: (CGSize) -> Void = { _ in }
+    var onMenuBarRowContentSize: (CGSize) -> Void = { _ in }
     var onSlotClick: (Slot) -> Void = { _ in }
     var onSlotSecondaryAction: (Slot, String) -> Void = { _, _ in }
     var onAction: (_ module: String, _ action: String, _ payload: JSONValue) -> Void = { _, _, _ in }
@@ -142,6 +167,10 @@ final class BarModel: ObservableObject {
         visibleRows.map { row in row.compactMap { slot in slotFrames[slot.id].map { BarDrop.Chip(key: slot.id, frame: $0) } } }
     }
 
+    func slot(at point: CGPoint) -> Slot? {
+        visibleRows.joined().first { slotFrames[$0.id]?.contains(point) == true }
+    }
+
     func slotID(at point: CGPoint) -> String? {
         visibleRows.joined().first { $0.kind != .assistant && slotFrames[$0.id]?.contains(point) == true }?.id
     }
@@ -162,7 +191,7 @@ final class BarModel: ObservableObject {
     func carry(to point: CGPoint) {
         guard isCarrying, let key = rearrangement?.key else { return }
         carriedPointer = point
-        let drop = BarDrop.resolve(at: point, in: chipRows, moving: key)
+        let drop = BarDrop.resolve(at: point, in: chipRows, moving: key, firstRowBand: isFirstRowInMenuBar ? menuBarRowBand : nil)
         guard drop != rearrangement?.drop else { return }
         (drop == .remove ? NSCursor.disappearingItem : NSCursor.closedHand).set()
         withAnimation(Self.reflow) { rearrangement?.drop = drop }
@@ -180,23 +209,53 @@ final class BarModel: ObservableObject {
         }
     }
 
+    /// The arranged rows with the modules that do not fit in the menu bar moved to the start of the row below; while
+    /// idle only the pinned ones among them show there.
+    private var fittedRows: [[Slot]] {
+        let rows = arrangedRows
+        let fit = menuBarFit
+        guard !fit.overflow.isEmpty else { return rows }
+        let byID = Dictionary(rows.joined().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let shown = fit.rows(from: rows.map { $0.map(\.id) }).enumerated().map { index, row in
+            row.filter { key in
+                isActive || index != 1 || !fit.overflow.contains(key) || layout.isPinned(key, default: byID[key]?.isPinned ?? false)
+            }
+        }
+        return [shown[0].compactMap { byID[$0] }] + shown.dropFirst().map { $0.compactMap { byID[$0] } }.filter { !$0.isEmpty }
+    }
+
     static let reflow = Animation.spring(duration: 0.28, bounce: 0.18)
     static let vanish = Animation.easeIn(duration: 0.18)
 
+    /// Splits the menu bar row by the widths its modules last had, wherever they were drawn.
+    var menuBarFit: MenuBarFit {
+        guard isFirstRowInMenuBar, let first = arrangedRows.first else { return MenuBarFit() }
+        let frames = slotFrames
+        let hasCapsules = [SurfaceMaterial.glass, .solid].contains(SurfaceMaterial(active: theme.activeMaterial))
+        let spacing = hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing
+        let padding: CGFloat = 8
+        return MenuBarFit(
+            chips: first.map { ($0.id, frames[$0.id]?.width ?? 60) }, spacing: spacing, budget: menuBarRowBudget - padding
+        )
+    }
+
     private var arrangedRows: [[Slot]] {
-        let usable = slots.filter { isActive || ($0.failure == nil && !$0.needsApproval && $0.kind != .assistant) }
+        let usable = slots.filter { isActive || isFirstRowInMenuBar || $0.showsWhileIdle }
         let byID = Dictionary(usable.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let items = usable.map { BarLayout.Item(key: $0.id, isPinned: $0.isPinned, order: $0.order, isOptIn: $0.isOptIn) }
         let raised = Set(usable.filter(\.isRaised).map(\.id))
-        return layout.arranged(items, isActive: isActive, raised: raised).map { row in row.compactMap { byID[$0] } }
+        let rows = layout.arranged(items, isActive: isActive, raised: raised, keepsFirstRow: isFirstRowInMenuBar)
+            .map { row in row.compactMap { byID[$0] } }
+        guard isFirstRowInMenuBar, !isActive, let first = rows.first else { return rows }
+        return [first] + rows.dropFirst().map { $0.filter(\.showsWhileIdle) }.filter { !$0.isEmpty }
     }
 
     var visibleRows: [[Slot]] {
-        let rows = arrangedRows
+        let rows = fittedRows
         guard let rearrangement, let drop = rearrangement.drop else { return rows }
         let byID = Dictionary(rows.joined().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var preview = BarLayout(rows: rows.map { $0.map(\.id) })
-        preview.move(rearrangement.key, to: drop)
+        preview.move(rearrangement.key, to: drop, keepsFirstRow: isFirstRowInMenuBar)
         return preview.rows.map { row in row.compactMap { byID[$0] } }
     }
 }

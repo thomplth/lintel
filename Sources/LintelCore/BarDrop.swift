@@ -21,26 +21,37 @@ public enum BarDrop: Equatable, Sendable {
     private static let removalDepthInLines: CGFloat = 1.5
     private static let removalSideMargin: CGFloat = 48
 
-    public static func resolve(at point: CGPoint, in displayed: [[Chip]], moving key: String) -> BarDrop? {
-        let rows = displayed.map { $0.filter { $0.key != key } }.filter { !$0.isEmpty }
-        let bands = rows.map(band)
+    /// `firstRowBand` is the strip of a first row that lives in the system menu bar: that row keeps its index even
+    /// when empty, takes any drop on its strip, and no row can open above it.
+    public static func resolve(
+        at point: CGPoint, in displayed: [[Chip]], moving key: String, firstRowBand: CGRect? = nil
+    ) -> BarDrop? {
+        let remaining = displayed.map { $0.filter { $0.key != key } }
+        let rows: [[Chip]] = if firstRowBand != nil, let first = remaining.first {
+            [first] + remaining.dropFirst().filter { !$0.isEmpty }
+        } else {
+            remaining.filter { !$0.isEmpty }
+        }
+        var bands = rows.map(band)
+        if let firstRowBand, !bands.isEmpty { bands[0] = bands[0].isNull ? firstRowBand : bands[0].union(firstRowBand) }
         guard let first = bands.first, let last = bands.last else { return nil }
         let bar = bands.reduce(first) { $0.union($1) }
         // A module carried into a new row of its own must count toward the bar's depth, or that row lies past the
         // removal line whenever the remaining modules fit on fewer lines, and the drop flips to removing it.
-        let drawnBottom = displayed.joined().map(\.frame.maxY).max() ?? last.maxY
-        let removalDepth = drawnBottom + lineHeight(rows[rows.count - 1]) * removalDepthInLines
+        let drawnBottom = max(displayed.joined().map(\.frame.maxY).max() ?? last.maxY, last.maxY)
+        let removalDepth = drawnBottom + lineHeight(rows[rows.count - 1], in: last) * removalDepthInLines
         if point.y > removalDepth || point.x < bar.minX - removalSideMargin || point.x > bar.maxX + removalSideMargin {
             return .remove
         }
-        if point.y < first.minY { return .newRow(0) }
+        let isFirstRowFixed = firstRowBand != nil
+        if point.y < first.minY { return isFirstRowFixed ? .row(0, index: insertionIndex(at: point, in: rows[0])) : .newRow(0) }
         if point.y > last.maxY { return .newRow(rows.count) }
 
         for (index, band) in bands.enumerated() {
             if point.y < band.minY { return .newRow(index) }
             guard point.y <= band.maxY else { continue }
-            let edge = lineHeight(rows[index]) * newRowEdgeShare
-            if point.y < band.minY + edge { return .newRow(index) }
+            let edge = lineHeight(rows[index], in: band) * newRowEdgeShare
+            if point.y < band.minY + edge, !(isFirstRowFixed && index == 0) { return .newRow(index) }
             if point.y > band.maxY - edge { return .newRow(index + 1) }
             return .row(index, index: insertionIndex(at: point, in: rows[index]))
         }
@@ -51,8 +62,8 @@ public enum BarDrop: Equatable, Sendable {
         row.dropFirst().reduce(row.first?.frame ?? .null) { $0.union($1.frame) }
     }
 
-    private static func lineHeight(_ row: [Chip]) -> CGFloat {
-        row.map(\.frame.height).min() ?? 0
+    private static func lineHeight(_ row: [Chip], in band: CGRect) -> CGFloat {
+        row.map(\.frame.height).min() ?? band.height
     }
 
     private static func insertionIndex(at point: CGPoint, in row: [Chip]) -> Int {
@@ -69,9 +80,10 @@ public enum BarDrop: Equatable, Sendable {
 }
 
 extension BarLayout {
-    public mutating func move(_ key: String, to drop: BarDrop) {
+    /// With `keepsFirstRow`, the first row lives in the system menu bar and stays in place when its last item leaves.
+    public mutating func move(_ key: String, to drop: BarDrop, keepsFirstRow: Bool = false) {
         guard row(of: key) != nil else { return }
-        remove(key)
+        remove(key, keepsFirstRow: keepsFirstRow)
         switch drop {
         case .row(let target, let index):
             guard rows.indices.contains(target) else { return rows.append([key]) }

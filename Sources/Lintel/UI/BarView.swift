@@ -2,48 +2,80 @@ import AppKit
 import LintelCore
 import SwiftUI
 
+/// The coordinate space chips report their frames in: the top-left of the view hosting them.
+let barSpace = "bar"
+
 struct BarView: View {
+    enum Host {
+        /// The bar's own window, holding every row, or every row after the first while that lives in the menu bar.
+        case window
+        /// A system menu bar item holding the first row, which always shows all its modules.
+        case menuBar
+    }
+
     @ObservedObject var model: BarModel
+    var host = Host.window
     @State private var isMovingBar = false
     @Namespace private var chipTravel
 
+    private var looksActive: Bool {
+        model.isActive || host == .menuBar
+    }
+
     private var material: SurfaceMaterial {
-        model.isActive ? SurfaceMaterial(active: model.theme.activeMaterial) : SurfaceMaterial(idle: model.theme.idleMaterial)
+        looksActive ? SurfaceMaterial(active: model.theme.activeMaterial) : SurfaceMaterial(idle: model.theme.idleMaterial)
+    }
+
+    private var rows: [[Slot]] {
+        switch host {
+        case .menuBar: Array(model.visibleRows.prefix(1))
+        case .window: model.isFirstRowInMenuBar ? Array(model.visibleRows.dropFirst()) : model.visibleRows
+        }
     }
 
     var body: some View {
         let theme = model.theme
         let material = material
         let hasCapsules = material == .glass || material == .solid
+        let isInMenuBar = host == .menuBar
         GlassEffectContainer(spacing: 0) {
             VStack(alignment: model.alignment, spacing: max(theme.rowSpacing, hasCapsules ? 3 : 0)) {
-                ForEach(Array(model.visibleRows.enumerated()), id: \.offset) { row in
+                ForEach(Array(rows.enumerated()), id: \.offset) { row in
                     WrappingRow(
                         spacing: hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing,
                         lineSpacing: max(theme.rowSpacing, hasCapsules ? 3 : 0), alignment: model.alignment,
-                        maxWidth: model.maxBarWidth
+                        // A menu bar item cannot grow taller; one too wide goes behind the menu bar's overflow button.
+                        maxWidth: isInMenuBar ? .greatestFiniteMagnitude : model.maxBarWidth
                     ) {
                         ForEach(row.element) { slot in
                             ChipView(slot: slot, model: model, material: material, travel: chipTravel)
                         }
                     }
-                    .frame(minHeight: row.offset == 0 ? model.topRowMinHeight : 0)
+                    .frame(minHeight: row.offset == 0 && !isInMenuBar ? model.topRowMinHeight : 0)
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.top, model.topRowMinHeight > 0 ? 0 : 4)
-        .padding(.bottom, 4)
-        .opacity(model.isActive ? 1 : theme.idleOpacity)
+        .padding(.horizontal, isInMenuBar ? 4 : 8)
+        .padding(.top, model.topRowMinHeight > 0 || isInMenuBar ? 0 : 4)
+        .padding(.bottom, isInMenuBar ? 0 : 4)
+        .frame(minWidth: isInMenuBar ? 16 : 0)
+        .opacity(looksActive ? 1 : theme.idleOpacity)
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            DragGesture(minimumDistance: 8, coordinateSpace: .named(barSpace))
                 .onChanged(dragChanged)
                 .onEnded(dragEnded)
         )
         .fixedSize()
-        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { model.onContentSize($0) })
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: model.alignment, vertical: .top))
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { size in
+            if isInMenuBar { model.onMenuBarRowContentSize(size) } else { model.onContentSize(size) }
+        })
+        .frame(
+            maxWidth: .infinity, maxHeight: .infinity,
+            alignment: isInMenuBar ? .trailing : Alignment(horizontal: model.alignment, vertical: .top)
+        )
+        .coordinateSpace(name: barSpace)
+        .environment(\.isInMenuBar, isInMenuBar)
         .animation(theme.motion == "full" ? .smooth(duration: 0.22) : nil, value: model.isActive)
         .environment(\.colorScheme, colorScheme(for: material) ?? systemScheme)
         .onExitCommand { model.onDismiss() }
@@ -57,7 +89,7 @@ struct BarView: View {
         } else if !isMovingBar, model.isActive, isCommandHeld, let key = model.slotID(at: value.startLocation) {
             model.beginRearranging(key, grabbedAt: value.startLocation)
             model.carry(to: value.location)
-        } else {
+        } else if !model.isFirstRowInMenuBar {
             isMovingBar = true
             model.onDragChanged(value.translation)
         }
@@ -86,9 +118,14 @@ struct BarView: View {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var isInMenuBar = false
+}
+
 struct ChipView: View {
     let slot: Slot
     @ObservedObject var model: BarModel
+    @Environment(\.isInMenuBar) private var isInMenuBar
     let material: SurfaceMaterial
     var travel: Namespace.ID?
     var isCarried = false
@@ -103,7 +140,9 @@ struct ChipView: View {
             // GlassEffectContainer draws every chip's glass and content itself, so opacity(0) leaves the chip visible.
             Color.clear
                 .frame(width: rearrangement.size.width, height: rearrangement.size.height)
-                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: { model.slotFrames[slot.id] = $0 })
+                .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
+                    model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar)
+                })
                 .modifier(Travels(id: slot.id, namespace: travel))
         } else {
             chip
@@ -113,13 +152,14 @@ struct ChipView: View {
     private var chip: some View {
         let context = RenderContext(theme: model.theme, surface: .chip, material: material, moduleID: slot.id)
         let hasCapsule = material == .glass || material == .solid
-        let isClickable = model.isActive && slot.isClickable
+        let isOpen = model.isActive || isInMenuBar
+        let isClickable = isOpen && slot.isClickable
         return content(context)
             .frame(minHeight: context.metrics.fontSize(role: nil) * 1.3)
             .padding(.horizontal, hasCapsule ? context.metrics.chipPaddingHorizontal : 0)
             .padding(.vertical, hasCapsule ? context.metrics.chipPaddingVertical : 0)
             .background {
-                if !hasCapsule, model.isActive, isHovered || isPanelOpen, isClickable {
+                if !hasCapsule, isOpen, isHovered || isPanelOpen, isClickable {
                     context.chipShape.fill(.black.opacity(0.28)).padding(.horizontal, -6).padding(.vertical, -2)
                 }
             }
@@ -133,9 +173,11 @@ struct ChipView: View {
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
-            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: { if !isCarried { model.slotFrames[slot.id] = $0 } })
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
+                if !isCarried { model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar) }
+            })
             .modifier(Travels(id: slot.id, namespace: isCarried ? nil : travel))
-            .help(model.isActive ? slot.failure ?? slot.title : "")
+            .help(isOpen ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
     }
 
