@@ -123,8 +123,8 @@ final class BarWindowController {
         model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
         let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.updateMouseCapture() } }
         mouseMonitors = [
-            NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved], handler: follow) as Any,
-            NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { follow($0); return $0 } as Any,
+            NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .flagsChanged], handler: follow) as Any,
+            NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .flagsChanged]) { follow($0); return $0 } as Any,
         ]
 
         NotificationCenter.default.addObserver(
@@ -266,6 +266,16 @@ final class BarWindowController {
         let captures = !model.isHiddenByUser && activation.isActive
             && (isOverBar || isPressing || dragOrigin != nil || model.rearrangement != nil)
         if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
+        updatePinDividers(isOverBar: isOverBar)
+    }
+
+    /// ⌘ over the open bar shows each row's pin divider, ready to be ⌘-dragged, and keeps it while a drag goes on.
+    private func updatePinDividers(isOverBar: Bool) {
+        let isOverMenuBarRow = menuBarRowFrame?.contains(NSEvent.mouseLocation) ?? false
+        let shows = activation.isActive && !model.isHiddenByUser && (isOverBar || isOverMenuBarRow)
+            && NSEvent.modifierFlags.contains(.command)
+        guard shows != model.showsPinDividers else { return }
+        withAnimation(BarModel.reflow) { model.showsPinDividers = shows }
     }
 
     /// Wide enough for the widest row the bar may have, and deep enough for several, so the canvas rarely has to grow

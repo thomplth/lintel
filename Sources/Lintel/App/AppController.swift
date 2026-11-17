@@ -44,7 +44,7 @@ final class AppController {
         }
         model.onSlotClick = { [weak self] slot in self?.clicked(slot) }
         model.onSlotSecondaryAction = { [weak self] slot, command in self?.edit(slot, command) }
-        model.onRearrange = { [weak self] key, drop in self?.rearrange(key, to: drop) }
+        model.onRearrange = { [weak self] rows, pins, hiding in self?.rearrange(rows: rows, pins: pins, hiding: hiding) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         model.onPanelCommand = { [weak self] command in self?.panelCommand(command) }
         model.onChatSubmit = { [weak self] message in self?.chat.submit(message) }
@@ -166,6 +166,8 @@ final class AppController {
             adoption.press(slot.id)
         case .module:
             if model.panel?.slotID == slot.id { closePanel() } else { openModulePanel(slot.id) }
+        case .pinDivider:
+            break
         }
     }
 
@@ -275,15 +277,12 @@ final class AppController {
         adoption.refreshSlots()
     }
 
-    private func rearrange(_ key: String, to drop: BarDrop) {
+    /// `rows` hold every module the open bar showed, as it showed them, so they replace the saved rows outright.
+    private func rearrange(rows: [[String]], pins: [String: Bool], hiding: String?) {
         var layout = model.layout
-        let keepsFirstRow = model.isFirstRowInMenuBar
-        layout.materialise(model.layoutItems.filter { item in
-            !item.isOptIn || layout.rows.contains { $0.contains(item.key) }
-        }, keepsFirstRow: keepsFirstRow)
-        // Drops count the rows as shown, where modules too wide for the menu bar already lead the second row.
-        if keepsFirstRow { layout.rows = model.menuBarFit.rows(from: layout.rows) }
-        layout.move(key, to: drop, keepsFirstRow: keepsFirstRow)
+        layout.rows = rows
+        layout.pinned.merge(pins) { _, new in new }
+        if let hiding { layout.setHidden(hiding, true) }
         host.update(layout)
         adoption.refreshSlots()
     }

@@ -2,12 +2,14 @@ import AppKit
 
 // Synthesises pointer input inside the test VM. Coordinates are AppKit screen points (origin bottom-left).
 //   vm-input click X Y
-//   vm-input drag FROM_X FROM_Y TO_X TO_Y [--hold SECONDS] [--command] [--back]
+//   vm-input drag FROM_X FROM_Y TO_X TO_Y [--hold SECONDS] [--command [--lead SECONDS]] [--back]
+// --lead holds ⌘ that long before the press, for what appears only while ⌘ is down.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 let numbers = arguments.compactMap(Double.init)
 let holdsCommand = arguments.contains("--command")
 let returnsToStart = arguments.contains("--back")
+let lead = arguments.firstIndex(of: "--lead").flatMap { Double(arguments[safe: $0 + 1] ?? "") } ?? 0
 let hold = arguments.firstIndex(of: "--hold").flatMap { Double(arguments[safe: $0 + 1] ?? "") } ?? 0.3
 let screenHeight = NSScreen.screens[0].frame.height
 let source = CGEventSource(stateID: .hidSystemState)
@@ -50,6 +52,7 @@ case "drag" where numbers.count >= 4:
     let start = point(numbers[0], numbers[1]), end = point(numbers[2], numbers[3])
     post(.mouseMoved, at: start)
     if holdsCommand { postCommandKey(down: true) }
+    usleep(useconds_t(lead * 1_000_000))
     post(.leftMouseDown, at: start)
     glide(from: start, to: end)
     usleep(useconds_t(hold * 1_000_000))
@@ -61,6 +64,6 @@ case "drag" where numbers.count >= 4:
     post(.leftMouseUp, at: release)
     if holdsCommand { postCommandKey(down: false) }
 default:
-    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command] [--back]\n".utf8))
+    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command [--lead S]] [--back]\n".utf8))
     exit(2)
 }

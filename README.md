@@ -34,6 +34,9 @@ Lintel, not among other apps' items (needs Accessibility; without it macOS moves
 Drag the open bar to move it to the left, centre or right of the screen; hold ⌘ and drag a module to move it beside
 another, into another row, or onto a row's top or bottom edge (or just below the bar) to start a new row there. Carry it
 well away from the bar until the pointer shows ✕ and let go to remove it; Settings › Bar Items brings it back.
+Holding ⌘ over the open bar also shows a slim divider in each of its rows (except one in the menu bar, which shows all
+its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
+is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.
 User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to use another folder.
 
 ## Layout of the code

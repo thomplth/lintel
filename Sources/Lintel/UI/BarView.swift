@@ -138,7 +138,33 @@ struct ChipView: View {
     }
 
     var body: some View {
-        chip.opacity(isLeftForTheCarrier ? 0 : 1)
+        Group {
+            if slot.kind == .pinDivider { pinDivider } else { chip }
+        }
+        .opacity(isLeftForTheCarrier ? 0 : 1)
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
+            if !isCarried { model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar) }
+        })
+    }
+
+    /// Drawn as wide as a grab needs, since drags pick what they carry by the frames chips report.
+    private var pinDivider: some View {
+        let context = RenderContext(theme: model.theme, surface: .chip, material: material, moduleID: slot.id)
+        let height = context.metrics.fontSize(role: nil) * 1.3 + context.metrics.chipPaddingVertical * 2
+        return Capsule()
+            .fill(context.accent.opacity(0.28))
+            .strokeBorder(context.accent.opacity(0.65), lineWidth: 1)
+            .overlay {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: context.metrics.fontSize(role: nil) * 0.75, weight: .bold))
+                    .rotationEffect(.degrees(90))
+                    .foregroundStyle(context.accent)
+            }
+            .frame(width: 11, height: height)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+            .help("Modules on the \(model.alignment == .leading ? "left" : "right") of this divider stay in the bar while it is closed. ⌘-drag modules or the divider to change which.")
+            .accessibilityLabel("Pin divider")
     }
 
     private var chip: some View {
@@ -166,9 +192,6 @@ struct ChipView: View {
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
-            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
-                if !isCarried { model.report(frame: $0, of: slot.id, isInMenuBar: isInMenuBar) }
-            })
             .help(isOpen ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
     }

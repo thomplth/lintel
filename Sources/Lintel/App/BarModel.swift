@@ -7,6 +7,7 @@ struct Slot: Identifiable, Equatable {
         case module
         case menuBarItem
         case assistant
+        case pinDivider
     }
 
     let id: String
@@ -27,11 +28,19 @@ struct Slot: Identifiable, Equatable {
     var isRaised = false
 
     var isClickable: Bool {
-        kind != .module || hasPanel || failure != nil || needsApproval
+        switch kind {
+        case .module: hasPanel || failure != nil || needsApproval
+        case .menuBarItem, .assistant: true
+        case .pinDivider: false
+        }
     }
 
     var showsWhileIdle: Bool {
-        failure == nil && !needsApproval && kind != .assistant
+        failure == nil && !needsApproval && kind != .assistant && kind != .pinDivider
+    }
+
+    static func pinDivider(_ key: String) -> Slot {
+        Slot(id: key, kind: .pinDivider, title: "Pin divider")
     }
 }
 
@@ -57,6 +66,8 @@ struct Rearrangement: Equatable {
     var key: String
     var grabOffset: CGSize
     var size: CGSize
+    /// The rows as the drag found them, which every preview and the drop are worked out from.
+    var start: PinDividers
     var drop: BarDrop?
     var phase = Phase.carrying
 
@@ -103,6 +114,8 @@ final class BarModel: ObservableObject {
         didSet { if (oldValue == nil) != (rearrangement == nil) { onRearrangingChanged() } }
     }
     @Published var carriedPointer = CGPoint.zero
+    /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
+    @Published var showsPinDividers = false
 
     private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
     /// Where the menu bar row's top-left corner lies in the bar window's top-left coordinates.
@@ -143,7 +156,7 @@ final class BarModel: ObservableObject {
     var onPanelCommand: (String) -> Void = { _ in }
     var onDragEnded: (CGFloat) -> Void = { _ in }
     var onDragChanged: (CGSize) -> Void = { _ in }
-    var onRearrange: (_ key: String, _ drop: BarDrop) -> Void = { _, _ in }
+    var onRearrange: (_ rows: [[String]], _ pins: [String: Bool], _ hiding: String?) -> Void = { _, _, _ in }
     var onRearrangingChanged: () -> Void = {}
     var manifestFor: (String) -> ModuleManifest? = { _ in nil }
 
@@ -156,7 +169,7 @@ final class BarModel: ObservableObject {
     }
 
     func slot(_ id: String) -> Slot? {
-        slots.first { $0.id == id }
+        PinDividers.isDivider(id) ? .pinDivider(id) : slots.first { $0.id == id }
     }
 
     var layoutItems: [BarLayout.Item] {
@@ -182,31 +195,53 @@ final class BarModel: ObservableObject {
     func beginRearranging(_ key: String, grabbedAt point: CGPoint) {
         guard let frame = slotFrames[key] else { return }
         carriedPointer = point
-        rearrangement = Rearrangement(
-            key: key, grabOffset: CGSize(width: point.x - frame.minX, height: point.y - frame.minY), size: frame.size
-        )
+        withAnimation(Self.reflow) {
+            rearrangement = Rearrangement(
+                key: key, grabOffset: CGSize(width: point.x - frame.minX, height: point.y - frame.minY), size: frame.size,
+                start: pinDividers(fittedRows)
+            )
+        }
         NSCursor.closedHand.set()
     }
 
     func carry(to point: CGPoint) {
-        guard isCarrying, let key = rearrangement?.key else { return }
+        guard isCarrying, let rearrangement else { return }
+        let key = rearrangement.key
         carriedPointer = point
-        let drop = BarDrop.resolve(at: point, in: chipRows, moving: key, firstRowBand: isFirstRowInMenuBar ? menuBarRowBand : nil)
-        guard drop != rearrangement?.drop else { return }
+        // A row the carried module leaves holding only its divider closes, as PinDividers.moving closes it.
+        let rows = chipRows.map { row in
+            row.allSatisfy { $0.key == key || PinDividers.isDivider($0.key) } ? row.filter { $0.key == key } : row
+        }
+        let drop = BarDrop.resolve(at: point, in: rows, moving: key, firstRowBand: isFirstRowInMenuBar ? menuBarRowBand : nil)
+            .flatMap { rearrangement.start.accepts($0, moving: key) ? $0 : nil }
+        guard drop != rearrangement.drop else { return }
         (drop == .remove ? NSCursor.disappearingItem : NSCursor.closedHand).set()
-        withAnimation(Self.reflow) { rearrangement?.drop = drop }
+        withAnimation(Self.reflow) { self.rearrangement?.drop = drop }
     }
 
     func drop() {
         guard isCarrying, let rearrangement else { return }
         NSCursor.arrow.set()
-        if let drop = rearrangement.drop { onRearrange(rearrangement.key, drop) }
+        if let drop = rearrangement.drop {
+            let result = rearrangement.start.moving(rearrangement.key, to: drop)
+            let changed = result.pins.filter { key, isPinned in layout.isPinned(key, default: slot(key)?.isPinned ?? false) != isPinned }
+            onRearrange(result.layoutRows, changed, rearrangement.isRemoving ? rearrangement.key : nil)
+        }
         let ending = rearrangement.isRemoving ? Rearrangement.Phase.vanishing : .landing
         withAnimation(ending == .vanishing ? Self.vanish : Self.reflow, completionCriteria: .logicallyComplete) {
             self.rearrangement?.phase = ending
         } completion: {
-            self.rearrangement = nil
+            withAnimation(Self.reflow) { self.rearrangement = nil }
         }
+    }
+
+    private func pinDividers(_ rows: [[Slot]]) -> PinDividers {
+        let byID = Dictionary(rows.joined().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return PinDividers(
+            rows: rows.map { $0.map(\.id) },
+            isPinned: { [layout] key in layout.isPinned(key, default: byID[key]?.isPinned ?? false) },
+            pinsAtEnd: alignment != .leading, keepsFirstRow: isFirstRowInMenuBar
+        )
     }
 
     /// The arranged rows with the modules that do not fit in the menu bar moved to the start of the row below; while
@@ -253,10 +288,10 @@ final class BarModel: ObservableObject {
 
     var visibleRows: [[Slot]] {
         let rows = fittedRows
-        guard let rearrangement, let drop = rearrangement.drop else { return rows }
+        guard showsPinDividers || rearrangement != nil else { return rows }
         let byID = Dictionary(rows.joined().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var preview = BarLayout(rows: rows.map { $0.map(\.id) })
-        preview.move(rearrangement.key, to: drop, keepsFirstRow: isFirstRowInMenuBar)
-        return preview.rows.map { row in row.compactMap { byID[$0] } }
+        let start = rearrangement?.start ?? pinDividers(rows)
+        let shown = rearrangement.flatMap { moving in moving.drop.map { start.moving(moving.key, to: $0) } } ?? start
+        return shown.rows.map { row in row.compactMap { byID[$0] ?? (PinDividers.isDivider($0) ? .pinDivider($0) : nil) } }
     }
 }
