@@ -58,7 +58,8 @@ Lintel trial <module.js>...          # run modules against the design rules with
 Lintel chat [--approve] "<request>"  # one assistant request, headless
 Lintel export <id> <file>            # write a shareable .lintelmodule
 Lintel import <file> [--approve]     # install one after the same checks
-Lintel items                         # list system menu bar items (needs Accessibility)
+Lintel items [--pictures <dir>]      # list system menu bar items (needs Accessibility), and save their pictures
+Lintel metrics                       # live performance numbers from the running instance (debug and local builds)
 Lintel stage --out <dir> --shots halo/idle,ink/panel:system [--size 900x620] [--backdrop photo|document|light|dark]
                                      # photograph the bar and a panel on a hidden stand-in desktop
 Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, chat, settings, dock, state, quit

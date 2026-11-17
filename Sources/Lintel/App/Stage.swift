@@ -180,6 +180,7 @@ final class ControlChannel {
                 "barFrame": app.bar.map { .string("\($0.contentFrame)") } ?? .null,
                 "guardedTopEdge": app.bar?.guardedTopEdge.map { .string("\($0)") } ?? .null,
                 "pointerTap": .bool(app.pointerTap.isRunning), "menuBarRowBudget": .number(Double(min(app.model.menuBarRowBudget, 99999))), "accessibility": .bool(AXIsProcessTrusted()),
+                "screenRecording": .bool(CGPreflightScreenCaptureAccess()),
             ]
             try? state.text.write(toFile: path, atomically: true, encoding: .utf8)
         case "metrics":

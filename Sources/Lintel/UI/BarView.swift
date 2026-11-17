@@ -241,7 +241,7 @@ struct ChipView: View, Equatable {
             .font(context.font())
         } else if let image = slot.image {
             Image(nsImage: image)
-                .renderingMode(.template)
+                .renderingMode(image.isTemplate ? .template : .original)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: context.theme.fontSize * 1.45)

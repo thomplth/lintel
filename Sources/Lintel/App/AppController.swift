@@ -88,7 +88,7 @@ final class AppController {
             self.host.update(settings)
         }
         bar.onActiveChanged = { [weak self] isActive in
-            if !isActive { self?.closePanel(releasing: false) }
+            if isActive { self?.adoption.scanIfNeeded(force: false) } else { self?.closePanel(releasing: false) }
         }
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
         bar.onGuardedTopEdgeChanged = { [weak self] span in self?.pointerTap.guardSpan(span) }
@@ -280,6 +280,7 @@ final class AppController {
         }
         host.update(layout)
         adoption.refreshSlots()
+        adoption.scanIfNeeded(force: false)
     }
 
     /// `rows` hold every module the open bar showed, as it showed them, so they replace the saved rows outright.
@@ -290,6 +291,7 @@ final class AppController {
         if let hiding { layout.setHidden(hiding, true) }
         host.update(layout)
         adoption.refreshSlots()
+        adoption.scanIfNeeded(force: false)
     }
 
     func showSettings(tab: SettingsTab) {

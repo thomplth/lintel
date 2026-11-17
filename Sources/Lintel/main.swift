@@ -114,10 +114,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(0)
             }
         case "items":
-            for item in MenuBarItems.scanNow() {
+            let items = MenuBarItems.scanNow()
+            for item in items {
                 emit("\(item.key) | \(item.label) | \(Int(item.frame.minX)),\(Int(item.frame.minY)) \(Int(item.frame.width))x\(Int(item.frame.height))")
             }
-            exit(0)
+            guard let index = arguments.firstIndex(of: "--pictures"), index + 1 < arguments.count else { exit(0) }
+            let folder = URL(fileURLWithPath: arguments[index + 1])
+            Task {
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                for (key, picture) in await MenuBarItems.pictures(of: items) {
+                    let kind = picture.map { $0.isTemplate ? "monochrome" : "colour" } ?? "empty"
+                    let file = folder.appending(path: "\(key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key).png")
+                    if let image = picture?.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+                        try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: file)
+                    }
+                    emit("\(key): \(kind)")
+                }
+                exit(0)
+            }
         default:
             app.startModules()
             app.startInterface()

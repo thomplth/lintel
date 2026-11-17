@@ -70,36 +70,69 @@ enum MenuBarItems {
         }
     }
 
-    static func images(for items: [MenuBarItem]) async -> [String: NSImage] {
-        guard CGPreflightScreenCaptureAccess(), !items.isEmpty,
-              let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+    /// Pictures of the items as the system menu bar draws them, keyed by item. An item with nothing drawn, because it
+    /// was taken out of the menu bar, maps to `nil`; an item missing from the result could not be captured at all.
+    static func pictures(of items: [MenuBarItem]) async -> [String: NSImage?] {
+        await Perf.measure("menubar.capture") { await capture(items) }
+    }
+
+    private static func capture(_ items: [MenuBarItem]) async -> [String: NSImage?] {
+        guard !items.isEmpty else { return [:] }
+        guard CGPreflightScreenCaptureAccess() else {
+            Perf.count("menubar.capture.denied")
+            return [:]
+        }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
               let bar = content.windows.first(where: {
                   $0.owningApplication?.bundleIdentifier == "com.apple.MenuBarAgent" && $0.frame.height < 80
               })
-        else { return [:] }
+        else {
+            Perf.count("menubar.capture.nowindow")
+            return [:]
+        }
         let configuration = SCStreamConfiguration()
         configuration.width = Int(bar.frame.width) * 2
         configuration.height = Int(bar.frame.height) * 2
         configuration.showsCursor = false
         guard let strip = try? await SCScreenshotManager.captureImage(
             contentFilter: SCContentFilter(desktopIndependentWindow: bar), configuration: configuration
-        ) else { return [:] }
+        ) else {
+            Perf.count("menubar.capture.failed")
+            return [:]
+        }
 
         let scale = CGFloat(strip.width) / bar.frame.width
-        var images: [String: NSImage] = [:]
+        var pictures: [String: NSImage?] = [:]
         for item in items {
             let local = item.frame.offsetBy(dx: -bar.frame.minX, dy: -bar.frame.minY)
             let pixels = CGRect(x: local.minX * scale, y: local.minY * scale, width: local.width * scale, height: local.height * scale)
-            guard let crop = strip.cropping(to: pixels) else { continue }
-            guard hasInk(crop) else {
-                images[item.key] = NSImage()
+            guard let crop = strip.cropping(to: pixels), let rgba = rgbaBytes(of: crop) else { continue }
+            let kind = MenuBarPicture.kind(rgba: rgba, width: crop.width, height: crop.height)
+            Perf.count("menubar.capture.\(kind)")
+            guard kind != .empty else {
+                pictures[item.key] = .some(nil)
                 continue
             }
             let image = NSImage(cgImage: crop, size: item.frame.size)
-            image.isTemplate = true
-            images[item.key] = image
+            image.isTemplate = kind == .monochrome
+            pictures[item.key] = image
         }
-        return images
+        return pictures
+    }
+
+    /// A cropped CGImage shares its parent's pixel buffer, in whatever layout ScreenCaptureKit chose, so the crop is
+    /// redrawn into a buffer of known layout before its pixels are read.
+    private static func rgbaBytes(of image: CGImage) -> [UInt8]? {
+        var bytes = [UInt8](repeating: 0, count: image.width * image.height * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: image.width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            return true
+        }
+        return drawn ? bytes : nil
     }
 
     static func setAllowedInSystemMenuBar(bundle: String, allowed: Bool) throws {
@@ -188,14 +221,6 @@ enum MenuBarItems {
         return CGRect(origin: origin, size: size)
     }
 
-    // An item removed from the system menu bar keeps its Accessibility frame but leaves only faint background there.
-    private static func hasInk(_ image: CGImage) -> Bool {
-        guard let data = image.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return false }
-        let alphaOffset = image.alphaInfo == .premultipliedFirst || image.alphaInfo == .first ? 0 : 3
-        let solid = stride(from: alphaOffset, to: CFDataGetLength(data), by: 4 * 7).lazy.filter { bytes[$0] > 150 }
-        return Array(solid.prefix(8)).count == 8
-    }
-
     static func isSystemMenuBarRevealed() -> Bool {
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
         return windows.contains { window in
@@ -227,7 +252,8 @@ final class MenuBarAdoption {
     private let home: AppHome
     private(set) var items: [String: MenuBarItem] = [:]
     private(set) var known: [String: KnownMenuBarItem] = [:]
-    private var images: [String: NSImage] = [:]
+    private var pictures: [String: NSImage] = [:]
+    private var savedPictures: [String: Data] = [:]
     private var timer: Timer?
     private var isScanning = false
     private var isRevealing = false
@@ -235,11 +261,13 @@ final class MenuBarAdoption {
     var wantsListing = false
 
     private var knownFile: URL { home.root.appending(path: "menu-bar-items.json") }
+    private var picturesFolder: URL { home.root.appending(path: "MenuBarPictures") }
 
     init(model: BarModel, home: AppHome) {
         self.model = model
         self.home = home
         known = Dictionary((home.load([KnownMenuBarItem].self, from: knownFile) ?? []).map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        loadPictures()
     }
 
     func start() {
@@ -300,14 +328,7 @@ final class MenuBarAdoption {
                 }
                 self.refreshSlots()
                 completion?()
-                let adopted = found.filter { self.adoptedKeys.contains($0.key) && self.model.layout.symbols[$0.key] == nil }
-                guard self.model.settings.adoptsPictures, !adopted.isEmpty else { return }
-                Task {
-                    for (key, image) in await MenuBarItems.images(for: adopted) where image.size != .zero {
-                        self.images[key] = image
-                    }
-                    self.refreshSlots()
-                }
+                self.capturePictures(of: found)
             }
         }
     }
@@ -322,11 +343,60 @@ final class MenuBarAdoption {
                 slot.chip = ViewNode(.icon, ["name": .string(symbol)])
             } else {
                 slot.chip = ViewNode(.text, ["value": .string(String(item.label.prefix(24)))])
-                slot.image = images[item.key]
+                slot.image = model.settings.adoptsPictures ? pictures[item.key] : nil
             }
             slots.append(slot)
         }
         if slots != model.slots { model.slots = slots }
+    }
+
+    /// Adopted items show their pictures from the system menu bar, which change as the items do: a clock ticks, a
+    /// battery drains. Each scan takes them again. Pictures of other apps' items can be taken only while the menu bar
+    /// shows, so the last one is kept on disk for the times it hides.
+    private func capturePictures(of found: [MenuBarItem]) {
+        let adopted = Set(adoptedKeys)
+        let wanted = found.filter { adopted.contains($0.key) && model.layout.symbols[$0.key] == nil && $0.frame.width > 0 }
+        guard model.settings.adoptsPictures, !wanted.isEmpty else { return }
+        Task {
+            var changed = false
+            for (key, picture) in await MenuBarItems.pictures(of: wanted) {
+                guard let picture, let data = Self.png(of: picture), data != savedPictures[key] else { continue }
+                pictures[key] = picture
+                savedPictures[key] = data
+                try? FileManager.default.createDirectory(at: picturesFolder, withIntermediateDirectories: true)
+                try? data.write(to: pictureFile(key, isTemplate: picture.isTemplate), options: .atomic)
+                try? FileManager.default.removeItem(at: pictureFile(key, isTemplate: !picture.isTemplate))
+                changed = true
+            }
+            if changed { refreshSlots() }
+        }
+    }
+
+    private func pictureFile(_ key: String, isTemplate: Bool) -> URL {
+        let name = key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key
+        return picturesFolder.appending(path: "\(name)\(isTemplate ? ".template" : "").png")
+    }
+
+    private func loadPictures() {
+        let files = (try? FileManager.default.contentsOfDirectory(at: picturesFolder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.pathExtension == "png" {
+            var name = file.deletingPathExtension().lastPathComponent
+            let isTemplate = name.hasSuffix(".template")
+            if isTemplate { name = String(name.dropLast(".template".count)) }
+            guard let key = name.removingPercentEncoding, let data = try? Data(contentsOf: file),
+                  let representation = NSBitmapImageRep(data: data)
+            else { continue }
+            let image = NSImage(size: NSSize(width: representation.pixelsWide / 2, height: representation.pixelsHigh / 2))
+            image.addRepresentation(representation)
+            image.isTemplate = isTemplate
+            pictures[key] = image
+            savedPictures[key] = data
+        }
+    }
+
+    private static func png(of image: NSImage) -> Data? {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
     }
 
     func press(_ key: String) {
