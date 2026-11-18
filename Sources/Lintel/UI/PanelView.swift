@@ -56,6 +56,7 @@ struct PanelView: View {
             manifest: model.manifestFor(panel.slotID)
         )
         let model = model
+        context.panelFocus = model.panelFocus
         context.perform = { action, payload in model.onAction(panel.slotID, action, payload) }
         context.performForResult = { action, payload in await model.onAppAction(panel.slotID, action, payload) }
         return context
@@ -98,7 +99,7 @@ struct PanelView: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .keyboardOperable(context, ring: RoundedRectangle(cornerRadius: 5), activate: action)
+        .keyboardOperable(context, focusKey: "header." + symbol, isContent: false, ring: RoundedRectangle(cornerRadius: 5), activate: action)
         .help(help)
     }
 
@@ -128,12 +129,12 @@ struct PanelView: View {
                     Button("Ask assistant to fix") { model.onPanelCommand("fix") }
                         .buttonStyle(TokenButtonStyle(context: context, style: "primary"))
                         .focusable(false)
-                        .keyboardOperable(context) { model.onPanelCommand("fix") }
+                        .keyboardOperable(context, focusKey: "fix") { model.onPanelCommand("fix") }
                     if slot?.isUserModule == true {
                         Button("Remove") { model.onPanelCommand("remove") }
                             .buttonStyle(TokenButtonStyle(context: context, style: "destructive"))
                             .focusable(false)
-                            .keyboardOperable(context) { model.onPanelCommand("remove") }
+                            .keyboardOperable(context, focusKey: "remove") { model.onPanelCommand("remove") }
                     }
                 }
             }
@@ -180,15 +181,15 @@ private struct ApprovalView: View {
                 Button("Allow") { model.onPanelCommand("approve") }
                     .buttonStyle(TokenButtonStyle(context: context, style: "primary"))
                     .focusable(false)
-                    .keyboardOperable(context) { model.onPanelCommand("approve") }
+                    .keyboardOperable(context, focusKey: "approve") { model.onPanelCommand("approve") }
                 Button("View Code") { model.onPanelCommand("source") }
                     .buttonStyle(TokenButtonStyle(context: context, style: "secondary"))
                     .focusable(false)
-                    .keyboardOperable(context) { model.onPanelCommand("source") }
+                    .keyboardOperable(context, focusKey: "source") { model.onPanelCommand("source") }
                 Button("Remove") { model.onPanelCommand("remove") }
                     .buttonStyle(TokenButtonStyle(context: context, style: "destructive"))
                     .focusable(false)
-                    .keyboardOperable(context) { model.onPanelCommand("remove") }
+                    .keyboardOperable(context, focusKey: "remove") { model.onPanelCommand("remove") }
             }
         }
     }
@@ -306,7 +307,7 @@ struct ChatView: View {
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .keyboardOperable(context) { model.onChatSubmit(suggestion) }
+                .keyboardOperable(context, focusKey: "suggestion." + suggestion) { model.onChatSubmit(suggestion) }
             }
         }
     }
@@ -340,20 +341,20 @@ struct ChatView: View {
                             Button("Review Permissions") { model.onChatCommand("review", message) }
                                 .buttonStyle(TokenButtonStyle(context: context, style: "primary"))
                                 .focusable(false)
-                                .keyboardOperable(context) { model.onChatCommand("review", message) }
+                                .keyboardOperable(context, focusKey: "review") { model.onChatCommand("review", message) }
                                 .fixedSize()
                         } else if message.moduleID != nil {
                             Button("Open") { model.onChatCommand("open", message) }
                                 .buttonStyle(TokenButtonStyle(context: context, style: "secondary"))
                                 .focusable(false)
-                                .keyboardOperable(context) { model.onChatCommand("open", message) }
+                                .keyboardOperable(context, focusKey: "open") { model.onChatCommand("open", message) }
                                 .fixedSize()
                         }
                         if message.canUndoTheme {
                             Button("Undo") { model.onChatCommand("undo", message) }
                                 .buttonStyle(TokenButtonStyle(context: context, style: "secondary"))
                                 .focusable(false)
-                                .keyboardOperable(context) { model.onChatCommand("undo", message) }
+                                .keyboardOperable(context, focusKey: "undo") { model.onChatCommand("undo", message) }
                                 .fixedSize()
                         }
                     }

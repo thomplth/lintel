@@ -175,11 +175,14 @@ final class AppController {
         closePanel(releasing: false)
         bar?.takeKeyboardFocus()
         model.isDrivenByKeyboard = true
-        model.keyboardSelection = BarSelection.step(.first, from: nil, in: model.selectableRows)
-        // The chips report their frames once the opened bar has laid them out.
+        let remembered = model.rememberedSelection
+        let initial = BarSelection.resume(remembered, in: model.selectableRows)
+        model.keyboardSelection = initial
+        // Chips report their frames only once the opened bar has laid them out, so a module shown only while the bar
+        // is open, which the remembered one may be, cannot be found until then.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self, self.model.isDrivenByKeyboard, self.model.keyboardSelection == nil else { return }
-            self.model.keyboardSelection = BarSelection.step(.first, from: nil, in: self.model.selectableRows)
+            guard let self, self.model.isDrivenByKeyboard, self.model.keyboardSelection == initial else { return }
+            self.model.keyboardSelection = BarSelection.resume(remembered, in: self.model.selectableRows)
         }
     }
 
@@ -198,15 +201,18 @@ final class AppController {
         let selected = model.keyboardSelection.flatMap { id in model.slot(id) }
         switch command {
         case .select(let step):
+            if let bump = BarSelection.bump(step, from: model.keyboardSelection, in: rows) {
+                if model.animatesSelection { model.bump(bump) } else { NSSound.beep() }
+            }
             model.keyboardSelection = BarSelection.step(step, from: model.keyboardSelection, in: rows)
         case .open:
             guard let selected, selected.isClickable else { return NSSound.beep() }
-            model.onSlotClick(selected)
+            openFromKeyboard(selected)
         case .openAt(let position):
             let order = rows.joined().map(\.key)
             guard order.indices.contains(position), let slot = model.slot(order[position]) else { return NSSound.beep() }
             model.keyboardSelection = slot.id
-            if slot.isClickable { model.onSlotClick(slot) }
+            if slot.isClickable { openFromKeyboard(slot) }
         case .edit(let name):
             guard let selected, selected.kind != .assistant else { return NSSound.beep() }
             if name == "hide" { model.keyboardSelection = BarSelection.step(.next, from: selected.id, in: rows) }
@@ -221,9 +227,15 @@ final class AppController {
         }
     }
 
+    private func openFromKeyboard(_ slot: Slot) {
+        model.onSlotClick(slot)
+        if model.panel?.slotID == slot.id, model.panel?.content == .module { model.panelFocus.arm(slot.id) }
+    }
+
     // MARK: Panels
 
     private func clicked(_ slot: Slot) {
+        if model.isDrivenByKeyboard, slot.kind != .pinDivider { model.keyboardSelection = slot.id }
         switch slot.kind {
         case .assistant:
             toggleAssistant()
@@ -271,6 +283,7 @@ final class AppController {
 
     func closePanel(releasing: Bool = true) {
         guard model.panel != nil else { return }
+        model.panelFocus.disarm()
         host.closePanel()
         panelWindow?.hide()
         if releasing, !isHeldByDock { bar?.unhold() }

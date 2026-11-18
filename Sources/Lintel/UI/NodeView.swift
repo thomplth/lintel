@@ -269,7 +269,7 @@ struct NodeView: View {
         }
         .buttonStyle(TokenButtonStyle(context: context, style: node.string("style") ?? "secondary"))
         .focusable(false)
-        .keyboardOperable(context, activate: press)
+        .keyboardOperable(context, focusKey: node.focusKey, activate: press)
     }
 
     private func press() {
@@ -474,7 +474,8 @@ private struct ItemRow: View {
             }
             if let accessory = node.string("accessoryAction") {
                 ItemAccessory(
-                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"), context: context
+                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                    focusKey: node.focusKey + "|accessory", context: context
                 ) { context.perform(accessory, node.props["payload"] ?? .null) }
             } else if isClickable {
                 Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
@@ -489,7 +490,7 @@ private struct ItemRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture(perform: press)
-        .modifier(OptionalKeyboardOperable(context: context, activate: isClickable ? press : nil))
+        .modifier(OptionalKeyboardOperable(context: context, focusKey: node.focusKey, activate: isClickable ? press : nil))
     }
 
     private func press() {
@@ -504,16 +505,18 @@ private struct ItemRow: View {
 /// Only rows that do something on a click take a Tab stop.
 private struct OptionalKeyboardOperable: ViewModifier {
     let context: RenderContext
+    let focusKey: String
     let activate: (() -> Void)?
 
     func body(content: Content) -> some View {
-        if let activate { content.keyboardOperable(context, activate: activate) } else { content }
+        if let activate { content.keyboardOperable(context, focusKey: focusKey, activate: activate) } else { content }
     }
 }
 
 private struct ItemAccessory: View {
     let symbol: String
     let label: String?
+    let focusKey: String
     let context: RenderContext
     let action: () -> Void
     @State private var isHovered = false
@@ -528,7 +531,7 @@ private struct ItemAccessory: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .keyboardOperable(context, ring: Circle(), activate: action)
+        .keyboardOperable(context, focusKey: focusKey, ring: Circle(), activate: action)
         .onHover { isHovered = $0 }
         .help(label ?? "")
         .accessibilityLabel(label ?? "")
@@ -561,7 +564,7 @@ private struct ToggleControl: View {
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: flip)
-        .keyboardOperable(context, activate: flip)
+        .keyboardOperable(context, focusKey: node.focusKey, activate: flip)
         .onAppear { isOn = node.bool("on") }
         .onChange(of: node.bool("on")) { isOn = node.bool("on") }
     }
@@ -596,12 +599,12 @@ private struct SegmentedControl: View {
         }
         .padding(2)
         .background(context.fill, in: context.tileShape)
-        .keyboardOperable(context, ring: context.tileShape) { step in
+        .keyboardOperable(context, focusKey: node.focusKey, ring: context.tileShape, adjust: { step in
             guard let action = node.string("action"), !options.isEmpty else { return }
             let index = options.firstIndex(of: selected ?? "").map { $0 + step } ?? 0
             let option = options[min(max(index, 0), options.count - 1)]
             if option != selected { context.perform(action, .string(option)) }
-        }
+        })
     }
 }
 
@@ -651,12 +654,12 @@ private struct SliderControl: View {
                 .frame(height: 18)
             }
         }
-        .keyboardOperable(context, ring: context.tileShape) { direction in
+        .keyboardOperable(context, focusKey: node.focusKey, ring: context.tileShape, adjust: { direction in
             guard let action = node.string("action") else { return }
             let step = node.number("step").flatMap { $0 > 0 ? $0 : nil } ?? (high - low) / 20
             value = min(max(value + step * Double(direction), low), high)
             context.perform(action, .number(value))
-        }
+        })
         .onAppear { value = node.number("value") ?? low }
         .onChange(of: node.number("value")) { if !isEditing { value = node.number("value") ?? low } }
     }

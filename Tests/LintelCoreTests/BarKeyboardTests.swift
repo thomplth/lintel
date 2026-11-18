@@ -54,6 +54,26 @@ import Testing
         #expect(BarSelection.rows(from: frames).map { $0.map(\.key) } == [["weather", "clock"], ["system"], ["assistant"]])
     }
 
+    @Test func reopeningResumesAtTheRememberedModule() {
+        #expect(BarSelection.resume("stocks", in: rows) == "stocks")
+    }
+
+    @Test func aRememberedModuleNoLongerInTheBarResumesAtTheFirst() {
+        #expect(BarSelection.resume("gone", in: rows) == "wifi")
+        #expect(BarSelection.resume(nil, in: rows) == "wifi")
+    }
+
+    @Test func steppingPastTheTopOrBottomRowBumpsThatWay() {
+        #expect(BarSelection.bump(.rowAbove, from: "battery", in: rows) == .up)
+        #expect(BarSelection.bump(.rowBelow, from: "stocks", in: rows) == .down)
+    }
+
+    @Test func stepsThatLandSomewhereDoNotBump() {
+        #expect(BarSelection.bump(.rowBelow, from: "battery", in: rows) == nil)
+        #expect(BarSelection.bump(.next, from: "stocks", in: rows) == nil)
+        #expect(BarSelection.bump(.rowAbove, from: nil, in: rows) == nil)
+    }
+
     @Test func anEmptyBarHasNothingToSelect() {
         #expect(BarSelection.step(.next, from: "wifi", in: []) == nil)
     }

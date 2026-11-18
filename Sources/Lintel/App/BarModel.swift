@@ -58,6 +58,11 @@ struct PanelState: Equatable {
     var isPinnedOpen = false
 }
 
+struct SelectionBump: Equatable {
+    var direction: BarSelection.Bump
+    var count: Int
+}
+
 struct Rearrangement: Equatable {
     enum Phase: Equatable {
         case carrying, landing, vanishing
@@ -127,7 +132,23 @@ final class BarModel: ObservableObject {
     var isDrivenByKeyboard = false {
         didSet { if !isDrivenByKeyboard { keyboardSelection = nil } }
     }
-    @Published var keyboardSelection: String?
+    @Published var keyboardSelection: String? {
+        didSet { if let keyboardSelection { UserDefaults.standard.set(keyboardSelection, forKey: Self.rememberedSelectionKey) } }
+    }
+    /// The module last selected from the keyboard, where the next keyboard session starts, across restarts too.
+    var rememberedSelection: String? { UserDefaults.standard.string(forKey: Self.rememberedSelectionKey) }
+    private static let rememberedSelectionKey = "keyboardSelection"
+    /// Counts each step that tried to leave the top or bottom row, so the selection ring can nudge that way.
+    @Published private(set) var selectionBump = SelectionBump(direction: .down, count: 0)
+    let panelFocus = PanelFocusMemory()
+
+    var animatesSelection: Bool {
+        theme.motion == "full" && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    func bump(_ direction: BarSelection.Bump) {
+        selectionBump = SelectionBump(direction: direction, count: selectionBump.count + 1)
+    }
 
     /// The bar's modules as the keyboard steps through them; pin dividers are only for ⌘-dragging.
     var selectableRows: [[BarSelection.Chip]] {

@@ -56,6 +56,12 @@ struct BarView: View {
                     .transition(Arrival())
             }
         }
+        .overlayPreferenceValue(SelectionMark.Key.self) { mark in
+            SelectionRing(
+                mark: mark, isDimmed: model.isDrivenByKeyboard && model.panel != nil, bump: model.selectionBump,
+                animates: model.animatesSelection
+            )
+        }
         .padding(.horizontal, isInMenuBar ? 4 : Placement.barSidePadding)
         .padding(.top, model.topRowMinHeight > 0 || isInMenuBar ? 0 : 4)
         .padding(.bottom, isInMenuBar ? 0 : 4)
@@ -217,21 +223,18 @@ struct ChipView: View, Equatable {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)
                 }
             }
-            .overlay { selectionRing(context, hasCapsule: hasCapsule) }
+            .anchorPreference(key: SelectionMark.Key.self, value: .bounds) { bounds in
+                isSelected ? SelectionMark(
+                    bounds: bounds, cornerRadius: context.metrics.chipCornerRadius.map { CGFloat($0) }, outset: hasCapsule ? 2 : 6,
+                    color: context.accent
+                ) : nil
+            }
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
             .help(isOpen ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
-    }
-
-    @ViewBuilder private func selectionRing(_ context: RenderContext, hasCapsule: Bool) -> some View {
-        if isSelected {
-            context.chipShape.stroke(context.accent, lineWidth: 2)
-                .padding(.horizontal, hasCapsule ? -2 : -6)
-                .padding(.vertical, -2)
-        }
     }
 
     @ViewBuilder private func content(_ context: RenderContext) -> some View {
@@ -282,6 +285,58 @@ struct ChipView: View, Equatable {
             }
         }
         Button("Lintel Settings…") { model.onSlotSecondaryAction(slot, "settings") }
+    }
+}
+
+/// Where the selected chip lies, so one ring drawn over the whole bar can slide between chips.
+struct SelectionMark: Equatable {
+    var bounds: Anchor<CGRect>
+    /// nil for a capsule.
+    var cornerRadius: CGFloat?
+    /// How far the ring stands outside the chip horizontally; chips without a capsule draw their text edge to edge.
+    var outset: CGFloat
+    var color: Color
+
+    struct Key: PreferenceKey {
+        static let defaultValue: SelectionMark? = nil
+        static func reduce(value: inout SelectionMark?, nextValue: () -> SelectionMark?) {
+            value = value ?? nextValue()
+        }
+    }
+}
+
+/// Dimmed while focus is in the selected module's panel; nudges up or down when a step finds no row there.
+private struct SelectionRing: View {
+    let mark: SelectionMark?
+    let isDimmed: Bool
+    let bump: SelectionBump
+    let animates: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let mark {
+                let rect = proxy[mark.bounds].insetBy(dx: -mark.outset, dy: -2)
+                let shape = mark.cornerRadius.map { AnyShape(RoundedRectangle(cornerRadius: $0 + 2, style: .continuous)) }
+                    ?? AnyShape(Capsule())
+                shape
+                    .fill(mark.color.opacity(isDimmed ? 0 : 0.12))
+                    .stroke(mark.color.opacity(isDimmed ? 0.45 : 1), lineWidth: isDimmed ? 1.5 : 2)
+                    .shadow(color: mark.color.opacity(isDimmed ? 0 : 0.55), radius: 5)
+                    .frame(width: rect.width, height: rect.height)
+                    .keyframeAnimator(initialValue: CGFloat(0), trigger: bump.count) { ring, offset in
+                        ring.offset(y: bump.direction == .up ? -offset : offset)
+                    } keyframes: { _ in
+                        SpringKeyframe(animates ? 4 : 0, duration: 0.09)
+                        SpringKeyframe(0, duration: 0.3, spring: .bouncy)
+                    }
+                    .position(x: rect.midX, y: rect.midY)
+                    .animation(animates ? .spring(duration: 0.28, bounce: 0.16) : nil, value: rect)
+                    .animation(animates ? .easeOut(duration: 0.18) : nil, value: isDimmed)
+                    .transition(animates ? .opacity.combined(with: .scale(scale: 1.15)) : .identity)
+            }
+        }
+        .animation(animates ? .easeOut(duration: 0.18) : nil, value: mark == nil)
+        .allowsHitTesting(false)
     }
 }
 

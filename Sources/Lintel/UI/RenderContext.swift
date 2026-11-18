@@ -34,6 +34,7 @@ struct RenderContext {
     var material: SurfaceMaterial
     var moduleID: String
     var manifest: ModuleManifest?
+    var panelFocus: PanelFocusMemory?
     var perform: (String, JSONValue) -> Void = { _, _ in }
     var performForResult: (String, JSONValue) async -> JSONValue = { _, _ in .null }
 

@@ -32,6 +32,25 @@ public enum BarSelection {
         }
     }
 
+    public enum Bump: Equatable, Sendable {
+        case up, down
+    }
+
+    /// Where a step up or down from the top or bottom row would have gone, since the selection itself stays put.
+    public static func bump(_ step: Step, from current: String?, in rows: [[Chip]]) -> Bump? {
+        let rows = rows.filter { !$0.isEmpty }
+        guard step == .rowAbove || step == .rowBelow, let current,
+              let row = rows.firstIndex(where: { $0.contains { $0.key == current } })
+        else { return nil }
+        if step == .rowAbove { return row == 0 ? .up : nil }
+        return row == rows.count - 1 ? .down : nil
+    }
+
+    public static func resume(_ remembered: String?, in rows: [[Chip]]) -> String? {
+        if let remembered, rows.joined().contains(where: { $0.key == remembered }) { return remembered }
+        return step(.first, from: nil, in: rows)
+    }
+
     public static func step(_ step: Step, from current: String?, in rows: [[Chip]]) -> String? {
         let rows = rows.filter { !$0.isEmpty }
         let order = rows.joined().map(\.key)
