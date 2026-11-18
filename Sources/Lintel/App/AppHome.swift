@@ -30,6 +30,7 @@ struct AppSettings: Codable, Equatable {
     var toggleShortcut = Shortcut(keyCode: 11, modifiers: 0x1900, label: "⌃⌥⌘B")
     var hideShortcut = Shortcut(keyCode: 4, modifiers: 0x1900, label: "⌃⌥⌘H")
     var keyboardShortcut = Shortcut(keyCode: 37, modifiers: 0x1900, label: "⌃⌥⌘L")
+    var barKeys = BarKeymap()
 
     init() {}
 
@@ -61,6 +62,7 @@ struct AppSettings: Codable, Equatable {
         toggleShortcut = value("toggleShortcut", defaults.toggleShortcut)
         hideShortcut = value("hideShortcut", defaults.hideShortcut)
         keyboardShortcut = value("keyboardShortcut", defaults.keyboardShortcut)
+        barKeys = value("barKeys", defaults.barKeys)
     }
 
     var isPrivateEdition: Bool { edition == "private" }

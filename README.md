@@ -38,8 +38,8 @@ Holding ⌘ over the open bar also shows a slim divider in each of its rows (exc
 its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
 is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.
 ⌃⌥⌘L opens the bar for the keyboard, with the module you last selected (or the first) ringed; the ring slides as the
-selection moves, dims while you are in that module's panel, and nudges when ↑ or ↓ finds no row there. Settings ›
-General changes all three shortcuts:
+selection moves, dims while you are in that module's panel, and nudges when ↑ or ↓ finds no row there. These are
+the standard keys; Settings › Keyboard changes any of them except Esc and 1–9, and the three global shortcuts:
 
 | Key | Does |
 |---|---|

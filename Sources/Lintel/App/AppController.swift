@@ -189,7 +189,7 @@ final class AppController {
     private func installBarKeys() {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.bar?.panel.isKeyWindow == true, self.model.isDrivenByKeyboard,
-                  let key = BarKey(event), let command = BarKey.command(for: key, modifiers: BarKey.Modifiers(event.modifierFlags))
+                  let key = BarKey(event), let command = self.model.settings.barKeys.command(for: key, modifiers: BarKey.Modifiers(event.modifierFlags))
             else { return event }
             self.perform(command)
             return nil

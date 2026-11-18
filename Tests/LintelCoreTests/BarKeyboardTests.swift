@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 @testable import LintelCore
 
@@ -80,49 +81,124 @@ import Testing
 }
 
 @Suite struct KeyboardCommands {
+    func command(_ key: BarKey, _ modifiers: BarKey.Modifiers = []) -> BarKey.Command? {
+        BarKeymap.standard.command(for: key, modifiers: modifiers)
+    }
+
     @Test func arrowsMoveTheSelection() {
-        #expect(BarKey.command(for: .left, modifiers: []) == .select(.previous))
-        #expect(BarKey.command(for: .right, modifiers: []) == .select(.next))
-        #expect(BarKey.command(for: .up, modifiers: []) == .select(.rowAbove))
-        #expect(BarKey.command(for: .down, modifiers: []) == .select(.rowBelow))
-        #expect(BarKey.command(for: .tab, modifiers: []) == .select(.next))
-        #expect(BarKey.command(for: .tab, modifiers: [.shift]) == .select(.previous))
-        #expect(BarKey.command(for: .home, modifiers: []) == .select(.first))
-        #expect(BarKey.command(for: .end, modifiers: []) == .select(.last))
+        #expect(command(.left) == .select(.previous))
+        #expect(command(.right) == .select(.next))
+        #expect(command(.up) == .select(.rowAbove))
+        #expect(command(.down) == .select(.rowBelow))
+        #expect(command(.tab) == .select(.next))
+        #expect(command(.tab, [.shift]) == .select(.previous))
+        #expect(command(.home) == .select(.first))
+        #expect(command(.end) == .select(.last))
     }
 
     @Test func commandArrowsMoveTheSelectedModuleAsTheContextMenuDoes() {
-        #expect(BarKey.command(for: .left, modifiers: [.command]) == .edit("left"))
-        #expect(BarKey.command(for: .right, modifiers: [.command]) == .edit("right"))
-        #expect(BarKey.command(for: .up, modifiers: [.command]) == .edit("up"))
-        #expect(BarKey.command(for: .down, modifiers: [.command]) == .edit("down"))
+        #expect(command(.left, [.command]) == .edit("left"))
+        #expect(command(.right, [.command]) == .edit("right"))
+        #expect(command(.up, [.command]) == .edit("up"))
+        #expect(command(.down, [.command]) == .edit("down"))
     }
 
     @Test func returnAndSpaceOpenTheSelectedModule() {
-        #expect(BarKey.command(for: .return, modifiers: []) == .open)
-        #expect(BarKey.command(for: .space, modifiers: []) == .open)
+        #expect(command(.return) == .open)
+        #expect(command(.space) == .open)
     }
 
     @Test func lettersPinHideAndAskTheAssistant() {
-        #expect(BarKey.command(for: .character("p"), modifiers: []) == .edit("pin"))
-        #expect(BarKey.command(for: .delete, modifiers: []) == .edit("hide"))
-        #expect(BarKey.command(for: .character("a"), modifiers: []) == .edit("change"))
-        #expect(BarKey.command(for: .character("/"), modifiers: []) == .assistant)
+        #expect(command(.character("p")) == .edit("pin"))
+        #expect(command(.delete) == .edit("hide"))
+        #expect(command(.character("a")) == .edit("change"))
+        #expect(command(.character("/")) == .assistant)
     }
 
     @Test func commandCommaOpensSettingsAndEscapeClosesTheBar() {
-        #expect(BarKey.command(for: .character(","), modifiers: [.command]) == .settings)
-        #expect(BarKey.command(for: .escape, modifiers: []) == .close)
+        #expect(command(.character(","), [.command]) == .settings)
+        #expect(command(.escape) == .close)
     }
 
     @Test func numbersJumpToTheModuleAtThatPosition() {
-        #expect(BarKey.command(for: .character("1"), modifiers: []) == .openAt(0))
-        #expect(BarKey.command(for: .character("9"), modifiers: []) == .openAt(8))
+        #expect(command(.character("1")) == .openAt(0))
+        #expect(command(.character("9")) == .openAt(8))
     }
 
     @Test func otherKeysAndModifiersAreLeftAlone() {
-        #expect(BarKey.command(for: .character("q"), modifiers: [.command]) == nil)
-        #expect(BarKey.command(for: .character("z"), modifiers: []) == nil)
-        #expect(BarKey.command(for: .left, modifiers: [.option]) == nil)
+        #expect(command(.character("q"), [.command]) == nil)
+        #expect(command(.character("z")) == nil)
+        #expect(command(.left, [.option]) == nil)
+    }
+}
+
+@Suite struct ChosenKeys {
+    let h = BarKeyBinding(.character("h"))
+    let p = BarKeyBinding(.character("p"))
+
+    @Test func aKeyGivenToAnActionTriggersItInPlaceOfItsOldKeys() {
+        var keys = BarKeymap.standard
+        keys.assign(h, to: .hide)
+        #expect(keys.command(for: .character("h"), modifiers: []) == .edit("hide"))
+        #expect(keys.command(for: .delete, modifiers: []) == nil)
+        #expect(keys.bindings(for: .hide) == [h])
+    }
+
+    @Test func givingAKeyUsedByAnotherActionTakesItFromThatAction() {
+        var keys = BarKeymap.standard
+        keys.assign(p, to: .hide)
+        #expect(keys.command(for: .character("p"), modifiers: []) == .edit("hide"))
+        #expect(keys.bindings(for: .pin).isEmpty)
+    }
+
+    @Test func takingOneOfSeveralKeysLeavesTheOthers() {
+        var keys = BarKeymap.standard
+        keys.assign(BarKeyBinding(.space), to: .pin)
+        #expect(keys.bindings(for: .open) == [BarKeyBinding(.return)])
+    }
+
+    @Test func resettingRestoresTheStandardKeys() {
+        var keys = BarKeymap.standard
+        keys.assign(p, to: .hide)
+        keys.reset(.pin)
+        #expect(keys.bindings(for: .pin) == [p])
+        #expect(keys.bindings(for: .hide).isEmpty)
+        #expect(!keys.isStandard)
+        keys.resetAll()
+        #expect(keys == .standard)
+        #expect(keys.isStandard)
+    }
+
+    @Test func escapeAndTheNumberKeysStayReserved() {
+        var keys = BarKeymap.standard
+        #expect(BarKeymap.isReserved(BarKeyBinding(.escape)))
+        #expect(BarKeymap.isReserved(BarKeyBinding(.character("3"))))
+        #expect(!BarKeymap.isReserved(BarKeyBinding(.character("3"), [.command])))
+        keys.assign(BarKeyBinding(.escape), to: .pin)
+        #expect(keys.bindings(for: .pin) == [p])
+        #expect(keys.command(for: .escape, modifiers: []) == .close)
+    }
+
+    @Test func onlyChangedActionsAreStoredAndTheyReadBackTheSame() throws {
+        var keys = BarKeymap.standard
+        keys.assign(BarKeyBinding(.left, [.option, .shift]), to: .moveLeft)
+        let data = try JSONEncoder().encode(keys)
+        let stored = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        #expect(stored?.keys.sorted() == ["moveLeft"])
+        #expect(try JSONDecoder().decode(BarKeymap.self, from: data) == keys)
+    }
+
+    @Test func storedKeysForUnknownActionsAreIgnored() throws {
+        let data = Data(#"{"teleport":[{"key":"t","modifiers":0}],"pin":[{"key":"k","modifiers":0}]}"#.utf8)
+        let keys = try JSONDecoder().decode(BarKeymap.self, from: data)
+        #expect(keys.bindings(for: .pin) == [BarKeyBinding(.character("k"))])
+    }
+
+    @Test func keysReadAsTheyAreTyped() {
+        #expect(BarKeyBinding(.left, [.command]).label == "⌘←")
+        #expect(BarKeyBinding(.tab, [.shift]).label == "⇧Tab")
+        #expect(BarKeyBinding(.character("p"), [.control, .option]).label == "⌃⌥P")
+        #expect(BarKeyBinding(.space).label == "Space")
+        #expect(BarKeyBinding(.delete).label == "Delete")
     }
 }

@@ -71,12 +71,12 @@ public enum BarSelection {
     }
 }
 
-/// What a key pressed while the bar has keyboard focus does.
-public enum BarKey: Equatable, Sendable {
+/// A key pressed while the bar has keyboard focus.
+public enum BarKey: Hashable, Sendable {
     case left, right, up, down, tab, home, end, `return`, space, delete, escape
     case character(Character)
 
-    public struct Modifiers: OptionSet, Sendable {
+    public struct Modifiers: OptionSet, Hashable, Sendable {
         public let rawValue: Int
         public init(rawValue: Int) { self.rawValue = rawValue }
         public static let shift = Modifiers(rawValue: 1)
@@ -96,32 +96,213 @@ public enum BarKey: Equatable, Sendable {
         case close
     }
 
-    public static func command(for key: BarKey, modifiers: Modifiers) -> Command? {
-        switch (key, modifiers) {
-        case (.left, []): .select(.previous)
-        case (.right, []), (.tab, []): .select(.next)
-        case (.tab, [.shift]): .select(.previous)
-        case (.up, []): .select(.rowAbove)
-        case (.down, []): .select(.rowBelow)
-        case (.home, []): .select(.first)
-        case (.end, []): .select(.last)
-        case (.left, [.command]): .edit("left")
-        case (.right, [.command]): .edit("right")
-        case (.up, [.command]): .edit("up")
-        case (.down, [.command]): .edit("down")
-        case (.return, []), (.space, []): .open
-        case (.delete, []): .edit("hide")
-        case (.escape, []): .close
-        case (.character(","), [.command]): .settings
-        case (.character(let letter), []):
-            switch letter {
-            case "p": .edit("pin")
-            case "a": .edit("change")
-            case "/": .assistant
-            case "1"..."9": letter.wholeNumberValue.map { .openAt($0 - 1) }
-            default: nil
-            }
-        default: nil
+    private static let named: [(BarKey, String)] = [
+        (.left, "left"), (.right, "right"), (.up, "up"), (.down, "down"), (.tab, "tab"), (.home, "home"), (.end, "end"),
+        (.return, "return"), (.space, "space"), (.delete, "delete"), (.escape, "escape"),
+    ]
+
+    var storedName: String {
+        if case .character(let character) = self { return String(character) }
+        return Self.named.first { $0.0 == self }?.1 ?? ""
+    }
+
+    init?(storedName: String) {
+        if let named = Self.named.first(where: { $0.1 == storedName }) {
+            self = named.0
+        } else if storedName.count == 1, let character = storedName.first {
+            self = .character(character)
+        } else {
+            return nil
         }
+    }
+
+    var label: String {
+        switch self {
+        case .left: "←"
+        case .right: "→"
+        case .up: "↑"
+        case .down: "↓"
+        case .tab: "Tab"
+        case .home: "Home"
+        case .end: "End"
+        case .return: "Return"
+        case .space: "Space"
+        case .delete: "Delete"
+        case .escape: "Esc"
+        case .character(let character): character.uppercased()
+        }
+    }
+}
+
+public struct BarKeyBinding: Hashable, Sendable, Codable {
+    public var key: BarKey
+    public var modifiers: BarKey.Modifiers
+
+    public init(_ key: BarKey, _ modifiers: BarKey.Modifiers = []) {
+        self.key = key
+        self.modifiers = modifiers
+    }
+
+    public var label: String {
+        let marks: [(BarKey.Modifiers, String)] = [(.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘")]
+        return marks.filter { modifiers.contains($0.0) }.map(\.1).joined() + key.label
+    }
+
+    private enum CodingKeys: String, CodingKey { case key, modifiers }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try container.decode(String.self, forKey: .key)
+        guard let key = BarKey(storedName: name) else {
+            throw DecodingError.dataCorruptedError(forKey: .key, in: container, debugDescription: "Unknown key \(name)")
+        }
+        self.key = key
+        modifiers = BarKey.Modifiers(rawValue: try container.decode(Int.self, forKey: .modifiers))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(key.storedName, forKey: .key)
+        try container.encode(modifiers.rawValue, forKey: .modifiers)
+    }
+}
+
+/// What the bar does that a key can be chosen for. Escape and 1–9 are fixed, so they are not among them.
+public enum BarAction: String, CaseIterable, Sendable {
+    case previous, next, rowAbove, rowBelow, first, last, open
+    case moveLeft, moveRight, moveUp, moveDown, pin, hide, change, assistant, settings
+
+    public var command: BarKey.Command {
+        switch self {
+        case .previous: .select(.previous)
+        case .next: .select(.next)
+        case .rowAbove: .select(.rowAbove)
+        case .rowBelow: .select(.rowBelow)
+        case .first: .select(.first)
+        case .last: .select(.last)
+        case .open: .open
+        case .moveLeft: .edit("left")
+        case .moveRight: .edit("right")
+        case .moveUp: .edit("up")
+        case .moveDown: .edit("down")
+        case .pin: .edit("pin")
+        case .hide: .edit("hide")
+        case .change: .edit("change")
+        case .assistant: .assistant
+        case .settings: .settings
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .previous: "Select the previous module"
+        case .next: "Select the next module"
+        case .rowAbove: "Select in the row above"
+        case .rowBelow: "Select in the row below"
+        case .first: "Select the first module"
+        case .last: "Select the last module"
+        case .open: "Open the selected module"
+        case .moveLeft: "Move it left"
+        case .moveRight: "Move it right"
+        case .moveUp: "Move it up a row"
+        case .moveDown: "Move it down a row"
+        case .pin: "Pin or unpin it"
+        case .hide: "Hide it from the bar"
+        case .change: "Ask the assistant to change it"
+        case .assistant: "Open the assistant"
+        case .settings: "Open Settings"
+        }
+    }
+
+    public var standardBindings: [BarKeyBinding] {
+        switch self {
+        case .previous: [BarKeyBinding(.left), BarKeyBinding(.tab, [.shift])]
+        case .next: [BarKeyBinding(.right), BarKeyBinding(.tab)]
+        case .rowAbove: [BarKeyBinding(.up)]
+        case .rowBelow: [BarKeyBinding(.down)]
+        case .first: [BarKeyBinding(.home)]
+        case .last: [BarKeyBinding(.end)]
+        case .open: [BarKeyBinding(.return), BarKeyBinding(.space)]
+        case .moveLeft: [BarKeyBinding(.left, [.command])]
+        case .moveRight: [BarKeyBinding(.right, [.command])]
+        case .moveUp: [BarKeyBinding(.up, [.command])]
+        case .moveDown: [BarKeyBinding(.down, [.command])]
+        case .pin: [BarKeyBinding(.character("p"))]
+        case .hide: [BarKeyBinding(.delete)]
+        case .change: [BarKeyBinding(.character("a"))]
+        case .assistant: [BarKeyBinding(.character("/"))]
+        case .settings: [BarKeyBinding(.character(","), [.command])]
+        }
+    }
+}
+
+/// Which key does what while the bar has keyboard focus; stored as the actions whose keys differ from the standard ones.
+public struct BarKeymap: Equatable, Sendable, Codable {
+    private var changed: [BarAction: [BarKeyBinding]] = [:]
+
+    public static let standard = BarKeymap()
+
+    public init() {}
+
+    public func bindings(for action: BarAction) -> [BarKeyBinding] {
+        changed[action] ?? action.standardBindings
+    }
+
+    public var isStandard: Bool { changed.isEmpty }
+
+    public func isStandard(_ action: BarAction) -> Bool { changed[action] == nil }
+
+    /// Escape steps back and closes the bar, and the unmodified digits open the module at their position.
+    public static func isReserved(_ binding: BarKeyBinding) -> Bool {
+        if binding.key == .escape { return true }
+        guard binding.modifiers.isEmpty, case .character(let character) = binding.key else { return false }
+        return ("1"..."9").contains(character)
+    }
+
+    /// Replaces the action's keys with `binding`, taking it from any other action that had it.
+    public mutating func assign(_ binding: BarKeyBinding, to action: BarAction) {
+        guard !Self.isReserved(binding) else { return }
+        for other in BarAction.allCases where other != action && bindings(for: other).contains(binding) {
+            set(bindings(for: other).filter { $0 != binding }, for: other)
+        }
+        set([binding], for: action)
+    }
+
+    public mutating func reset(_ action: BarAction) {
+        changed[action] = nil
+        for binding in action.standardBindings {
+            for other in BarAction.allCases where other != action && bindings(for: other).contains(binding) {
+                set(bindings(for: other).filter { $0 != binding }, for: other)
+            }
+        }
+    }
+
+    public mutating func resetAll() {
+        changed = [:]
+    }
+
+    private mutating func set(_ bindings: [BarKeyBinding], for action: BarAction) {
+        changed[action] = bindings == action.standardBindings ? nil : bindings
+    }
+
+    public func command(for key: BarKey, modifiers: BarKey.Modifiers) -> BarKey.Command? {
+        let binding = BarKeyBinding(key, modifiers)
+        if key == .escape, modifiers.isEmpty { return .close }
+        if let action = BarAction.allCases.first(where: { bindings(for: $0).contains(binding) }) { return action.command }
+        if Self.isReserved(binding), case .character(let digit) = key, let position = digit.wholeNumberValue {
+            return .openAt(position - 1)
+        }
+        return nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        let stored = try [String: [BarKeyBinding]](from: decoder)
+        for (name, bindings) in stored {
+            if let action = BarAction(rawValue: name) { changed[action] = bindings }
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        try Dictionary(uniqueKeysWithValues: changed.map { ($0.key.rawValue, $0.value) }).encode(to: encoder)
     }
 }

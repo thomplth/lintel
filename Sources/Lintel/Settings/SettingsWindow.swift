@@ -5,7 +5,7 @@ import ServiceManagement
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case welcome, general, appearance, items, modules, assistant, browser
+    case welcome, general, keyboard, appearance, items, modules, assistant, browser
 
     var id: String { rawValue }
 
@@ -13,6 +13,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .welcome: "Welcome"
         case .general: "General"
+        case .keyboard: "Keyboard"
         case .appearance: "Appearance"
         case .items: "Bar Items"
         case .modules: "Modules"
@@ -25,6 +26,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .welcome: "hand.wave"
         case .general: "gearshape"
+        case .keyboard: "keyboard"
         case .appearance: "paintbrush"
         case .items: "rectangle.3.group"
         case .modules: "puzzlepiece.extension"
@@ -112,6 +114,7 @@ private struct SettingsView: View {
                     switch state.tab {
                     case .welcome: WelcomePane(app: app, model: model, state: state)
                     case .general: GeneralPane(app: app, model: model)
+                    case .keyboard: KeyboardPane(app: app, model: model)
                     case .appearance: AppearancePane(app: app, model: model)
                     case .items: ItemsPane(app: app, model: model, state: state)
                     case .modules: ModulesPane(app: app, model: model, state: state)
@@ -256,10 +259,6 @@ private struct GeneralPane: View {
             Toggle("Keep the hidden menu bar from sliding in above the bar", isOn: settingBinding(app, \.guardsTopEdge))
             LabeledSlider(title: "Rest time before it opens", value: settingBinding(app, \.dwell), range: 0...1.5, unit: "s", digits: 2)
             LabeledSlider(title: "Stays open after the pointer leaves", value: settingBinding(app, \.grace), range: 0.1...3, unit: "s", digits: 1)
-            Divider()
-            ShortcutRow(title: "Open the assistant", shortcut: settingBinding(app, \.toggleShortcut))
-            ShortcutRow(title: "Hide or show the whole bar", shortcut: settingBinding(app, \.hideShortcut))
-            ShortcutRow(title: "Use the bar from the keyboard", shortcut: settingBinding(app, \.keyboardShortcut))
             Toggle("Show the assistant button in the bar", isOn: settingBinding(app, \.showsAssistant))
         }
         Card(title: "System", footer: "Click the Dock icon to open the whole bar, and again to open Settings. Private features use undocumented parts of macOS: hiding other apps' items from the system menu bar directly, and letting modules run command-line tools you approve.") {
@@ -301,6 +300,100 @@ private struct LabeledSlider: View {
     }
 }
 
+private struct KeyboardPane: View {
+    let app: AppController
+    @ObservedObject var model: BarModel
+
+    var body: some View {
+        Card(title: "Anywhere", footer: "These work in any app and need a modifier key.") {
+            ShortcutRow(title: "Use the bar from the keyboard", shortcut: settingBinding(app, \.keyboardShortcut))
+            ShortcutRow(title: "Open the assistant", shortcut: settingBinding(app, \.toggleShortcut))
+            ShortcutRow(title: "Hide or show the whole bar", shortcut: settingBinding(app, \.hideShortcut))
+        }
+        Card(
+            title: "In the bar",
+            footer: "While \(model.settings.keyboardShortcut.label) has the bar open. Click a key to change it; a key already used by another action moves here. Esc and 1–9 cannot be changed."
+        ) {
+            ForEach(BarAction.allCases, id: \.self) { action in
+                BarKeyRow(action: action, keys: settingBinding(app, \.barKeys))
+            }
+            Divider()
+            FixedKeyRow(title: "Open the module at that position", label: "1–9")
+            FixedKeyRow(title: "Go back from a panel, then close the bar", label: "Esc")
+            HStack {
+                Spacer()
+                Button("Restore Standard Keys") { settingBinding(app, \.barKeys).wrappedValue.resetAll() }
+                    .disabled(model.settings.barKeys.isStandard)
+            }
+        }
+    }
+}
+
+private struct BarKeyRow: View {
+    let action: BarAction
+    @Binding var keys: BarKeymap
+    @State private var isRecording = false
+    @State private var monitor: Any?
+
+    var body: some View {
+        let bindings = keys.bindings(for: action)
+        HStack {
+            Text(action.title)
+            Spacer()
+            if !keys.isStandard(action) {
+                Button { keys.reset(action) } label: { Image(systemName: "arrow.counterclockwise") }
+                    .buttonStyle(.borderless)
+                    .help("Use \(action.standardBindings.map(\.label).joined(separator: " or ")) again")
+            }
+            Button(isRecording ? "Press a key…" : bindings.isEmpty ? "None" : bindings.map(\.label).joined(separator: " or ")) {
+                isRecording ? stop() : record()
+            }
+            .frame(minWidth: 130)
+        }
+        .onDisappear(perform: stop)
+        // Closing Settings does not make its views disappear, so the recorder would otherwise take the next key
+        // pressed in the bar.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in stop() }
+    }
+
+    private func record() {
+        isRecording = true
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard let key = BarKey(event), key != .escape else {
+                stop()
+                return nil
+            }
+            let binding = BarKeyBinding(key, BarKey.Modifiers(event.modifierFlags))
+            if BarKeymap.isReserved(binding) {
+                NSSound.beep()
+                return nil
+            }
+            keys.assign(binding, to: action)
+            stop()
+            return nil
+        }
+    }
+
+    private func stop() {
+        isRecording = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
+
+private struct FixedKeyRow: View {
+    let title: String
+    let label: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(label).foregroundStyle(.secondary).frame(minWidth: 130)
+        }
+    }
+}
+
 private struct ShortcutRow: View {
     let title: String
     @Binding var shortcut: Shortcut
@@ -315,6 +408,7 @@ private struct ShortcutRow: View {
                 .frame(minWidth: 110)
         }
         .onDisappear(perform: stop)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in stop() }
     }
 
     private func record() {
