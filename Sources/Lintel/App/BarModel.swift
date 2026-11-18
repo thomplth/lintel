@@ -123,6 +123,20 @@ final class BarModel: ObservableObject {
     let carried = CarriedPointer()
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
     @Published var showsPinDividers = false
+    /// The bar was opened with the keyboard shortcut, so its keys move `keyboardSelection` and act on that module.
+    var isDrivenByKeyboard = false {
+        didSet { if !isDrivenByKeyboard { keyboardSelection = nil } }
+    }
+    @Published var keyboardSelection: String?
+
+    /// The bar's modules as the keyboard steps through them; pin dividers are only for ⌘-dragging.
+    var selectableRows: [[BarSelection.Chip]] {
+        let frames = slotFrames
+        return BarSelection.rows(from: visibleRows.joined().compactMap { slot in
+            guard slot.kind != .pinDivider, let frame = frames[slot.id] else { return nil }
+            return (slot.id, frame)
+        })
+    }
 
     private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
     /// Where the menu bar row's top-left corner lies in the bar window's top-left coordinates.

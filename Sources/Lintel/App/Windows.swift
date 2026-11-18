@@ -98,6 +98,7 @@ final class BarWindowController {
     var onAnchorChanged: (BarAnchor) -> Void = { _ in }
     var onHideToggled: () -> Void = {}
     var onAssistantHotkey: () -> Void = {}
+    var onKeyboardHotkey: () -> Void = {}
     var onSystemMenuBarRevealed: () -> Void = {}
 
     init(model: BarModel) {
@@ -160,6 +161,9 @@ final class BarWindowController {
         if let hide = Hotkey(shortcut: model.settings.hideShortcut, action: { [weak self] in
             MainActor.assumeIsolated { self?.onHideToggled() }
         }) { hotkeys.append(hide) }
+        if let keyboard = Hotkey(shortcut: model.settings.keyboardShortcut, action: { [weak self] in
+            MainActor.assumeIsolated { self?.onKeyboardHotkey() }
+        }) { hotkeys.append(keyboard) }
         place()
     }
 
@@ -174,6 +178,12 @@ final class BarWindowController {
         activation.release()
         applyActivation()
         if panel.isKeyWindow { panel.resignKey() }
+    }
+
+    /// Taking key status must happen inside the hotkey's own event, as for the assistant panel.
+    func takeKeyboardFocus() {
+        hold()
+        panel.makeKeyAndOrderFront(nil)
     }
 
     func unhold() {
@@ -246,6 +256,7 @@ final class BarWindowController {
     private func applyActivation() {
         guard model.isActive != activation.isActive else { return }
         model.isActive = activation.isActive
+        if !activation.isActive { model.isDrivenByKeyboard = false }
         updateMouseCapture()
         if !activation.isActive, panel.isKeyWindow { panel.resignKey() }
         onActiveChanged(activation.isActive)

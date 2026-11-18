@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import LintelCore
 import SwiftUI
@@ -76,6 +77,7 @@ final class AppController {
             return self.panelWindow?.visibleFrame
         }
         bar.onAssistantHotkey = { [weak self] in self?.toggleAssistant() }
+        bar.onKeyboardHotkey = { [weak self] in self?.toggleKeyboardControl() }
         bar.onHideToggled = { [weak self] in
             guard let self else { return }
             self.closePanel()
@@ -100,6 +102,7 @@ final class AppController {
         pointerTap.start()
         panelWindow.onClickOutside = { [weak self] in self?.closePanel() }
         installEscapeHandling()
+        installBarKeys()
         adoption.start()
         control = ControlChannel(app: self)
         perf.start()
@@ -156,6 +159,65 @@ final class AppController {
             model.slots.append(slot)
         } else if !model.settings.showsAssistant, exists {
             model.slots.removeAll { $0.kind == .assistant }
+        }
+    }
+
+    // MARK: Keyboard
+
+    func toggleKeyboardControl() {
+        if model.isDrivenByKeyboard, model.panel == nil {
+            model.isDrivenByKeyboard = false
+            isHeldByDock = false
+            bar?.release()
+            return
+        }
+        if model.isHiddenByUser { bar?.setHidden(false) }
+        closePanel(releasing: false)
+        bar?.takeKeyboardFocus()
+        model.isDrivenByKeyboard = true
+        model.keyboardSelection = BarSelection.step(.first, from: nil, in: model.selectableRows)
+        // The chips report their frames once the opened bar has laid them out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self, self.model.isDrivenByKeyboard, self.model.keyboardSelection == nil else { return }
+            self.model.keyboardSelection = BarSelection.step(.first, from: nil, in: self.model.selectableRows)
+        }
+    }
+
+    private func installBarKeys() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.bar?.panel.isKeyWindow == true, self.model.isDrivenByKeyboard,
+                  let key = BarKey(event), let command = BarKey.command(for: key, modifiers: BarKey.Modifiers(event.modifierFlags))
+            else { return event }
+            self.perform(command)
+            return nil
+        }
+    }
+
+    private func perform(_ command: BarKey.Command) {
+        let rows = model.selectableRows
+        let selected = model.keyboardSelection.flatMap { id in model.slot(id) }
+        switch command {
+        case .select(let step):
+            model.keyboardSelection = BarSelection.step(step, from: model.keyboardSelection, in: rows)
+        case .open:
+            guard let selected, selected.isClickable else { return NSSound.beep() }
+            model.onSlotClick(selected)
+        case .openAt(let position):
+            let order = rows.joined().map(\.key)
+            guard order.indices.contains(position), let slot = model.slot(order[position]) else { return NSSound.beep() }
+            model.keyboardSelection = slot.id
+            if slot.isClickable { model.onSlotClick(slot) }
+        case .edit(let name):
+            guard let selected, selected.kind != .assistant else { return NSSound.beep() }
+            if name == "hide" { model.keyboardSelection = BarSelection.step(.next, from: selected.id, in: rows) }
+            edit(selected, name)
+        case .assistant:
+            openAssistant()
+        case .settings:
+            closePanel()
+            showSettings(tab: .general)
+        case .close:
+            dismiss()
         }
     }
 
@@ -226,7 +288,10 @@ final class AppController {
     }
 
     private func dismiss() {
-        if model.panel != nil { closePanel() } else {
+        if model.panel != nil, model.isDrivenByKeyboard {
+            closePanel(releasing: false)
+            bar?.takeKeyboardFocus()
+        } else if model.panel != nil { closePanel() } else {
             isHeldByDock = false
             bar?.release()
         }
@@ -305,5 +370,36 @@ final class AppController {
         if let panelWindow, panelWindow.isVisible { result.append(("panel", panelWindow.panel)) }
         if let window = settingsWindow?.window, window.isVisible { result.append(("settings", window)) }
         return result
+    }
+}
+
+extension BarKey {
+    init?(_ event: NSEvent) {
+        switch Int(event.keyCode) {
+        case kVK_LeftArrow: self = .left
+        case kVK_RightArrow: self = .right
+        case kVK_UpArrow: self = .up
+        case kVK_DownArrow: self = .down
+        case kVK_Tab: self = .tab
+        case kVK_Home: self = .home
+        case kVK_End: self = .end
+        case kVK_Return, kVK_ANSI_KeypadEnter: self = .return
+        case kVK_Space: self = .space
+        case kVK_Delete, kVK_ForwardDelete: self = .delete
+        case kVK_Escape: self = .escape
+        default:
+            guard let character = event.charactersIgnoringModifiers?.lowercased().first else { return nil }
+            self = .character(character)
+        }
+    }
+}
+
+extension BarKey.Modifiers {
+    init(_ flags: NSEvent.ModifierFlags) {
+        self = []
+        if flags.contains(.shift) { insert(.shift) }
+        if flags.contains(.command) { insert(.command) }
+        if flags.contains(.option) { insert(.option) }
+        if flags.contains(.control) { insert(.control) }
     }
 }

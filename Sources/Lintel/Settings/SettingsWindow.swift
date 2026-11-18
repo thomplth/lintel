@@ -192,7 +192,7 @@ private struct WelcomePane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Lintel is the floating bar at the top of your screen.").font(.title2).fontWeight(.semibold)
-            Text("Rest the pointer on it, or press \(model.settings.toggleShortcut.label), to open it. Click any item for its panel. Ask the assistant (the sparkle) to restyle the bar or build something new for it.")
+            Text("Rest the pointer on it, or press \(model.settings.toggleShortcut.label), to open it. Click any item for its panel, or press \(model.settings.keyboardShortcut.label) and use the arrow keys and Return. Ask the assistant (the sparkle) to restyle the bar or build something new for it.")
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         Card(title: "Permissions", footer: "Both are optional. Without them the bar still shows its own modules; it just cannot adopt other apps' menu bar items.") {
@@ -259,6 +259,7 @@ private struct GeneralPane: View {
             Divider()
             ShortcutRow(title: "Open the assistant", shortcut: settingBinding(app, \.toggleShortcut))
             ShortcutRow(title: "Hide or show the whole bar", shortcut: settingBinding(app, \.hideShortcut))
+            ShortcutRow(title: "Use the bar from the keyboard", shortcut: settingBinding(app, \.keyboardShortcut))
             Toggle("Show the assistant button in the bar", isOn: settingBinding(app, \.showsAssistant))
         }
         Card(title: "System", footer: "Click the Dock icon to open the whole bar, and again to open Settings. Private features use undocumented parts of macOS: hiding other apps' items from the system menu bar directly, and letting modules run command-line tools you approve.") {

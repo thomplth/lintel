@@ -69,7 +69,7 @@ mid-gesture screenshots go to the macOS Tart guest shared with the Debut project
 Scripts/vm.sh session            # run in the background; waits its turn in Debut's Tart queue, prints "VM ready"
 Scripts/vm.sh install            # bundle this checkout, install it with a fresh layout, launch, hold the bar open
 Scripts/vm.sh lintel '{"cmd":"state"}'                         # rows, chip frames (screen points) and drag state
-Scripts/vm.sh input drag 752 720 740 480 --hold 0.5 --command  # ⌘-drag; also `input click X Y`
+Scripts/vm.sh input drag 752 720 740 480 --hold 0.5 --command  # ⌘-drag; also `input click X Y`, `input key l --control --option --command`
 Scripts/vm.sh shot after-drag    # screenshot with the pointer; prints the PNG's host path
 Scripts/vm.sh stop               # always: an idle guest burns host CPU and blocks Debut's runs
 ```

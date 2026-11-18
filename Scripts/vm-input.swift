@@ -4,7 +4,8 @@ import AppKit
 //   vm-input click X Y
 //   vm-input drag FROM_X FROM_Y TO_X TO_Y [--hold SECONDS] [--command [--lead SECONDS]] [--back]
 //   vm-input type TEXT          types into whatever has keyboard focus
-//   vm-input key NAME           presses return, escape, up, down, left, right, tab or delete
+//   vm-input key NAME [--command] [--control] [--option] [--shift]
+//                               presses return, escape, up, down, left, right, tab, delete, space, a letter or digit
 // --lead holds ⌘ that long before the press, for what appears only while ⌘ is down.
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -37,9 +38,10 @@ func postCommandKey(down: Bool) {
     usleep(100_000)
 }
 
-func press(_ virtualKey: CGKeyCode, text: String? = nil) {
+func press(_ virtualKey: CGKeyCode, text: String? = nil, modifiers: CGEventFlags = []) {
     for isDown in [true, false] {
         let event = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: isDown)
+        event?.flags = modifiers
         if let text { event?.keyboardSetUnicodeString(stringLength: text.utf16.count, unicodeString: Array(text.utf16)) }
         event?.post(tap: .cghidEventTap)
         usleep(30_000)
@@ -48,7 +50,14 @@ func press(_ virtualKey: CGKeyCode, text: String? = nil) {
 
 let namedKeys: [String: CGKeyCode] = [
     "return": 0x24, "escape": 0x35, "up": 0x7E, "down": 0x7D, "left": 0x7B, "right": 0x7C, "tab": 0x30, "delete": 0x33,
+    "space": 0x31, "comma": 0x2B, "slash": 0x2C,
+    "a": 0x00, "b": 0x0B, "h": 0x04, "l": 0x25, "p": 0x23,
+    "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "5": 0x17, "6": 0x16, "7": 0x1A, "8": 0x1C, "9": 0x19,
 ]
+
+let keyModifiers: CGEventFlags = [
+    ("--command", CGEventFlags.maskCommand), ("--control", .maskControl), ("--option", .maskAlternate), ("--shift", .maskShift),
+].reduce([]) { flags, entry in arguments.contains(entry.0) ? flags.union(entry.1) : flags }
 
 func glide(from start: CGPoint, to end: CGPoint) {
     for step in 1...25 {
@@ -81,8 +90,8 @@ case "drag" where numbers.count >= 4:
 case "type" where arguments.count >= 2:
     for character in arguments.dropFirst().joined(separator: " ") { press(0, text: String(character)) }
 case "key" where namedKeys[arguments[safe: 1] ?? ""] != nil:
-    press(namedKeys[arguments[1]]!)
+    press(namedKeys[arguments[1]]!, modifiers: keyModifiers)
 default:
-    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command [--lead S]] [--back] | type TEXT | key NAME\n".utf8))
+    FileHandle.standardError.write(Data("usage: vm-input click X Y | drag FX FY TX TY [--hold S] [--command [--lead S]] [--back] | type TEXT | key NAME [--command] [--control] [--option] [--shift]\n".utf8))
     exit(2)
 }

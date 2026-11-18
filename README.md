@@ -37,6 +37,21 @@ well away from the bar until the pointer shows ✕ and let go to remove it; Sett
 Holding ⌘ over the open bar also shows a slim divider in each of its rows (except one in the menu bar, which shows all
 its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
 is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.
+⌃⌥⌘L opens the bar for the keyboard, with its first module selected (Settings › General changes all three shortcuts):
+
+| Key | Does |
+|---|---|
+| ← → ↑ ↓, Tab, ⇧Tab, Home, End | Select a module; ↑ and ↓ go to the nearest module in the row above or below |
+| Return or Space | Open the selected module, as a click would |
+| 1–9 | Open the module at that position |
+| ⌘← ⌘→ ⌘↑ ⌘↓ | Move the selected module along its row or to the row above or below |
+| P | Pin it, so it shows while the bar is closed, or unpin it |
+| Delete | Hide it from the bar (Settings › Bar Items brings it back) |
+| A | Ask the assistant to change it; / opens the assistant |
+| ⌘, | Open Settings |
+| Esc | Close the bar; in a panel opened from the keyboard, go back to the bar |
+
+In a panel, Tab moves through its controls, Space or Return uses one, and ← → step a slider or segmented choice.
 User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to use another folder.
 
 ## Layout of the code

@@ -260,13 +260,7 @@ struct NodeView: View {
     }
 
     private var buttonView: some View {
-        Button {
-            if let action = node.string("action") {
-                context.perform(action, node.props["payload"] ?? .null)
-            } else if let address = node.string("url"), let url = URL(string: address), url.scheme == "https" {
-                NSWorkspace.shared.open(url)
-            }
-        } label: {
+        Button(action: press) {
             HStack(spacing: context.metrics.unit * 1.5) {
                 if let name = node.string("icon") { Image(systemName: RenderContext.symbol(name)) }
                 Text(node.string("label") ?? "").lineLimit(1)
@@ -274,6 +268,16 @@ struct NodeView: View {
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(TokenButtonStyle(context: context, style: node.string("style") ?? "secondary"))
+        .focusable(false)
+        .keyboardOperable(context, activate: press)
+    }
+
+    private func press() {
+        if let action = node.string("action") {
+            context.perform(action, node.props["payload"] ?? .null)
+        } else if let address = node.string("url"), let url = URL(string: address), url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private var noteView: some View {
@@ -484,13 +488,26 @@ private struct ItemRow: View {
         .background(isHovered && isClickable ? context.fill : .clear)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture {
-            if let action = node.string("action") {
-                context.perform(action, node.props["payload"] ?? .null)
-            } else if let address = node.string("url"), let url = URL(string: address), url.scheme == "https" {
-                NSWorkspace.shared.open(url)
-            }
+        .onTapGesture(perform: press)
+        .modifier(OptionalKeyboardOperable(context: context, activate: isClickable ? press : nil))
+    }
+
+    private func press() {
+        if let action = node.string("action") {
+            context.perform(action, node.props["payload"] ?? .null)
+        } else if let address = node.string("url"), let url = URL(string: address), url.scheme == "https" {
+            NSWorkspace.shared.open(url)
         }
+    }
+}
+
+/// Only rows that do something on a click take a Tab stop.
+private struct OptionalKeyboardOperable: ViewModifier {
+    let context: RenderContext
+    let activate: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let activate { content.keyboardOperable(context, activate: activate) } else { content }
     }
 }
 
@@ -510,6 +527,8 @@ private struct ItemAccessory: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
+        .keyboardOperable(context, ring: Circle(), activate: action)
         .onHover { isHovered = $0 }
         .help(label ?? "")
         .accessibilityLabel(label ?? "")
@@ -541,12 +560,15 @@ private struct ToggleControl: View {
                 .accessibilityValue(isOn ? "on" : "off")
         }
         .contentShape(Rectangle())
-        .onTapGesture {
-            isOn.toggle()
-            if let action = node.string("action") { context.perform(action, .bool(isOn)) }
-        }
+        .onTapGesture(perform: flip)
+        .keyboardOperable(context, activate: flip)
         .onAppear { isOn = node.bool("on") }
         .onChange(of: node.bool("on")) { isOn = node.bool("on") }
+    }
+
+    private func flip() {
+        isOn.toggle()
+        if let action = node.string("action") { context.perform(action, .bool(isOn)) }
     }
 }
 
@@ -574,6 +596,12 @@ private struct SegmentedControl: View {
         }
         .padding(2)
         .background(context.fill, in: context.tileShape)
+        .keyboardOperable(context, ring: context.tileShape) { step in
+            guard let action = node.string("action"), !options.isEmpty else { return }
+            let index = options.firstIndex(of: selected ?? "").map { $0 + step } ?? 0
+            let option = options[min(max(index, 0), options.count - 1)]
+            if option != selected { context.perform(action, .string(option)) }
+        }
     }
 }
 
@@ -622,6 +650,12 @@ private struct SliderControl: View {
                 }
                 .frame(height: 18)
             }
+        }
+        .keyboardOperable(context, ring: context.tileShape) { direction in
+            guard let action = node.string("action") else { return }
+            let step = node.number("step").flatMap { $0 > 0 ? $0 : nil } ?? (high - low) / 20
+            value = min(max(value + step * Double(direction), low), high)
+            context.perform(action, .number(value))
         }
         .onAppear { value = node.number("value") ?? low }
         .onChange(of: node.number("value")) { if !isEditing { value = node.number("value") ?? low } }

@@ -137,6 +137,7 @@ struct ChipView: View, Equatable {
     let isPinned: Bool
     let pinsOnTheLeft: Bool
     let isCarried: Bool
+    let isSelected: Bool
     @Environment(\.isInMenuBar) private var isInMenuBar
     @State private var isHovered = false
 
@@ -151,6 +152,7 @@ struct ChipView: View, Equatable {
         isLeftForTheCarrier = !isCarried && model.rearrangement?.key == slot.id
         isPinned = model.layout.isPinned(slot.id, default: slot.isPinned)
         pinsOnTheLeft = model.alignment == .leading
+        isSelected = !isCarried && model.keyboardSelection == slot.id
     }
 
     nonisolated static func == (lhs: ChipView, rhs: ChipView) -> Bool {
@@ -159,6 +161,7 @@ struct ChipView: View, Equatable {
                 && lhs.isActive == rhs.isActive && lhs.isPanelOpen == rhs.isPanelOpen
                 && lhs.isLeftForTheCarrier == rhs.isLeftForTheCarrier && lhs.isPinned == rhs.isPinned
                 && lhs.pinsOnTheLeft == rhs.pinsOnTheLeft && lhs.isCarried == rhs.isCarried
+                && lhs.isSelected == rhs.isSelected
         }
     }
 
@@ -214,12 +217,21 @@ struct ChipView: View, Equatable {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)
                 }
             }
+            .overlay { selectionRing(context, hasCapsule: hasCapsule) }
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
             .help(isOpen ? slot.failure ?? slot.title : "")
             .accessibilityLabel(slot.title)
+    }
+
+    @ViewBuilder private func selectionRing(_ context: RenderContext, hasCapsule: Bool) -> some View {
+        if isSelected {
+            context.chipShape.stroke(context.accent, lineWidth: 2)
+                .padding(.horizontal, hasCapsule ? -2 : -6)
+                .padding(.vertical, -2)
+        }
     }
 
     @ViewBuilder private func content(_ context: RenderContext) -> some View {
