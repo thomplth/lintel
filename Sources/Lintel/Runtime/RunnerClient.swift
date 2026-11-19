@@ -60,8 +60,7 @@ final class RunnerClient {
         process.standardInput = stdin
         process.standardOutput = stdout
         process.standardError = FileHandle.standardError
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
+        stdout.fileHandleForReading.readChunksUntilEnd { [weak self] chunk in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.receive(chunk, from: process) }
             }
