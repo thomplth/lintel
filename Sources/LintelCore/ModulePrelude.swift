@@ -1,7 +1,7 @@
 public enum ModulePrelude {
     /// Evaluated in every module's context before the module file. `__call` and `__post` are installed natively.
     public static let source = #"""
-    var __module = null, __data = {}, __storage = {}, __history = {};
+    var __module = null, __data = {}, __storage = {}, __history = {}, __jobs = { own: [], all: [] };
     function defineModule(module) { __module = module; }
 
     function __node(type, props, children) {
@@ -101,6 +101,15 @@ public enum ModulePrelude {
       return (index === 0 || value >= 100 ? String(Math.round(value)) : value.toFixed(1)) + ' ' + units[index];
     }
 
+    var __jobsAPI = function () { return (__jobs.own || []).slice(); };
+    __jobsAPI.run = function (name) { return __async('jobs.run', [String(name)]); };
+    __jobsAPI.setNext = function (name, when) {
+      var ts = when === null || when === undefined ? null : (typeof when === 'number' ? when : new Date(when).getTime());
+      __post('jobs.setNext', JSON.stringify([String(name), ts]));
+    };
+    __jobsAPI.setEnabled = function (name, enabled) { __post('jobs.setEnabled', JSON.stringify([String(name), !!enabled])); };
+    __jobsAPI.clearError = function (name) { __post('jobs.clearError', JSON.stringify([String(name)])); };
+
     var host = {
       system: function () { return __data.system || { cpu: 0, cores: [], loadAverage: [0, 0, 0], memoryUsed: 0, memoryTotal: 0, memoryPressure: 0, swapUsed: 0, gpu: null, uptime: 0, thermal: 'nominal', battery: null }; },
       network: function () { return __data.network || { down: 0, up: 0, interface: null, ip: null, wifi: null }; },
@@ -109,6 +118,8 @@ public enum ModulePrelude {
       audio: function () { return __data.audio || { volume: 0, muted: false, output: null }; },
       bluetooth: function () { return __data.bluetooth || { on: false, devices: [] }; },
       appearance: function () { return __data.appearance || { dark: true }; },
+      jobs: __jobsAPI,
+      allJobs: function () { return (__jobs.all || []).slice(); },
       setVolume: function (fraction) { return __async('audio.setVolume', [Number(fraction)]); },
       setMuted: function (muted) { return __async('audio.setMuted', [!!muted]); },
       storage: {
@@ -207,11 +218,25 @@ public enum ModulePrelude {
     }
     function __describe() {
       if (!__module || typeof __module !== 'object') return null;
+      var rawJobs = __module.jobs && typeof __module.jobs === 'object' ? __module.jobs : {};
+      var jobs = Object.keys(rawJobs).map(function (id) {
+        var spec = rawJobs[id] || {};
+        return {
+          id: id,
+          title: spec.title || id,
+          schedule: spec.schedule || (spec.intervalSeconds ? { every: spec.intervalSeconds } : (spec.cron ? { cron: spec.cron } : {})),
+          timeoutSeconds: spec.timeoutSeconds,
+          runOnWake: spec.runOnWake,
+          retrySeconds: spec.retrySeconds,
+          hasRun: typeof spec.run === 'function'
+        };
+      });
       return JSON.stringify({
         meta: __module.meta || null,
         hasRender: typeof (__module.render || __module.chip) === 'function',
         hasPanel: typeof __module.panel === 'function',
-        actions: Object.keys(__module.actions || {})
+        actions: Object.keys(__module.actions || {}),
+        jobs: jobs
       });
     }
     function __render(surface, done) {
@@ -231,7 +256,17 @@ public enum ModulePrelude {
         function (result) { done(JSON.stringify(result === undefined ? null : result), null); },
         function (error) { done(null, __message(error)); });
     }
+    function __runJob(name, done) {
+      var job = (__module.jobs || {})[name];
+      if (!job || typeof job.run !== 'function') { done(null, 'the module has no job named ' + name); return; }
+      var pending;
+      try { pending = Promise.resolve(job.run.call(job, host)); } catch (error) { pending = Promise.reject(error); }
+      pending.then(
+        function (result) { done(JSON.stringify(result === undefined ? null : result), null); },
+        function (error) { done(null, __message(error)); });
+    }
     function __setData(json) { __data = JSON.parse(json); }
     function __setStorage(json) { __storage = JSON.parse(json); }
+    function __setJobs(json) { __jobs = JSON.parse(json) || { own: [], all: [] }; }
     """#
 }

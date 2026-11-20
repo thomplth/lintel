@@ -34,6 +34,9 @@ final class ChatController {
             app.model.isChatBusy = false
             app.model.chatActivity = ""
             save()
+            if let id = reply.moduleID, app.studioWindow?.isVisible == true {
+                app.studioWindow?.show(module: id)
+            }
         }
     }
 
@@ -50,7 +53,7 @@ final class ChatController {
             }
             save()
         case "review", "open":
-            if let id = message?.moduleID { app.openModulePanel(id) }
+            if let id = message?.moduleID { app.showStudio(module: id) }
         default:
             break
         }
@@ -239,9 +242,34 @@ final class ChatController {
 
     private func referencedSources(in message: String) -> String {
         let lowered = message.lowercased()
-        let mentioned = app.model.slots.filter { $0.kind == .module && (lowered.contains($0.id) || lowered.contains($0.title.lowercased())) }
-        return mentioned.prefix(2).compactMap { slot in
-            app.host.source(of: slot.id).map { "### Current source of \(slot.id).js\n```js\n\($0)\n```" }
+        var orderedIDs: [String] = []
+        if let focused = app.model.studioFocusedModuleID {
+            orderedIDs.append(focused)
+        }
+        for slot in app.model.slots where slot.kind == .module {
+            if (lowered.contains(slot.id) || lowered.contains(slot.title.lowercased())), !orderedIDs.contains(slot.id) {
+                orderedIDs.append(slot.id)
+            }
+        }
+        return orderedIDs.prefix(2).compactMap { id in
+            guard let source = app.host.source(of: id) else { return nil }
+            var blocks = ["### Current source of \(id).js\n```js\n\(source)\n```"]
+            if let failure = app.model.slot(id)?.failure {
+                blocks.append("Current runtime error: \(failure)")
+            }
+            let modJobs = app.host.jobs.snapshots(for: id)
+            if !modJobs.isEmpty {
+                let jobLines = modJobs.map { snap in
+                    let err = snap.record.lastError.map { " — error: \($0)" } ?? ""
+                    return "- \(snap.spec.id) (\(snap.spec.trigger.summary)): \(snap.effectiveStatus.rawValue)\(err)"
+                }
+                blocks.append("Scheduled jobs:\n" + jobLines.joined(separator: "\n"))
+            }
+            let logs = app.host.logs(of: id).suffix(12)
+            if !logs.isEmpty {
+                blocks.append("Recent logs:\n" + logs.joined(separator: "\n"))
+            }
+            return blocks.joined(separator: "\n\n")
         }.joined(separator: "\n\n")
     }
 

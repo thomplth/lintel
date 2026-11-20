@@ -52,6 +52,12 @@ final class RunnerProcess {
         case "act":
             let payload = Self.json(message["payload"] ?? NSNull())
             invoke(module, function: "__act", arguments: [message["action"] as? String ?? "", payload], request: request)
+        case "job":
+            invoke(module, function: "__runJob", arguments: [message["job"] as? String ?? ""], request: request)
+        case "jobs":
+            guard let context = contexts[module] else { return }
+            let payload = Self.json(message["jobs"] ?? ["own": [], "all": []])
+            entering(module) { context.objectForKeyedSubscript("__setJobs").call(withArguments: [payload]) }
         case "data":
             dataJSON = Self.json(message["data"] ?? [String: Any]())
             for (key, context) in contexts {

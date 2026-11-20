@@ -18,6 +18,11 @@ final class HostServices {
     var grants: [String: Grant] = [:]
     var onRefreshRequest: (String) -> Void = { _ in }
     var onAttention: (String, Bool) -> Void = { _, _ in }
+    var onLogChanged: (String) -> Void = { _ in }
+    var onJobRun: ((_ module: String, _ name: String) async throws -> JSONValue)?
+    var onJobSetNext: ((_ module: String, _ name: String, _ date: Date?) -> Void)?
+    var onJobSetEnabled: ((_ module: String, _ name: String, _ enabled: Bool) -> Void)?
+    var onJobClearError: ((_ module: String, _ name: String) -> Void)?
     private(set) var logs: [String: [String]] = [:]
     private var storageCache: [String: [String: JSONValue]] = [:]
     private let redirects = RedirectGuard()
@@ -67,7 +72,12 @@ final class HostServices {
             let tool = argument(0).string ?? ""
             try require(.exec(tool), as: "exec:\(tool)")
             guard settings.isPrivateEdition else { throw ModuleFailure("running tools is not available in this edition") }
-            return try await execute(tool, arguments: (argument(1).array ?? []).compactMap(\.string))
+            return try await execute(tool, arguments: (argument(1).array ?? []).compactMap(\.string), options: argument(2))
+        case "jobs.run":
+            guard !grant.isTrial else { throw ModuleFailure("jobs cannot run during a trial") }
+            let name = argument(0).string ?? ""
+            guard let onJobRun else { throw ModuleFailure("scheduled jobs are unavailable") }
+            return try await onJobRun(module, name)
         case "audio.setVolume":
             try require(.audio, as: "audio")
             try SystemSampler.setVolume(argument(0).number ?? 0)
@@ -109,13 +119,43 @@ final class HostServices {
             onRefreshRequest(module)
         case "attention":
             if !grant.isTrial { onAttention(module, arguments.first?.bool ?? false) }
+        case "jobs.setNext":
+            guard !grant.isTrial else { return }
+            let date: Date? = arguments.count > 1 ? arguments[1].number.map { Date(timeIntervalSince1970: $0 / 1000) } : nil
+            onJobSetNext?(module, text(0), date)
+        case "jobs.setEnabled":
+            guard !grant.isTrial, arguments.count > 1, let enabled = arguments[1].bool else { return }
+            onJobSetEnabled?(module, text(0), enabled)
+        case "jobs.clearError":
+            guard !grant.isTrial else { return }
+            onJobClearError?(module, text(0))
         case "log":
             let line = arguments.compactMap(\.string).joined(separator: " ")
-            logs[module, default: []].append(String(line.prefix(500)))
-            if logs[module]!.count > 100 { logs[module]!.removeFirst(logs[module]!.count - 100) }
+            let stamp = Self.logFormatter.string(from: Date())
+            logs[module, default: []].append("[\(stamp)] " + String(line.prefix(500)))
+            if logs[module]!.count > 200 { logs[module]!.removeFirst(logs[module]!.count - 200) }
+            onLogChanged(module)
         default:
             break
         }
+    }
+
+    private static let logFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    func appendLog(_ message: String, for module: String) {
+        let stamp = Self.logFormatter.string(from: Date())
+        logs[module, default: []].append("[\(stamp)] " + String(message.prefix(500)))
+        if logs[module]!.count > 200 { logs[module]!.removeFirst(logs[module]!.count - 200) }
+        onLogChanged(module)
+    }
+
+    func clearLogs(for module: String) {
+        logs[module] = []
+        onLogChanged(module)
     }
 
     func storage(for id: String) -> [String: JSONValue] {
@@ -166,16 +206,18 @@ final class HostServices {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private func execute(_ tool: String, arguments: [String]) async throws -> JSONValue {
+    private func execute(_ tool: String, arguments: [String], options: JSONValue = .null) async throws -> JSONValue {
         guard let executable = Self.find(tool: tool) else { throw ModuleFailure("\(tool) is not installed") }
         let inherited = ProcessInfo.processInfo.environment
         var environment = ["HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "SHELL"].reduce(into: [String: String]()) { $0[$1] = inherited[$1] }
         environment["PATH"] = Self.toolDirectories.joined(separator: ":")
+        let timeout = min(max(options["timeout"].number ?? 20, 1), 300)
+        let input = options["input"].string
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 do {
                     let result = try Shell.run(
-                        executable, arguments, timeout: 20, environment: environment,
+                        executable, arguments, input: input, timeout: timeout, environment: environment,
                         directory: FileManager.default.temporaryDirectory
                     )
                     continuation.resume(returning: [

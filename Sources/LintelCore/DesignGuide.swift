@@ -60,7 +60,17 @@ public enum DesignGuide {
             panelRefreshSeconds: 5,            // optional faster refresh while the panel is open
             panelWidth: 'medium',              // 'small' | 'medium' | 'large'
             permissions: ['api.example.com'],  // every host contacted, plus capabilities: 'notify', 'audio',
-                                               // 'clipboard', 'exec:<tool>', 'secret:<name>'
+                                               // 'clipboard', 'jobs', 'exec:<tool>', 'secret:<name>'
+          },
+          jobs: {                                           // optional; background scheduled tasks owned by this module
+            'sync': {                                       // lowercase id; runs off the render loop and survives wake
+              title: 'Short job title',
+              schedule: { every: 3600 },                    // or { cron: '0 */5 * * *' } or { manual: true }
+              timeoutSeconds: 90,                           // optional (default 60, max 600)
+              runOnWake: true,                              // optional (default true): catch up after Mac sleep
+              retrySeconds: 900,                            // optional backoff base on thrown error
+              async run(host) { return { summary: 'ok' }; }
+            },
           },
           render(host) { return <bar item view>; },        // required; may be async
           panel(host) { return [<view>, <view>, ...]; },    // optional; may be async; shown when the item is clicked
@@ -109,6 +119,8 @@ public enum DesignGuide {
           host.audio() -> { volume: 0..1, muted: boolean, output: string | null }
           host.bluetooth() -> { on: boolean, devices: [{ name, connected: boolean, battery: 0..100 | null }] }
           host.appearance() -> { dark: boolean }
+          host.jobs() -> [{ id, title, schedule, enabled, status, isRunning, lastRunAt, lastOkAt, nextRunAt, durationMs, summary, lastError, consecutiveErrors, recentRuns }]
+          host.allJobs() -> same array across all modules (needs 'jobs' in meta.permissions)
           host.history(key, number, max = 60) -> number[]   // appends and returns a rolling series, for sparklines and charts
           host.storage.get(key, fallback), host.storage.set(key, jsonValue), host.storage.remove(key)   // persistent
 
@@ -119,10 +131,14 @@ public enum DesignGuide {
                               or null. Use only when the site has no JSON API; it loads the whole page.
           host.browser.all(url, cssSelector) -> innerText of every match (at most 50)
           host.secret(name) -> string | null     // a key the user saved in settings; needs 'secret:<name>'
-          host.exec(tool, [args]) -> { status, stdout, stderr }   // needs 'exec:<tool>', e.g. 'exec:gh'
+          host.exec(tool, [args], { timeout?, input? }) -> { status, stdout, stderr }   // needs 'exec:<tool>', timeout up to 300s
+          host.jobs.run(id) -> Promise<jobSnapshot>   // trigger one of this module's jobs (or 'module:id' with 'jobs')
           host.setVolume(fraction), host.setMuted(boolean)        // needs 'audio'
 
         Fire and forget:
+          host.jobs.setNext(id, epochMsOrNull)   // override next scheduled run time (e.g. exact upstream reset)
+          host.jobs.setEnabled(id, boolean)      // pause or resume a scheduled job
+          host.jobs.clearError(id)               // acknowledge/clear a job failure state
           host.notify(title, body)   // needs 'notify'; only for events the user asked to be told about
           host.open(url)             // opens an https link in the default browser
           host.copy(text)            // needs 'clipboard'

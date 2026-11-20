@@ -92,6 +92,7 @@ struct AppHome {
     var approvalsFile: URL { root.appending(path: "approvals.json") }
     var chatFile: URL { root.appending(path: "chat.json") }
     var secretsFile: URL { root.appending(path: "secrets.json") }
+    var jobsFile: URL { root.appending(path: "jobs.json") }
 
     func prepare() {
         for directory in [root, modulesDirectory, storageDirectory, promptsDirectory] {

@@ -65,6 +65,7 @@ User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to 
 | `Sources/LintelCore` | The design system and all pure logic: components, theme, design rules, layout, placement, manifests. Unit-tested. |
 | `Sources/Lintel/Runtime` | Module helper process, its client and watchdog, host services, module discovery and scheduling. |
 | `Sources/Lintel/UI` | The renderer: one SwiftUI view per component, bar, panels, web clip and mini app stages. |
+| `Sources/Lintel/Studio` | Lintel Studio window: dashboard of modules & background processes, scheduled jobs, live preview, logs, code editor, and the interactive assistant chat. |
 | `Sources/Lintel/Chat` | Assistant engines and the authoring loop (trial run, design rules, repair). |
 | `Sources/Lintel/Resources/Modules` | Built-in modules. They double as the examples the assistant learns from. |
 | `Sources/Lintel/Resources/Library` | Optional modules, switched on in Settings › Modules or by asking the assistant. |
@@ -81,7 +82,7 @@ Lintel items [--pictures <dir>]      # list system menu bar items (needs Accessi
 Lintel metrics                       # live performance numbers from the running instance (debug and local builds)
 Lintel stage --out <dir> --shots halo/idle,ink/panel:system [--size 900x620] [--backdrop photo|document|light|dark]
                                      # photograph the bar and a panel on a hidden stand-in desktop
-Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, chat, settings, dock, state, quit
+Lintel ctl '{"cmd":"open","slot":"system"}'   # drive a running instance: open, close, assistant, studio, chat, jobs, job-run, settings, dock, state, quit
 ```
 
 ## Performance metrics

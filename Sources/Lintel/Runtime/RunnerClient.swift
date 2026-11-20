@@ -9,7 +9,10 @@ struct ModuleFailure: Error, Equatable {
     }
 
     static func describe(_ error: Error) -> String {
-        (error as? ModuleFailure)?.message ?? (error as? ModuleManifest.Invalid)?.message ?? error.localizedDescription
+        (error as? ModuleFailure)?.message
+            ?? (error as? ModuleManifest.Invalid)?.message
+            ?? (error as? JobManifest.Invalid)?.message
+            ?? error.localizedDescription
     }
 }
 
@@ -17,6 +20,7 @@ struct ModuleDescription {
     var manifest: ModuleManifest
     var hasPanel: Bool
     var actions: [String]
+    var jobs: [JobManifest] = []
 }
 
 /// The app side of the module runtime: starts the helper, routes requests and host calls, and replaces the helper
@@ -96,10 +100,19 @@ final class RunnerClient {
         guard reply["hasRender"].bool == true else {
             throw ModuleFailure("defineModule needs a render(host) function")
         }
+        let rawJobs = reply["jobs"].array ?? []
+        let jobs: [JobManifest] = try rawJobs.map { entry in
+            guard entry["hasRun"].bool == true else {
+                let id = entry["id"].string ?? "job"
+                throw JobManifest.Invalid(message: "job '\(id)' needs a run(host) function")
+            }
+            return try JobManifest(entry)
+        }
         return ModuleDescription(
             manifest: try ModuleManifest(reply["meta"]),
             hasPanel: reply["hasPanel"].bool ?? false,
-            actions: (reply["actions"].array ?? []).compactMap(\.string)
+            actions: (reply["actions"].array ?? []).compactMap(\.string),
+            jobs: jobs
         )
     }
 
@@ -111,6 +124,14 @@ final class RunnerClient {
         try await request(["op": "act", "module": key, "action": action, "payload": payload.any])
     }
 
+    func runJob(key: String, name: String, timeout: TimeInterval) async throws -> JSONValue {
+        try await request(["op": "job", "module": key, "job": name], timeout: max(timeout, 30))
+    }
+
+    func setJobs(key: String, own: [JSONValue], all: [JSONValue]) {
+        send(["op": "jobs", "module": key, "jobs": ["own": own.map(\.any), "all": all.map(\.any)]])
+    }
+
     func unload(key: String) {
         send(["op": "unload", "module": key])
     }
@@ -120,7 +141,8 @@ final class RunnerClient {
         send(["op": "data", "data": data.any])
     }
 
-    private func request(_ message: [String: Any]) async throws -> JSONValue {
+    private func request(_ message: [String: Any], timeout: TimeInterval? = nil) async throws -> JSONValue {
+        let effectiveTimeout = timeout ?? Self.requestLimit
         if process == nil { start() }
         guard process != nil else { throw ModuleFailure("the module runtime is not running") }
         let identifier = nextRequest
@@ -130,7 +152,7 @@ final class RunnerClient {
         return try await withCheckedThrowingContinuation { continuation in
             pending[identifier] = continuation
             send(message)
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestLimit) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + effectiveTimeout) { [weak self] in
                 MainActor.assumeIsolated {
                     self?.pending.removeValue(forKey: identifier)?.resume(throwing: ModuleFailure("timed out"))
                 }

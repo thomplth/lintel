@@ -673,6 +673,7 @@ private struct ModulesPane: View {
 
     var body: some View {
         HStack {
+            Button("Open Studio") { app.showStudio() }
             Button("Import Module…") { ModuleSharing.importModule(app: app) { app.showSettings(tab: .modules) } }
             Button("Open Modules Folder") { NSWorkspace.shared.open(app.home.modulesDirectory) }
             Spacer()

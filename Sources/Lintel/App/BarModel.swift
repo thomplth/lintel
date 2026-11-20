@@ -120,6 +120,7 @@ final class BarModel: ObservableObject {
     @Published var chatFocusRequests = 0
     @Published var chatDraft = ""
     @Published var engineName = ""
+    @Published var studioFocusedModuleID: String?
     @Published var rearrangement: Rearrangement? {
         didSet { if (oldValue == nil) != (rearrangement == nil) { onRearrangingChanged() } }
     }

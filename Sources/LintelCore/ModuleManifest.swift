@@ -4,6 +4,7 @@ public enum Capability: Hashable, Sendable {
     case notify
     case audio
     case clipboard
+    case jobs
     case exec(String)
     case secret(String)
 
@@ -12,6 +13,7 @@ public enum Capability: Hashable, Sendable {
         case "notify": self = .notify
         case "audio": self = .audio
         case "clipboard": self = .clipboard
+        case "jobs": self = .jobs
         default:
             let parts = text.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2, !parts[1].isEmpty, parts[1].allSatisfy({ $0.isLetter || $0.isNumber || "-_.".contains($0) })
@@ -29,6 +31,7 @@ public enum Capability: Hashable, Sendable {
         case .notify: "Post notifications"
         case .audio: "Change the volume and mute"
         case .clipboard: "Write to the clipboard"
+        case .jobs: "Read and control scheduled jobs across all modules"
         case .exec(let tool): "Run the command-line tool \(tool)"
         case .secret(let name): "Read the saved secret \"\(name)\""
         }
@@ -67,7 +70,7 @@ public struct ModuleManifest: Equatable, Sendable {
         panelWidth = meta["panelWidth"].string.flatMap { ["small", "medium", "large"].contains($0) ? $0 : nil } ?? "medium"
         permissions = (meta["permissions"].array ?? []).compactMap(\.string).map { $0.lowercased() == $0 || $0.contains(":") ? $0 : $0.lowercased() }
         for permission in permissions where Capability(permission) == nil && !Self.isHostPattern(permission) {
-            throw Invalid(message: "meta.permissions entry '\(permission)' is neither a host (api.example.com, *.example.com, localhost:8080) nor a capability (notify, audio, clipboard, exec:<tool>, secret:<name>)")
+            throw Invalid(message: "meta.permissions entry '\(permission)' is neither a host (api.example.com, *.example.com, localhost:8080) nor a capability (notify, audio, clipboard, jobs, exec:<tool>, secret:<name>)")
         }
     }
 

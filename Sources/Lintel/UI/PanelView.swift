@@ -82,7 +82,7 @@ struct PanelView: View {
                 }
                 headerButton("trash", "Clear conversation", context) { model.onChatCommand("clear", nil) }
             } else if slot?.kind == .module {
-                headerButton("sparkles", "Ask the assistant to change this module", context) { model.onPanelCommand("change") }
+                headerButton("sparkles", "Open in Lintel Studio", context) { model.onPanelCommand("change") }
             }
             headerButton("gearshape", "Settings", context) { model.onPanelCommand("settings") }
         }
@@ -203,6 +203,7 @@ private struct ApprovalView: View {
         case .notify: "bell"
         case .audio: "speaker.wave.2.fill"
         case .clipboard: "doc.on.doc"
+        case .jobs: "clock.arrow.circlepath"
         case .exec: "terminal"
         case .secret: "key"
         case nil: "globe"

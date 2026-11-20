@@ -142,7 +142,22 @@ final class ControlChannel {
         case "open": if let slot = command["slot"].string { app.openModulePanel(slot) }
         case "close": app.closePanel()
         case "assistant": app.openAssistant(draft: command["draft"].string)
+        case "studio": app.showStudio(module: command["module"].string, focusChat: command["chat"].bool ?? false)
         case "chat": if let text = command["text"].string { app.openAssistant(); app.chat.submit(text) }
+        case "jobs":
+            guard let path = command["path"].string else { return }
+            let list = app.host.jobs.snapshots.map {
+                JobPlanner.jsonSnapshot(moduleID: $0.moduleID, moduleTitle: $0.moduleTitle, spec: $0.spec, record: $0.record)
+            }
+            try? JSONValue.array(list).text.write(toFile: path, atomically: true, encoding: .utf8)
+        case "job-run":
+            if let key = command["key"].string, let colon = key.firstIndex(of: ":") {
+                let mod = String(key[..<colon])
+                let job = String(key[key.index(after: colon)...])
+                Task { await app.host.jobs.runNow(moduleID: mod, jobID: job) }
+            } else if let mod = command["module"].string, let job = command["job"].string {
+                Task { await app.host.jobs.runNow(moduleID: mod, jobID: job) }
+            }
         case "hold": app.bar?.hold()
         case "dock": app.dockClicked()
         case "release": app.closePanel(); app.bar?.release()

@@ -58,6 +58,7 @@ final class ModuleHost {
     let model: BarModel
     let runner: RunnerClient
     let services: HostServices
+    let jobs: JobHost
     private let sampler = SystemSampler()
     private var loaded: [String: Loaded] = [:]
     private var blocked: [String: Date] = [:]
@@ -70,12 +71,14 @@ final class ModuleHost {
     private var panelTimer: Timer?
     private var libraryCache: [String: (stamp: Date, description: ModuleDescription)] = [:]
     var onSettingsChanged: () -> Void = {}
+    var onModulesChanged: () -> Void = {}
 
     init(home: AppHome, model: BarModel, runner: RunnerClient, services: HostServices) {
         self.home = home
         self.model = model
         self.runner = runner
         self.services = services
+        self.jobs = JobHost(home: home, runner: runner, services: services)
         approvals = home.loadApprovals()
         runner.onCall = { [weak services] module, name, arguments in
             guard let services else { throw ModuleFailure("the app is shutting down") }
@@ -94,6 +97,43 @@ final class ModuleHost {
             else { return }
             self.model.slots[index].isRaised = isRaised
         }
+        services.onJobRun = { [weak self] caller, name in
+            guard let self, let target = self.jobs.resolve(callerModule: caller, identifier: name) else {
+                throw ModuleFailure("cannot access job '\(name)'")
+            }
+            return await self.jobs.runNow(moduleID: target.moduleID, jobID: target.jobID)
+        }
+        services.onJobSetNext = { [weak self] caller, name, date in
+            guard let self, let target = self.jobs.resolve(callerModule: caller, identifier: name) else { return }
+            self.jobs.setNext(moduleID: target.moduleID, jobID: target.jobID, date: date)
+        }
+        services.onJobSetEnabled = { [weak self] caller, name, enabled in
+            guard let self, let target = self.jobs.resolve(callerModule: caller, identifier: name) else { return }
+            self.jobs.setEnabled(moduleID: target.moduleID, jobID: target.jobID, enabled: enabled)
+        }
+        services.onJobClearError = { [weak self] caller, name in
+            guard let self, let target = self.jobs.resolve(callerModule: caller, identifier: name) else { return }
+            self.jobs.clearError(moduleID: target.moduleID, jobID: target.jobID)
+        }
+        jobs.loadedModulesProvider = { [weak self] in
+            guard let self else { return [] }
+            return self.loaded.compactMap { key, entry in
+                guard let manifest = entry.description?.manifest, !entry.needsApproval else { return nil }
+                return (id: key, allowsAllJobs: manifest.allows(.jobs))
+            }
+        }
+        jobs.onChanged = { [weak self] affected in
+            guard let self else { return }
+            if let affected {
+                self.renderChip(affected)
+                self.renderPanel(affected)
+            }
+            for (key, entry) in self.loaded where key != affected && entry.description?.manifest.allows(.jobs) == true {
+                self.renderChip(key)
+                self.renderPanel(key)
+            }
+            self.onModulesChanged()
+        }
         model.manifestFor = { [weak self] id in self?.loaded[id]?.description?.manifest }
     }
 
@@ -104,6 +144,7 @@ final class ModuleHost {
     func start(watching: Bool = true) {
         runner.start()
         runner.setData(sampler.snapshot())
+        jobs.start()
         sync()
         dataTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.pushData() }
@@ -206,11 +247,17 @@ final class ModuleHost {
                 loaded[source.key]?.needsApproval = !isApproved
                 services.grants[source.key] = HostServices.Grant(manifest: description.manifest)
                 publish(source.key)
-                if isApproved { schedule(source.key) }
+                if isApproved {
+                    jobs.register(moduleID: source.key, moduleTitle: description.manifest.title, jobs: description.jobs)
+                    jobs.pushSnapshotsToModule(source.key, allowsAllJobs: description.manifest.allows(.jobs))
+                    schedule(source.key)
+                }
+                onModulesChanged()
             } catch {
                 guard loaded[source.key]?.generation == current else { return }
                 loaded[source.key]?.failure = ModuleFailure.describe(error)
                 publish(source.key)
+                onModulesChanged()
             }
         }
     }
@@ -218,11 +265,13 @@ final class ModuleHost {
     private func unload(_ key: String) {
         guard let entry = loaded.removeValue(forKey: key) else { return }
         entry.timer?.invalidate()
+        jobs.unregister(moduleID: key)
         runner.unload(key: key)
         services.grants[key] = nil
         model.slots.removeAll { $0.id == key && $0.kind == .module }
         if model.panel?.slotID == key, model.panel?.content == .module { closePanel() }
         updateNeeds()
+        onModulesChanged()
     }
 
     private func updateNeeds() {
@@ -429,14 +478,18 @@ final class ModuleHost {
     }
 
     func approve(_ id: String) {
-        guard let manifest = loaded[id]?.description?.manifest else { return }
+        guard let description = loaded[id]?.description else { return }
+        let manifest = description.manifest
         approvals[id] = Approval(permissions: manifest.permissions)
         home.save(approvals, to: home.approvalsFile)
         stamps[home.approvalsFile] = AppHome.modificationDate(of: home.approvalsFile)
         loaded[id]?.needsApproval = false
         publish(id)
+        jobs.register(moduleID: id, moduleTitle: manifest.title, jobs: description.jobs)
+        jobs.pushSnapshotsToModule(id, allowsAllJobs: manifest.allows(.jobs))
         schedule(id)
         if model.panel?.slotID == id { openPanel(id) }
+        onModulesChanged()
     }
 
     func remove(_ id: String) {
@@ -499,6 +552,45 @@ final class ModuleHost {
 
     func source(of id: String) -> String? {
         loaded[id]?.text
+    }
+
+    func manifest(of id: String) -> ModuleManifest? {
+        loaded[id]?.description?.manifest
+    }
+
+    func declaredJobs(of id: String) -> [JobManifest] {
+        loaded[id]?.description?.jobs ?? []
+    }
+
+    func backgroundActivity(of id: String) -> ModuleBackgroundActivity? {
+        guard let entry = loaded[id], let description = entry.description else { return nil }
+        return ModuleBackgroundActivity.analyze(manifest: description.manifest, jobs: description.jobs, source: entry.text)
+    }
+
+    func logs(of id: String) -> [String] {
+        services.logs[id] ?? []
+    }
+
+    func clearLogs(of id: String) {
+        services.clearLogs(for: id)
+    }
+
+    func previewPanel(of id: String) async -> (node: ViewNode?, failure: String?) {
+        guard let entry = loaded[id], entry.description?.hasPanel == true, !entry.needsApproval else {
+            return (nil, loaded[id]?.failure)
+        }
+        return await rendered(id, .panel)
+    }
+
+    func reload(_ id: String) {
+        guard let entry = loaded[id] else {
+            sync()
+            return
+        }
+        blocked[id] = nil
+        let source = entry.source
+        unload(id)
+        load(source)
     }
 
     func prompt(of id: String) -> String? {

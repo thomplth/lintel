@@ -20,6 +20,7 @@ final class AppController {
     private(set) var bar: BarWindowController?
     private(set) var panelWindow: PanelWindowController?
     private var settingsWindow: SettingsWindowController?
+    private(set) var studioWindow: StudioWindowController?
     private var control: ControlChannel?
     let pointerTap = PointerTap()
     private(set) lazy var perf = PerfRecorder(home: home, runnerPID: { [runner] in runner.processIdentifier })
@@ -57,6 +58,13 @@ final class AppController {
             self?.bar?.applySettings()
             self?.refreshAssistantSlot()
             self?.applyDockPresence()
+        }
+        host.onModulesChanged = { [weak self] in
+            guard let self, self.studioWindow?.isVisible == true else { return }
+            self.studioWindow?.refresh()
+        }
+        services.onLogChanged = { [weak self] moduleID in
+            self?.studioWindow?.notifyLogsChanged(for: moduleID)
         }
     }
 
@@ -260,25 +268,21 @@ final class AppController {
     }
 
     func toggleAssistant() {
-        if model.panel?.content == .assistant { closePanel() } else { openAssistant() }
+        if studioWindow?.isVisible == true, studioWindow?.window?.isKeyWindow == true {
+            studioWindow?.window?.close()
+        } else {
+            openAssistant()
+        }
     }
 
     func openAssistant(draft: String? = nil) {
-        if model.isHiddenByUser { bar?.setHidden(false) }
-        host.closePanel()
-        bar?.hold()
-        if let draft { model.chatDraft = draft }
-        // The chip only exists once the bar is active, so the panel is placed after the layout settles.
-        model.panel = PanelState(slotID: Self.assistantSlot, content: .assistant)
-        // Taking keyboard focus must happen inside the hotkey's own event; a moment later macOS no longer grants it
-        // to an app that is not active, and typing would land in whatever app is in front.
-        panelWindow?.show(focus: true)
-        model.chatFocusRequests += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self, self.model.panel?.content == .assistant else { return }
-            self.panelWindow?.place()
-            self.model.chatFocusRequests += 1
-        }
+        closePanel()
+        showStudio(focusChat: true, draft: draft)
+    }
+
+    func showStudio(module id: String? = nil, tab: StudioInspectorTab? = nil, focusChat: Bool = false, draft: String? = nil) {
+        if studioWindow == nil { studioWindow = StudioWindowController(app: self) }
+        studioWindow?.show(module: id, tab: tab, focusChat: focusChat, draft: draft)
     }
 
     func closePanel(releasing: Bool = true) {
@@ -320,10 +324,15 @@ final class AppController {
             host.remove(id)
         case "fix":
             let failure = model.slot(id)?.failure ?? model.panel?.failure ?? "it fails"
-            openAssistant()
+            closePanel()
+            showStudio(module: id, focusChat: true)
             chat.submit("Fix the module \"\(id)\". It fails with: \(failure)")
         case "change":
-            openAssistant(draft: "Change the \(model.slot(id)?.title ?? id) module: ")
+            closePanel()
+            showStudio(module: id, focusChat: true)
+        case "studio":
+            closePanel()
+            showStudio(module: id)
         case "source":
             NSWorkspace.shared.activateFileViewerSelecting([home.moduleFile(id: id)])
         case "settings":
@@ -348,7 +357,8 @@ final class AppController {
         case "up": layout.moveToRow(slot.id, offset: -1)
         case "down": layout.moveToRow(slot.id, offset: 1)
         case "change":
-            openAssistant(draft: "Change the \(slot.title) module: ")
+            closePanel()
+            showStudio(module: slot.id, focusChat: true)
             return
         case "settings":
             closePanel()
@@ -382,6 +392,7 @@ final class AppController {
         if let bar { result.append(("bar", bar.panel)) }
         if let panelWindow, panelWindow.isVisible { result.append(("panel", panelWindow.panel)) }
         if let window = settingsWindow?.window, window.isVisible { result.append(("settings", window)) }
+        if let window = studioWindow?.window, window.isVisible { result.append(("studio", window)) }
         return result
     }
 }
