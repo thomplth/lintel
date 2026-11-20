@@ -109,10 +109,13 @@ struct NodeView: View {
         case "large": 1.5
         default: 1
         }
-        return Image(systemName: RenderContext.symbol(name))
-            .symbolRenderingMode(context.symbolMode)
-            .font(.system(size: context.metrics.fontSize(role: role) * scale, weight: context.weight(nil)))
-            .foregroundStyle(context.color(tone))
+        return SymbolGlyph(
+            name: name,
+            size: context.metrics.fontSize(role: role) * scale,
+            weight: context.weight(nil),
+            symbolMode: context.symbolMode
+        )
+        .foregroundStyle(context.color(tone))
     }
 
     private func badgeView(_ value: String, tone: Tone?) -> some View {
@@ -262,7 +265,9 @@ struct NodeView: View {
     private var buttonView: some View {
         Button(action: press) {
             HStack(spacing: context.metrics.unit * 1.5) {
-                if let name = node.string("icon") { Image(systemName: RenderContext.symbol(name)) }
+                if let name = node.string("icon") {
+                    SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                }
                 Text(node.string("label") ?? "").lineLimit(1)
             }
             .frame(maxWidth: .infinity)
@@ -447,9 +452,7 @@ private struct ItemRow: View {
     var body: some View {
         HStack(spacing: context.metrics.unit * 2.5) {
             if let name = node.string("icon") {
-                Image(systemName: RenderContext.symbol(name))
-                    .symbolRenderingMode(context.symbolMode)
-                    .font(.system(size: context.metrics.fontSize(role: nil)))
+                SymbolGlyph(name: name, size: context.metrics.fontSize(role: nil), weight: context.weight(nil), symbolMode: context.symbolMode)
                     .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
                     .frame(width: context.theme.fontSize * 1.4)
             }
@@ -546,8 +549,9 @@ private struct ToggleControl: View {
     var body: some View {
         HStack(spacing: context.metrics.unit * 2) {
             if let name = node.string("icon") {
-                Image(systemName: RenderContext.symbol(name)).foregroundStyle(context.secondary)
-                    .font(.system(size: context.metrics.fontSize(role: "label")))
+                SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                    .foregroundStyle(context.secondary)
+                    .frame(width: context.theme.fontSize * 1.2)
             }
             Text(node.string("label") ?? "").font(context.font(role: "label", weight: context.theme.fontWeight)).foregroundStyle(context.primary)
             Spacer(minLength: 8)
@@ -692,8 +696,9 @@ private struct FieldControl: View {
     private var input: some View {
         HStack(spacing: context.metrics.unit * 2) {
             if let name = node.string("icon") {
-                Image(systemName: RenderContext.symbol(name)).foregroundStyle(context.secondary)
-                    .font(.system(size: context.metrics.fontSize(role: "label")))
+                SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                    .foregroundStyle(context.secondary)
+                    .frame(width: context.theme.fontSize * 1.2)
             }
             TextField(node.string("placeholder") ?? "", text: $draft)
                 .textFieldStyle(.plain)
@@ -772,5 +777,33 @@ private struct FieldControl: View {
         guard !text.isEmpty, let action = node.string("action") else { return }
         draft = ""
         context.perform(action, .string(text))
+    }
+}
+
+private struct SVGIconShape: Shape {
+    let icon: SVGIcon
+
+    func path(in rect: CGRect) -> Path {
+        Path(icon.cgPath(in: rect))
+    }
+}
+
+struct SymbolGlyph: View {
+    let name: String
+    let size: Double
+    let weight: Font.Weight
+    let symbolMode: SymbolRenderingMode
+
+    var body: some View {
+        if let svg = SVGIcon.parse(name) {
+            let side = size * 1.05
+            SVGIconShape(icon: svg)
+                .fill(style: FillStyle(eoFill: false))
+                .frame(width: side, height: side)
+        } else {
+            Image(systemName: RenderContext.symbol(name))
+                .symbolRenderingMode(symbolMode)
+                .font(.system(size: size, weight: weight))
+        }
     }
 }

@@ -139,7 +139,7 @@ public enum DesignLint {
                 guard let value = node.string(prop.name) else { continue }
                 switch prop.type {
                 case .symbol:
-                    if !symbolExists(value) {
+                    if !symbolExists(value), SVGIcon.parse(value) == nil {
                         problems.append(.error("no SF Symbol is named '\(value)' (in \(node.component.rawValue), \(surface))"))
                     }
                 case .action:

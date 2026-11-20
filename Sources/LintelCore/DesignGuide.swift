@@ -157,7 +157,7 @@ public enum DesignGuide {
         ## Rules the app enforces (a module that breaks one is rejected and sent back)
 
         - Bar item: only chip components; at most 8 elements; each text at most 32 characters, 56 in total; one line.
-        - Every icon name must be a real SF Symbol. Every action a view names must exist in actions.
+        - Every icon name must be a real SF Symbol, or a monochrome vector path `svg:<size>:<path>` (e.g. `svg:24:M...Z` or `svg:16x15:M...Z`). Every action a view names must exist in actions.
         - Every host a module fetches, browses, embeds or loads an image from must be in meta.permissions.
         - Links on items and buttons must be https. list() holds only item() rows, at most 30. Sections do not nest.
         - No hex colours, font sizes or pixel values anywhere.
