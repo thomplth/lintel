@@ -106,7 +106,8 @@ final class BarModel: ObservableObject {
     @Published var settings = AppSettings()
     @Published var slots: [Slot] = []
     @Published var isActive = false
-    @Published var isHiddenByUser = false
+    @Published var visibility = BarVisibility()
+    var isHidden: Bool { visibility.isHidden }
     @Published var topRowMinHeight: CGFloat = 0
     /// The first row lives in a system menu bar item instead of the bar's window.
     @Published var isFirstRowInMenuBar = false

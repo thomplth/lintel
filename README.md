@@ -22,7 +22,7 @@ xcrun --sdk macosx swift build && .build/debug/Lintel
 xcrun --sdk macosx swift test
 ```
 
-Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides it. Settings are behind the gear in any panel.
+Rest the pointer on the bar or press ⌃⌥⌘B to open it. ⌃⌥⌘H hides or shows it. The bar auto-hides whenever a window enters full screen (press ⌃⌥⌘H or ⌃⌥⌘L to bring it back; Settings › General turns this off). Settings are behind the gear in any panel.
 Clicking Lintel's Dock icon opens the whole bar until you switch to another app; clicking it again while the bar is open
 shows Settings. Settings › General › Show Lintel in the Dock takes the icon away.
 With the menu bar set to hide automatically, the top edge above the bar no longer brings the menu bar in; hold ⌥ there,

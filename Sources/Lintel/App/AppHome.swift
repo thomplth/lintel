@@ -13,6 +13,7 @@ struct AppSettings: Codable, Equatable {
     var edgeInset = 0.0
     var hoverActivates = true
     var guardsTopEdge = true
+    var autoHideInFullScreen = true
     var dwell = 0.3
     var grace = 0.6
     var engine = "auto"
@@ -45,6 +46,7 @@ struct AppSettings: Codable, Equatable {
         edgeInset = value("edgeInset", defaults.edgeInset)
         hoverActivates = value("hoverActivates", defaults.hoverActivates)
         guardsTopEdge = value("guardsTopEdge", defaults.guardsTopEdge)
+        autoHideInFullScreen = value("autoHideInFullScreen", defaults.autoHideInFullScreen)
         dwell = min(max(value("dwell", defaults.dwell), 0), 3)
         grace = min(max(value("grace", defaults.grace), 0.1), 5)
         engine = value("engine", defaults.engine)

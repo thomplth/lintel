@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import LintelCore
 import SwiftUI
@@ -97,6 +98,7 @@ final class BarWindowController {
     var onActiveChanged: (Bool) -> Void = { _ in }
     var onAnchorChanged: (BarAnchor) -> Void = { _ in }
     var onHideToggled: () -> Void = {}
+    var onWillHide: () -> Void = {}
     var onAssistantHotkey: () -> Void = {}
     var onKeyboardHotkey: () -> Void = {}
     var onSystemMenuBarRevealed: () -> Void = {}
@@ -130,13 +132,22 @@ final class BarWindowController {
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.place() } }
+        ) { [weak self] _ in MainActor.assumeIsolated {
+            self?.place()
+            self?.updateFullScreenState()
+        } }
         // macOS shrinks windows created while the screen is locked toward the centre; re-place on unlock and wake.
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.activeSpaceDidChangeNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.place() }
+                MainActor.assumeIsolated {
+                    self?.place()
+                    self?.updateFullScreenState()
+                }
             }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.updateFullScreenState() } }
         for name in ["com.apple.screenIsUnlocked", "AppleInterfaceMenuBarHidingChangedNotification"] {
             DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.place() }
@@ -147,6 +158,7 @@ final class BarWindowController {
             MainActor.assumeIsolated { self?.trackPointer() }
         }
         applySettings()
+        updateFullScreenState()
         place()
         panel.orderFrontRegardless()
     }
@@ -154,6 +166,9 @@ final class BarWindowController {
     func applySettings() {
         activation.dwell = model.settings.dwell
         activation.grace = model.settings.grace
+        var visibility = model.visibility
+        visibility.setAutoHideInFullScreen(model.settings.autoHideInFullScreen)
+        applyVisibility(visibility)
         hotkeys = []
         if let toggle = Hotkey(shortcut: model.settings.toggleShortcut, action: { [weak self] in
             MainActor.assumeIsolated { self?.onAssistantHotkey() }
@@ -191,13 +206,101 @@ final class BarWindowController {
         applyActivation()
     }
 
-    func setHidden(_ isHidden: Bool) {
-        model.isHiddenByUser = isHidden
+    func toggleHide() {
+        var visibility = model.visibility
+        visibility.toggleHide()
+        applyVisibility(visibility)
+    }
+
+    func revealIfHidden() {
+        var visibility = model.visibility
+        visibility.show()
+        applyVisibility(visibility)
+    }
+
+    private func applyVisibility(_ updated: BarVisibility) {
+        guard updated != model.visibility else { return }
+        let wasHidden = model.isHidden
+        model.visibility = updated
+        let isHidden = updated.isHidden
+        guard isHidden != wasHidden else { return }
+        if isHidden { onWillHide() }
         menuBarRow?.setHidden(isHidden)
         updateGuardedTopEdge()
         if isHidden { release() }
         panel.animator().alphaValue = isHidden || hasSteppedAside ? 0 : 1
         updateMouseCapture()
+    }
+
+    private func updateFullScreenState() {
+        var visibility = model.visibility
+        visibility.setFullScreen(detectFullScreen())
+        applyVisibility(visibility)
+    }
+
+    private func detectFullScreen() -> Bool {
+        guard let screen else { return false }
+        let mainHeight = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        let screenBounds = Placement.globalDisplayRect(screen.frame, mainScreenHeight: mainHeight)
+        let axFullScreen = frontmostWindowAXFullScreen(on: screenBounds)
+        if axFullScreen == true { return true }
+        let raw = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let windows: [ScreenWindow] = raw.compactMap { entry in
+            guard let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict),
+                  let layer = entry[kCGWindowLayer as String] as? Int
+            else { return nil }
+            return ScreenWindow(
+                owner: entry[kCGWindowOwnerName as String] as? String ?? "",
+                ownerPID: entry[kCGWindowOwnerPID as String] as? Int32 ?? 0,
+                layer: layer,
+                bounds: bounds,
+                alpha: entry[kCGWindowAlpha as String] as? Double ?? 1
+            )
+        }
+        return FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screenBounds,
+            notchStripHeight: screen.safeAreaInsets.top,
+            ownPID: ProcessInfo.processInfo.processIdentifier,
+            desktopIconLayer: Int(CGWindowLevelForKey(.desktopIconWindow)),
+            normalLayer: Int(CGWindowLevelForKey(.normalWindow)),
+            frontmostAXFullScreen: axFullScreen
+        )
+    }
+
+    private func frontmostWindowAXFullScreen(on screenBounds: CGRect) -> Bool? {
+        guard AXIsProcessTrusted(),
+              let frontmost = NSWorkspace.shared.frontmostApplication,
+              frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        else { return nil }
+        let app = AXUIElementCreateApplication(frontmost.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var focusedValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedValue) == .success,
+              let window = focusedValue
+        else { return nil }
+        let element = window as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        var fullScreenValue: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, "AXFullScreen" as CFString, &fullScreenValue) == .success,
+              let isFullScreen = fullScreenValue as? Bool
+        else { return nil }
+        guard isFullScreen else { return false }
+        var posValue: AnyObject?
+        var sizeValue: AnyObject?
+        if AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posValue) == .success,
+           AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success {
+            var origin = CGPoint.zero
+            var size = CGSize.zero
+            AXValueGetValue(posValue as! AXValue, .cgPoint, &origin)
+            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+            let frame = CGRect(origin: origin, size: size)
+            if !frame.isEmpty {
+                return frame.intersects(screenBounds.insetBy(dx: 4, dy: 4))
+            }
+        }
+        return true
     }
 
     func yieldFocusForExternalMenu() {
@@ -213,13 +316,13 @@ final class BarWindowController {
         defer { updateGuardedTopEdge() }
         guard isRevealed != hasSteppedAside else { return }
         hasSteppedAside = isRevealed
-        panel.animator().alphaValue = isRevealed || model.isHiddenByUser ? 0 : 1
+        panel.animator().alphaValue = isRevealed || model.isHidden ? 0 : 1
         if isRevealed, !isPanelOpen() { release() }
         if isRevealed { onSystemMenuBarRevealed() }
     }
 
     private func updateGuardedTopEdge() {
-        guard model.settings.guardsTopEdge, menuBarAutoHides, !hasSteppedAside, !model.isHiddenByUser, let screen else {
+        guard model.settings.guardsTopEdge, menuBarAutoHides, !hasSteppedAside, !model.isHidden, let screen else {
             guardedTopEdge = nil
             return
         }
@@ -237,10 +340,11 @@ final class BarWindowController {
         // is at the top edge; elsewhere an occasional look is enough to notice it leaving.
         let isNearTop = NSEvent.mouseLocation.y > (screen?.frame.maxY ?? 0) - 48
         if isNearTop || hasSteppedAside || pointerTicks % 20 == 0 { stepAsideForSystemMenuBar() }
+        if pointerTicks % 10 == 0 { updateFullScreenState() }
         // Other apps' items come and go beside the menu bar row and push it along.
         if let menuBarRow, menuBarRow.screenFrame != menuBarRowFrame { place() }
         if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
-        guard !hasSteppedAside, !model.isHiddenByUser, dragOrigin == nil, model.rearrangement == nil else { return }
+        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil else { return }
         let pointer = NSEvent.mouseLocation
         var isInside = contentFrame.insetBy(dx: -2, dy: -2).contains(pointer)
         if let menuBarRowFrame, menuBarRowFrame.contains(pointer) { isInside = true }
@@ -274,7 +378,7 @@ final class BarWindowController {
     private func updateMouseCapture() {
         let isPressing = !panel.ignoresMouseEvents && NSEvent.pressedMouseButtons != 0
         let isOverBar = contentFrame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
-        let captures = !model.isHiddenByUser && activation.isActive
+        let captures = !model.isHidden && activation.isActive
             && (isOverBar || isPressing || dragOrigin != nil || model.rearrangement != nil)
         if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
         updatePinDividers(isOverBar: isOverBar)
@@ -283,7 +387,7 @@ final class BarWindowController {
     /// ⌘ over the open bar shows each row's pin divider, ready to be ⌘-dragged, and keeps it while a drag goes on.
     private func updatePinDividers(isOverBar: Bool) {
         let isOverMenuBarRow = menuBarRowFrame?.contains(NSEvent.mouseLocation) ?? false
-        let shows = activation.isActive && !model.isHiddenByUser && (isOverBar || isOverMenuBarRow)
+        let shows = activation.isActive && !model.isHidden && (isOverBar || isOverMenuBarRow)
             && NSEvent.modifierFlags.contains(.command)
         guard shows != model.showsPinDividers else { return }
         withAnimation(BarModel.reflow) { model.showsPinDividers = shows }
@@ -333,7 +437,7 @@ final class BarWindowController {
         if wanted, menuBarRow == nil {
             let row = MenuBarRow(model: model)
             row.onPress = { [weak self] _ in self?.menuBarRowPressed() }
-            row.setHidden(model.isHiddenByUser)
+            row.setHidden(model.isHidden)
             menuBarRow = row
             measureMenuBarRowBudget()
         } else if !wanted, let row = menuBarRow {

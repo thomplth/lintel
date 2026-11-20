@@ -87,9 +87,10 @@ final class AppController {
         bar.onAssistantHotkey = { [weak self] in self?.toggleAssistant() }
         bar.onKeyboardHotkey = { [weak self] in self?.toggleKeyboardControl() }
         bar.onHideToggled = { [weak self] in
-            guard let self else { return }
-            self.closePanel()
-            self.bar?.setHidden(!self.model.isHiddenByUser)
+            self?.bar?.toggleHide()
+        }
+        bar.onWillHide = { [weak self] in
+            self?.closePanel()
         }
         bar.onAnchorChanged = { [weak self] anchor in
             guard let self else { return }
@@ -141,9 +142,9 @@ final class AppController {
     }
 
     func dockClicked() {
-        switch DockClick.response(isBarOpen: model.isActive && !model.isHiddenByUser) {
+        switch DockClick.response(isBarOpen: model.isActive && !model.isHidden) {
         case .openBar:
-            if model.isHiddenByUser { bar?.setHidden(false) }
+            if model.isHidden { bar?.revealIfHidden() }
             isHeldByDock = true
             bar?.hold()
         case .openSettings:
@@ -179,7 +180,7 @@ final class AppController {
             bar?.release()
             return
         }
-        if model.isHiddenByUser { bar?.setHidden(false) }
+        if model.isHidden { bar?.revealIfHidden() }
         closePanel(releasing: false)
         bar?.takeKeyboardFocus()
         model.isDrivenByKeyboard = true
