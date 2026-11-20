@@ -437,7 +437,7 @@ enum Shell {
 
     static func run(
         _ tool: String, _ arguments: [String], input: String? = nil, timeout: TimeInterval = 20,
-        environment: [String: String]? = nil, directory: URL? = nil
+        keepStdinOpenMs: Int = 0, environment: [String: String]? = nil, directory: URL? = nil
     ) throws -> (status: Int32, stdout: String, stderr: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
@@ -450,7 +450,15 @@ enum Shell {
         process.standardError = stderr
         try process.run()
         if let input { stdin.fileHandleForWriting.write(Data(input.utf8)) }
-        try? stdin.fileHandleForWriting.close()
+        let closeStdin: DispatchWorkItem?
+        if keepStdinOpenMs > 0 {
+            let item = DispatchWorkItem { try? stdin.fileHandleForWriting.close() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(keepStdinOpenMs), execute: item)
+            closeStdin = item
+        } else {
+            try? stdin.fileHandleForWriting.close()
+            closeStdin = nil
+        }
 
         let deadline = DispatchWorkItem { if process.isRunning { process.terminate() } }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
@@ -461,6 +469,8 @@ enum Shell {
         errorReader.wait()
         process.waitUntilExit()
         deadline.cancel()
+        closeStdin?.cancel()
+        try? stdin.fileHandleForWriting.close()
         return (process.terminationStatus, String(decoding: output, as: UTF8.self), String(decoding: errors, as: UTF8.self))
     }
 }

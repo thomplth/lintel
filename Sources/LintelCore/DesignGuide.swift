@@ -131,7 +131,7 @@ public enum DesignGuide {
                               or null. Use only when the site has no JSON API; it loads the whole page.
           host.browser.all(url, cssSelector) -> innerText of every match (at most 50)
           host.secret(name) -> string | null     // a key the user saved in settings; needs 'secret:<name>'
-          host.exec(tool, [args], { timeout?, input? }) -> { status, stdout, stderr }   // needs 'exec:<tool>', timeout up to 300s
+          host.exec(tool, [args], { timeout?, input?, keepStdinOpenMs? }) -> { status, stdout, stderr }   // needs 'exec:<tool>', timeout up to 300s
           host.jobs.run(id) -> Promise<jobSnapshot>   // trigger one of this module's jobs (or 'module:id' with 'jobs')
           host.setVolume(fraction), host.setMuted(boolean)        // needs 'audio'
 

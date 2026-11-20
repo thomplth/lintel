@@ -213,11 +213,12 @@ final class HostServices {
         environment["PATH"] = Self.toolDirectories.joined(separator: ":")
         let timeout = min(max(options["timeout"].number ?? 20, 1), 300)
         let input = options["input"].string
+        let keepStdinOpenMs = min(max(Int(options["keepStdinOpenMs"].number ?? 0), 0), 15_000)
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 do {
                     let result = try Shell.run(
-                        executable, arguments, input: input, timeout: timeout, environment: environment,
+                        executable, arguments, input: input, timeout: timeout, keepStdinOpenMs: keepStdinOpenMs, environment: environment,
                         directory: FileManager.default.temporaryDirectory
                     )
                     continuation.resume(returning: [

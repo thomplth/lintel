@@ -613,17 +613,20 @@ private struct StudioModuleInspector: View {
                             if let node = state.previewPanelNode {
                                 Divider()
                                 let panelContext = makePanelContext(listing.id)
-                                VStack(alignment: .leading, spacing: panelContext.metrics.sectionSpacing) {
-                                    if node.component == .column, node.props.isEmpty {
-                                        ForEach(Array(node.children.enumerated()), id: \.offset) { child in
-                                            NodeView(node: child.element, context: panelContext)
+                                ScrollView(.vertical) {
+                                    VStack(alignment: .leading, spacing: panelContext.metrics.sectionSpacing) {
+                                        if node.component == .column, node.props.isEmpty {
+                                            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                                                NodeView(node: child.element, context: panelContext)
+                                            }
+                                        } else {
+                                            NodeView(node: node, context: panelContext)
                                         }
-                                    } else {
-                                        NodeView(node: node, context: panelContext)
                                     }
+                                    .padding(14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(14)
-                                .frame(maxWidth: 460, alignment: .leading)
+                                .frame(maxWidth: 460, maxHeight: 380, alignment: .leading)
                                 .background(.background.opacity(0.75), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.quaternary, lineWidth: 1))
                             } else if state.previewIsLoading {
