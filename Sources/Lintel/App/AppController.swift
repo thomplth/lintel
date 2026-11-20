@@ -319,6 +319,7 @@ final class AppController {
         switch command {
         case "approve":
             host.approve(id)
+            chat.markApproved(id)
         case "remove":
             closePanel()
             host.remove(id)

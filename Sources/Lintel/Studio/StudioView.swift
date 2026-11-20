@@ -111,7 +111,7 @@ private struct StudioSidebar: View {
                     if !group.isEmpty {
                         Section(origin == .user ? "Yours" : origin == .library ? "Library" : "Built in") {
                             ForEach(group) { listing in
-                                SidebarModuleRow(app: app, jobs: jobs, listing: listing)
+                                SidebarModuleRow(app: app, model: model, jobs: jobs, listing: listing)
                                     .tag(StudioSelection.module(listing.id))
                             }
                         }
@@ -150,14 +150,17 @@ private struct StudioSidebar: View {
 
 private struct SidebarModuleRow: View {
     let app: AppController
+    @ObservedObject var model: BarModel
     @ObservedObject var jobs: JobHost
     let listing: ModuleListing
 
     private var moduleJobs: [JobSnapshot] { jobs.snapshots(for: listing.id) }
+    private var liveNeedsApproval: Bool { model.slot(listing.id)?.needsApproval ?? listing.needsApproval }
+    private var liveFailure: String? { model.slot(listing.id)?.failure ?? listing.failure }
 
     private var statusColor: Color {
-        if listing.failure != nil || moduleJobs.contains(where: { $0.effectiveStatus == .failed }) { return .red }
-        if listing.needsApproval { return .orange }
+        if liveFailure != nil || moduleJobs.contains(where: { $0.effectiveStatus == .failed }) { return .red }
+        if liveNeedsApproval { return .orange }
         if moduleJobs.contains(where: { $0.effectiveStatus == .running }) { return .blue }
         return listing.isEnabled ? .green : .secondary.opacity(0.45)
     }
@@ -539,9 +542,11 @@ private struct StudioModuleInspector: View {
     }
 
     private func overviewTab(_ listing: ModuleListing) -> some View {
-        ScrollView {
+        let needsApproval = slot?.needsApproval ?? listing.needsApproval
+        let activeFailure = slot?.failure ?? listing.failure ?? state.previewPanelFailure
+        return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if listing.needsApproval {
+                if needsApproval {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "lock.shield.fill").font(.title3).foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 4) {
@@ -552,7 +557,9 @@ private struct StudioModuleInspector: View {
                         Spacer()
                         Button("Allow Permissions") {
                             app.host.approve(listing.id)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { controller.refresh() }
+                            app.chat.markApproved(listing.id)
+                            controller.refresh()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { controller.refresh() }
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -560,7 +567,7 @@ private struct StudioModuleInspector: View {
                     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
-                if let failure = listing.failure ?? state.previewPanelFailure {
+                if let failure = activeFailure {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "exclamationmark.triangle.fill").font(.title3).foregroundStyle(.red)
                         VStack(alignment: .leading, spacing: 4) {
@@ -579,7 +586,7 @@ private struct StudioModuleInspector: View {
                 }
 
                 // Live Preview
-                if listing.isEnabled && !listing.needsApproval {
+                if listing.isEnabled && !needsApproval {
                     StudioCard(title: "Live Preview", subtitle: "Real-time render of the bar chip and panel using your current theme.") {
                         VStack(alignment: .leading, spacing: 14) {
                             HStack(spacing: 12) {
@@ -1160,15 +1167,22 @@ private struct StudioAssistantPane: View {
                         .textSelection(.enabled)
                 }
                 if message.needsApproval || message.canUndoTheme || message.moduleID != nil {
+                    let pendingApproval = message.needsApproval && message.moduleID.map { model.slot($0)?.needsApproval == true } == true
                     HStack(spacing: 8) {
-                        if message.needsApproval, let id = message.moduleID {
+                        if pendingApproval, let id = message.moduleID {
                             Button("Allow Permissions") {
                                 app.host.approve(id)
+                                app.chat.markApproved(id)
                                 state.selection = .module(id)
                                 controller.refresh()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { controller.refresh() }
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                        } else if message.needsApproval {
+                            Label("Allowed", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
                         }
                         if let id = message.moduleID {
                             Button("Inspect") {

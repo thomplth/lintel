@@ -59,6 +59,15 @@ final class ChatController {
         }
     }
 
+    func markApproved(_ moduleID: String) {
+        var changed = false
+        for index in app.model.chat.indices where app.model.chat[index].moduleID == moduleID && app.model.chat[index].needsApproval {
+            app.model.chat[index].needsApproval = false
+            changed = true
+        }
+        if changed { save() }
+    }
+
     private func save() {
         app.home.save(Array(app.model.chat.suffix(60)), to: app.home.chatFile)
     }

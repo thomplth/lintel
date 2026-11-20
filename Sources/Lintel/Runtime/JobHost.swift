@@ -91,10 +91,6 @@ final class JobHost: ObservableObject {
         for spec in jobs {
             let key = "\(moduleID):\(spec.id)"
             var record = records[key] ?? JobRecord()
-            if record.status == .running {
-                record.status = record.lastOkAt != nil ? .ok : .idle
-                mutated = true
-            }
             if record.nextRunAt == nil, let initial = JobPlanner.initialNextRun(for: spec, record: record, now: now) {
                 record.nextRunAt = initial
                 mutated = true
