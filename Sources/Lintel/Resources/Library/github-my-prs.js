@@ -448,45 +448,78 @@ function renderPRRow(host, rowInfo) {
     tone = 'warn';
   } else if (entry.requested.length > 0) {
     iconName = 'arrow.triangle.branch';
-    badgeLabel = 'In review';
+    badgeLabel = 'Review';
     tone = 'accent';
   }
 
-  // Order actionable signals first so narrow widgets show real status instead of truncating after PR numbers.
+  const compactParts = [];
   const parts = [];
-  if (pr.isDraft && badgeLabel !== 'Draft') parts.push('Draft');
-  if (!entry.hasConflict && entry.isBehind) parts.push('Behind');
+  let valueLabel;
+  if (!badgeLabel && entry.ci.state === 'passed') {
+    valueLabel = 'CI ok';
+  }
+
+  if (pr.isDraft && badgeLabel !== 'Draft') {
+    parts.push('Draft');
+    compactParts.push('Draft');
+  }
+  if (!entry.hasConflict && entry.isBehind) {
+    parts.push('Behind');
+    compactParts.push('Behind');
+  }
 
   if (entry.changesBy.length > 0) {
-    parts.push(entry.changesBy.length === 1 ? `Changes (@${entry.changesBy[0]})` : `Changes (${entry.changesBy.length})`);
+    const label = entry.changesBy.length === 1 ? `Changes (@${entry.changesBy[0]})` : `Changes (${entry.changesBy.length})`;
+    parts.push(label);
+    compactParts.push(entry.changesBy.length === 1 ? `@${entry.changesBy[0]}` : `${entry.changesBy.length} changes`);
   } else if (entry.approvedBy.length > 0) {
-    parts.push(entry.approvedBy.length === 1 ? `Approved (@${entry.approvedBy[0]})` : `Approved (${entry.approvedBy.length})`);
+    const label = entry.approvedBy.length === 1 ? `Approved (@${entry.approvedBy[0]})` : `Approved (${entry.approvedBy.length})`;
+    parts.push(label);
+    compactParts.push(label);
   } else if (entry.commentedBy.length > 0) {
-    parts.push(entry.commentedBy.length === 1 ? `Commented (@${entry.commentedBy[0]})` : `Commented (${entry.commentedBy.length})`);
+    const label = entry.commentedBy.length === 1 ? `Commented (@${entry.commentedBy[0]})` : `Commented (${entry.commentedBy.length})`;
+    parts.push(label);
+    compactParts.push(label);
   }
 
   if (entry.requested.length > 0) {
     const shown = entry.requested.slice(0, 2).join(', ');
     const more = entry.requested.length > 2 ? ` +${entry.requested.length - 2}` : '';
-    parts.push(badgeLabel === 'In review' ? `${shown}${more}` : `Req ${shown}${more}`);
+    const req = badgeLabel === 'Review' ? `${shown}${more}` : `Req ${shown}${more}`;
+    parts.push(req);
+    compactParts.push(req);
   }
 
   if (entry.unresolvedThreads > 0) {
-    parts.push(`${entry.unresolvedThreads} unresolved`);
+    const label = `${entry.unresolvedThreads} unresolved`;
+    parts.push(label);
+    compactParts.push(label);
   }
 
   if (entry.ci.label) {
     if (badgeLabel === 'CI fail') {
-      if (entry.ci.failed > 1) parts.push(`${entry.ci.failed} failed`);
+      if (entry.ci.failed > 1) {
+        parts.push(`${entry.ci.failed} failed`);
+        compactParts.push(`${entry.ci.failed} failed`);
+      }
     } else if (badgeLabel === 'CI running') {
-      if (entry.ci.total > 0) parts.push(`${entry.ci.passed}/${entry.ci.total}`);
+      if (entry.ci.total > 0) {
+        parts.push(`${entry.ci.passed}/${entry.ci.total}`);
+        compactParts.push(`${entry.ci.passed}/${entry.ci.total}`);
+      }
     } else {
       parts.push(entry.ci.label);
+      compactParts.push(entry.ci.label);
     }
   }
 
   if (entry.unresolvedThreads === 0 && entry.totalComments > 0 && entry.approvedBy.length === 0 && entry.changesBy.length === 0) {
     parts.push(`${entry.totalComments} cmt`);
+    compactParts.push(`${entry.totalComments} cmt`);
+  }
+
+  if (!parentNumber && pr.baseRefName && pr.baseRefName !== entry.defaultBranch) {
+    compactParts.push(`← ${pr.baseRefName}`);
   }
 
   const refPart = parentNumber
@@ -495,9 +528,15 @@ function renderPRRow(host, rowInfo) {
   if (stackSize >= 2) parts.push(`${stackIndex}/${stackSize}`);
   parts.push(refPart);
 
+  const compactTitle = stackSize >= 2 && prefix ? `${prefix}#${pr.number}` : `#${pr.number}`;
+  const compactSubtitle = compactParts.length > 0 ? compactParts.join(' · ') : host.format.ago(pr.updatedAt);
+
   return item(title, {
     subtitle: parts.join(' · '),
+    compactTitle,
+    compactSubtitle,
     icon: iconName,
+    value: valueLabel,
     badge: badgeLabel,
     tone,
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,

@@ -310,21 +310,41 @@ function renderReviewItem(host, entry, showScopeHint) {
     tone = 'accent';
   }
 
+  const hasDiff = typeof pr.additions === 'number' && typeof pr.deletions === 'number';
+  const diffCompact = hasDiff ? `+${host.format.compact(pr.additions)} −${host.format.compact(pr.deletions)}` : null;
+  const valueLabel = !badgeLabel && diffCompact ? diffCompact : undefined;
+
   const parts = [`@${entry.authorLogin}`];
-  if (entry.changesBy.length > 0) parts.push(`Changes (@${entry.changesBy[0]})`);
-  else if (entry.approvedBy.length > 0) parts.push(`Approved (${entry.approvedBy.length})`);
-  else if (entry.commentedBy.length > 0) parts.push(`Commented (@${entry.commentedBy[0]})`);
-  if (entry.ciFailed && badgeLabel !== 'CI fail') parts.push('CI fail');
-  if (typeof pr.additions === 'number' && typeof pr.deletions === 'number') {
+  const compactParts = [`@${entry.authorLogin}`];
+  if (entry.changesBy.length > 0) {
+    parts.push(`Changes (@${entry.changesBy[0]})`);
+    compactParts.push(`Changes (@${entry.changesBy[0]})`);
+  } else if (entry.approvedBy.length > 0) {
+    parts.push(`Approved (${entry.approvedBy.length})`);
+    compactParts.push(`Approved (${entry.approvedBy.length})`);
+  } else if (entry.commentedBy.length > 0) {
+    parts.push(`Commented (@${entry.commentedBy[0]})`);
+    compactParts.push(`Commented (@${entry.commentedBy[0]})`);
+  }
+  if (entry.ciFailed && badgeLabel !== 'CI fail') {
+    parts.push('CI fail');
+    compactParts.push('CI fail');
+  }
+  if (hasDiff && !valueLabel) {
     parts.push(`+${pr.additions} −${pr.deletions}`);
+    compactParts.push(diffCompact);
   }
   if (showScopeHint && !entry.isDirect && entry.teams.length > 0) parts.push(`@${entry.teams[0]}`);
   parts.push(`#${pr.number}`);
   parts.push(host.format.ago(pr.updatedAt));
+  if (compactParts.length === 1) compactParts.push(host.format.ago(pr.updatedAt));
 
   return item(cleanTitle(pr.title), {
     subtitle: parts.join(' · '),
+    compactTitle: `#${pr.number}`,
+    compactSubtitle: compactParts.join(' · '),
     icon: iconName,
+    value: valueLabel,
     badge: badgeLabel,
     tone,
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,

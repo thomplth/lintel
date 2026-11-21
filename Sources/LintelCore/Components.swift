@@ -248,14 +248,16 @@ public enum Catalog {
         ComponentSpec(
             component: .item, surfaces: panel,
             props: [
-                PropSpec("title", .string, required: true), PropSpec("subtitle", .string), PropSpec("icon", .symbol),
+                PropSpec("title", .string, required: true), PropSpec("subtitle", .string),
+                PropSpec("compactTitle", .string), PropSpec("compactSubtitle", .string),
+                PropSpec("icon", .symbol),
                 PropSpec("value", .string), PropSpec("badge", .string), PropSpec("tone", .tone), PropSpec("action", .action),
                 PropSpec("payload", .any), PropSpec("url", .url), PropSpec("accessoryIcon", .symbol),
                 PropSpec("accessoryAction", .action), PropSpec("accessoryLabel", .string),
             ],
             hasChildren: false,
-            signature: "item(title, { subtitle?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
-            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
+            signature: "item(title, { subtitle?, compactTitle?, compactSubtitle?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
+            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. compactTitle and compactSubtitle are optional shorter labels used automatically when the widget is narrow so tight sidebar cards stay unclipped while widening reveals full titles. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
         ),
         ComponentSpec(
             component: .keyValue, surfaces: panel,

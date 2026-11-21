@@ -497,6 +497,9 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(allRows.count == 2)
         #expect(allRows.allSatisfy { ($0.string("url") ?? "").hasPrefix("https://github.com/") })
         #expect(allRows[0].string("title")?.contains("Fix offline sync") == true)
+        #expect(allRows[0].string("compactTitle") == "#101")
+        #expect(allRows[0].string("compactSubtitle")?.contains("@bob") == true)
+        #expect(allRows[1].string("compactTitle") == "#202")
         #expect(allRows[1].string("badge") == "Conflict")
 
         let configure = try harness.render("configure")
@@ -612,6 +615,8 @@ private func sampleMyPRsGraphQLResponse() -> String {
 
         // Layer 1 (#301): base of stack, approved by 2, CI 12/12, Ready
         #expect(stackRows[0].string("title") == "Add FreeText writer core")
+        #expect(stackRows[0].string("compactTitle") == "#301")
+        #expect(stackRows[0].string("compactSubtitle") == "Approved (2) · CI 12/12")
         #expect(stackRows[0].string("badge") == "Ready")
         #expect(stackRows[0].string("tone") == "good")
         #expect(stackRows[0].string("subtitle")?.hasPrefix("Approved (2)") == true)
@@ -620,6 +625,9 @@ private func sampleMyPRsGraphQLResponse() -> String {
 
         // Layer 2 (#302): stacked on #301, requesting @dave & @xp, 2 unresolved threads, CI running
         #expect(stackRows[1].string("title")?.hasPrefix("└ ") == true)
+        #expect(stackRows[1].string("compactTitle") == "└ #302")
+        #expect(stackRows[1].string("compactSubtitle")?.contains("@dave") == true)
+        #expect(stackRows[1].string("compactSubtitle")?.contains("2 unresolved") == true)
         #expect(stackRows[1].string("subtitle")?.contains("2/3 · #302 ← #301") == true)
         #expect(stackRows[1].string("subtitle")?.contains("@dave") == true)
         #expect(stackRows[1].string("subtitle")?.contains("2 unresolved") == true)
@@ -627,6 +635,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
 
         // Layer 3 (#303): stacked on #302, conflicting + 2 CI failures across 218 checks
         #expect(stackRows[2].string("title")?.hasPrefix("└ ") == true)
+        #expect(stackRows[2].string("compactTitle") == "└ #303")
         #expect(stackRows[2].string("badge") == "Conflict")
         #expect(stackRows[2].string("tone") == "bad")
         #expect(stackRows[2].string("subtitle")?.contains("3/3 · #303 ← #302") == true)

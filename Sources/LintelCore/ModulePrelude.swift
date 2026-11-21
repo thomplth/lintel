@@ -59,7 +59,9 @@ public enum ModulePrelude {
     function list(items, options) { var o = __options(options); return __node('list', { compact: o.compact, overflow: o.overflow }, items); }
     function item(title, options) {
       var o = __options(options);
-      return __node('item', { title: __string(title), subtitle: o.subtitle, icon: o.icon, value: o.value, badge: o.badge,
+      return __node('item', { title: __string(title), subtitle: o.subtitle,
+        compactTitle: o.compactTitle, compactSubtitle: o.compactSubtitle,
+        icon: o.icon, value: o.value, badge: o.badge,
         tone: o.tone || o.color, action: o.action, payload: o.payload, url: o.url,
         accessoryIcon: o.accessoryIcon || (o.accessoryAction ? 'minus.circle' : undefined), accessoryAction: o.accessoryAction, accessoryLabel: o.accessoryLabel });
     }

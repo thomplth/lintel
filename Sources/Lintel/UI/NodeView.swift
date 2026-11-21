@@ -222,7 +222,7 @@ struct NodeView: View {
                         .font(context.font(role: "caption", weight: "semibold"))
                         .foregroundStyle(context.secondary)
                         .textCase(.uppercase)
-                        .kerning(context.isNarrowWidget ? 0.1 : 0.4)
+                        .kerning(context.isNarrowWidget ? 0 : 0.4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -582,53 +582,103 @@ private struct ItemRow: View {
     var body: some View {
         Group {
             if isNarrow {
+                let compactTitle = node.string("compactTitle")
+                let compactSubtitle = compactOverride ? nil : node.string("compactSubtitle")
                 let subtitle = compactOverride ? nil : node.string("subtitle")
                 let badge = node.string("badge")
                 let value = node.string("value")
-                let hasMeta = !compactOverride && !context.isShortWidget
-                    && (badge != nil || value != nil || (subtitle?.isEmpty == false))
-                let secondarySummary: String? = {
-                    let parts = [value, subtitle].compactMap { $0 }.filter { !$0.isEmpty }
-                    return parts.isEmpty ? nil : parts.joined(separator: " · ")
-                }()
-                HStack(alignment: .top, spacing: context.metrics.unit * 1.5) {
-                    if let name = node.string("icon") {
-                        SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
-                            .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
-                            .frame(width: context.theme.fontSize * 0.95, height: context.metrics.fontSize(role: "label") * 1.25)
-                    }
-                    VStack(alignment: .leading, spacing: 1.5) {
-                        HStack(spacing: context.metrics.unit) {
-                            Text(node.string("title") ?? "")
-                                .font(context.font(role: "label", weight: context.theme.fontWeight))
-                                .foregroundStyle(context.primary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 0)
-                            if let accessory = node.string("accessoryAction") {
-                                ItemAccessory(
-                                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
-                                    focusKey: node.focusKey + "|accessory", context: context
-                                ) { context.perform(accessory, node.props["payload"] ?? .null) }
-                            }
+                if let compactTitle, !compactTitle.isEmpty {
+                    let meta = (compactSubtitle?.isEmpty == false ? compactSubtitle : subtitle)
+                    let showsMeta = !compactOverride && !context.isShortWidget && (meta?.isEmpty == false)
+                    HStack(alignment: .top, spacing: context.metrics.unit * 1.5) {
+                        if let name = node.string("icon") {
+                            SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                                .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
+                                .frame(width: context.theme.fontSize * 0.95, height: context.metrics.fontSize(role: "label") * 1.25)
                         }
-                        if hasMeta {
+                        VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 0) {
+                                Text(compactTitle)
+                                    .font(context.font(role: "label", weight: "semibold", mono: true))
+                                    .foregroundStyle(context.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer(minLength: 4)
                                 if let badge {
                                     Text(badge)
                                         .font(context.font(role: "caption", weight: "semibold"))
                                         .foregroundStyle(context.color(node.tone(), fallback: context.accent))
                                         .lineLimit(1)
                                         .fixedSize(horizontal: true, vertical: false)
-                                }
-                                if let secondarySummary {
-                                    Text(badge != nil ? " · \(secondarySummary)" : secondarySummary)
-                                        .font(context.font(role: "caption"))
+                                } else if let value {
+                                    Text(value)
+                                        .font(context.font(role: "caption", mono: true))
                                         .foregroundStyle(context.secondary)
                                         .lineLimit(1)
-                                        .truncationMode(.tail)
+                                        .fixedSize(horizontal: true, vertical: false)
                                 }
+                                if let accessory = node.string("accessoryAction") {
+                                    ItemAccessory(
+                                        symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                                        focusKey: node.focusKey + "|accessory", context: context
+                                    ) { context.perform(accessory, node.props["payload"] ?? .null) }
+                                }
+                            }
+                            if showsMeta, let meta {
+                                Text(meta)
+                                    .font(context.font(role: "caption"))
+                                    .foregroundStyle(context.secondary)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                } else {
+                    let hasMeta = !compactOverride && !context.isShortWidget
+                        && (badge != nil || value != nil || (subtitle?.isEmpty == false))
+                    let secondarySummary: String? = {
+                        let parts = [value, subtitle].compactMap { $0 }.filter { !$0.isEmpty }
+                        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+                    }()
+                    HStack(alignment: .top, spacing: context.metrics.unit * 1.5) {
+                        if let name = node.string("icon") {
+                            SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                                .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
+                                .frame(width: context.theme.fontSize * 0.95, height: context.metrics.fontSize(role: "label") * 1.25)
+                        }
+                        VStack(alignment: .leading, spacing: 1.5) {
+                            HStack(spacing: context.metrics.unit) {
+                                Text(node.string("title") ?? "")
+                                    .font(context.font(role: "label", weight: context.theme.fontWeight))
+                                    .foregroundStyle(context.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                                 Spacer(minLength: 0)
+                                if let accessory = node.string("accessoryAction") {
+                                    ItemAccessory(
+                                        symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                                        focusKey: node.focusKey + "|accessory", context: context
+                                    ) { context.perform(accessory, node.props["payload"] ?? .null) }
+                                }
+                            }
+                            if hasMeta {
+                                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                                    if let badge {
+                                        Text(badge)
+                                            .font(context.font(role: "caption", weight: "semibold"))
+                                            .foregroundStyle(context.color(node.tone(), fallback: context.accent))
+                                            .lineLimit(1)
+                                            .fixedSize(horizontal: true, vertical: false)
+                                    }
+                                    if let secondarySummary {
+                                        Text(badge != nil ? " · \(secondarySummary)" : secondarySummary)
+                                            .font(context.font(role: "caption"))
+                                            .foregroundStyle(context.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
                             }
                         }
                     }
