@@ -34,8 +34,8 @@ final class ChatController {
             app.model.isChatBusy = false
             app.model.chatActivity = ""
             save()
-            if let id = reply.moduleID, app.studioWindow?.isVisible == true {
-                app.studioWindow?.show(module: id)
+            if let id = reply.moduleID, app.mainWindow?.isVisible == true {
+                app.mainWindow?.show(.module(id))
             }
         }
     }
@@ -53,7 +53,7 @@ final class ChatController {
             }
             save()
         case "review", "open":
-            if let id = message?.moduleID { app.showStudio(module: id) }
+            if let id = message?.moduleID { app.showWindow(.module(id)) }
         default:
             break
         }

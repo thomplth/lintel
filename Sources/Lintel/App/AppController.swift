@@ -19,8 +19,7 @@ final class AppController {
     private(set) var chat: ChatController!
     private(set) var bar: BarWindowController?
     private(set) var panelWindow: PanelWindowController?
-    private var settingsWindow: SettingsWindowController?
-    private(set) var studioWindow: StudioWindowController?
+    private(set) var mainWindow: MainWindowController?
     private var control: ControlChannel?
     let pointerTap = PointerTap()
     private(set) lazy var perf = PerfRecorder(home: home, runnerPID: { [runner] in runner.processIdentifier })
@@ -79,11 +78,11 @@ final class AppController {
             self?.applyDockPresence()
         }
         host.onModulesChanged = { [weak self] in
-            guard let self, self.studioWindow?.isVisible == true else { return }
-            self.studioWindow?.refresh()
+            guard let self, self.mainWindow?.isVisible == true else { return }
+            self.mainWindow?.refresh()
         }
         services.onLogChanged = { [weak self] moduleID in
-            self?.studioWindow?.notifyLogsChanged(for: moduleID)
+            self?.mainWindow?.notifyLogsChanged(for: moduleID)
         }
     }
 
@@ -145,7 +144,7 @@ final class AppController {
             MainActor.assumeIsolated { self?.endDockHold() }
         }
         if !model.settings.hasOnboarded {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showSettings(tab: .welcome) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showWindow(.welcome) }
         }
     }
 
@@ -156,24 +155,27 @@ final class AppController {
     private func applyDockPresence() {
         let policy: NSApplication.ActivationPolicy = model.settings.showsInDock ? .regular : .accessory
         guard NSApp.activationPolicy() != policy else { return }
-        let settingsIsOpen = settingsWindow?.window?.isVisible == true
+        let mainIsOpen = mainWindow?.isVisible == true
         NSApp.setActivationPolicy(policy)
-        // Turning into an accessory app deactivates it, which would drop the Settings window the toggle sits in behind other apps.
-        if settingsIsOpen {
+        // Turning into an accessory app deactivates it, which would drop the main window the toggle sits in behind other apps.
+        if mainIsOpen {
             NSApp.activate(ignoringOtherApps: true)
-            settingsWindow?.window?.makeKeyAndOrderFront(nil)
+            mainWindow?.window?.makeKeyAndOrderFront(nil)
         }
     }
 
     func dockClicked() {
-        switch DockClick.response(isBarOpen: model.isActive && !model.isHidden) {
+        switch DockClick.response(isBarOpen: model.isActive && !model.isHidden, hasMainWindow: mainWindow?.isVisible == true) {
+        case .focusWindow:
+            endDockHold()
+            mainWindow?.focus()
         case .openBar:
             if model.isHidden { bar?.revealIfHidden() }
             isHeldByDock = true
             bar?.hold()
-        case .openSettings:
+        case .openWindow:
             endDockHold()
-            showSettings(tab: .general)
+            showWindow()
         }
     }
 
@@ -254,7 +256,7 @@ final class AppController {
             openAssistant()
         case .settings:
             closePanel()
-            showSettings(tab: .general)
+            showWindow(.general)
         case .close:
             dismiss()
         }
@@ -305,8 +307,8 @@ final class AppController {
     }
 
     func toggleAssistant() {
-        if studioWindow?.isVisible == true, studioWindow?.window?.isKeyWindow == true {
-            studioWindow?.window?.close()
+        if mainWindow?.isVisible == true, mainWindow?.window?.isKeyWindow == true, mainWindow?.state.showAssistant == true {
+            mainWindow?.close()
         } else {
             openAssistant()
         }
@@ -314,12 +316,22 @@ final class AppController {
 
     func openAssistant(draft: String? = nil) {
         closePanel()
-        showStudio(focusChat: true, draft: draft)
+        showWindow(focusChat: true, draft: draft)
     }
 
-    func showStudio(module id: String? = nil, tab: StudioInspectorTab? = nil, focusChat: Bool = false, draft: String? = nil) {
-        if studioWindow == nil { studioWindow = StudioWindowController(app: self) }
-        studioWindow?.show(module: id, tab: tab, focusChat: focusChat, draft: draft)
+    func showWindow(
+        _ destination: MainWindowSection? = nil,
+        inspectorTab: ModuleInspectorTab? = nil,
+        showAssistant: Bool? = nil,
+        focusChat: Bool = false,
+        draft: String? = nil
+    ) {
+        if mainWindow == nil { mainWindow = MainWindowController(app: self) }
+        mainWindow?.show(destination, inspectorTab: inspectorTab, showAssistant: showAssistant, focusChat: focusChat, draft: draft)
+    }
+
+    func closeMainWindow() {
+        mainWindow?.close()
     }
 
     func closePanel(releasing: Bool = true) {
@@ -365,20 +377,21 @@ final class AppController {
         case "fix":
             let failure = model.slot(id)?.failure ?? model.panel?.failure ?? "it fails"
             closePanel()
-            showStudio(module: id, focusChat: true)
+            showWindow(.module(id), focusChat: true)
             chat.submit("Fix the module \"\(id)\". It fails with: \(failure)")
         case "change":
             closePanel()
-            showStudio(module: id, focusChat: true)
+            showWindow(.module(id), focusChat: true)
         case "studio":
             closePanel()
-            showStudio(module: id)
+            showWindow(.module(id))
         case "source":
-            NSWorkspace.shared.activateFileViewerSelecting([home.moduleFile(id: id)])
-        case "settings":
-            let tab: SettingsTab = model.panel?.content == .assistant ? .assistant : .modules
             closePanel()
-            showSettings(tab: tab)
+            showWindow(.module(id), inspectorTab: .code)
+        case "settings":
+            let destination: MainWindowSection = model.panel?.content == .assistant ? .assistant : .general
+            closePanel()
+            showWindow(destination)
         case "pin-widget":
             let shape = model.slot(id)?.defaultShape ?? .card
             let box = model.panel?.widgetBox ?? Metrics(model.theme).defaultWidgetBox(for: shape)
@@ -418,10 +431,10 @@ final class AppController {
             host.update(layout)
         case "change":
             closePanel()
-            showStudio(module: id, focusChat: true)
+            showWindow(.module(id), focusChat: true)
         case "settings":
             closePanel()
-            showSettings(tab: .modules)
+            showWindow(.general)
         default:
             break
         }
@@ -459,11 +472,11 @@ final class AppController {
         case "down": layout.moveToRow(slot.id, offset: 1)
         case "change":
             closePanel()
-            showStudio(module: slot.id, focusChat: true)
+            showWindow(.module(slot.id), focusChat: true)
             return
         case "settings":
             closePanel()
-            showSettings(tab: .items)
+            showWindow(.barLayout)
             return
         default: return
         }
@@ -483,17 +496,11 @@ final class AppController {
         adoption.scanIfNeeded(force: false)
     }
 
-    func showSettings(tab: SettingsTab) {
-        if settingsWindow == nil { settingsWindow = SettingsWindowController(app: self) }
-        settingsWindow?.show(tab: tab)
-    }
-
     var windows: [(name: String, window: NSWindow)] {
         var result: [(String, NSWindow)] = []
         if let bar { result.append(("bar", bar.panel)) }
         if let panelWindow, panelWindow.isVisible { result.append(("panel", panelWindow.panel)) }
-        if let window = settingsWindow?.window, window.isVisible { result.append(("settings", window)) }
-        if let window = studioWindow?.window, window.isVisible { result.append(("studio", window)) }
+        if let window = mainWindow?.window, window.isVisible { result.append(("main", window)) }
         return result
     }
 }

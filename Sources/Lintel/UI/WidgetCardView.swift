@@ -590,7 +590,7 @@ struct WidgetCardView: View, Equatable {
                     model.onWidgetCommand(slot.id, "collapse")
                 }
             }
-            pillButton("sparkles", "Open in Lintel Studio", context: context) {
+            pillButton("sparkles", "Open in Lintel", context: context) {
                 if isPeek { model.onPanelCommand("change") } else { model.onWidgetCommand(slot.id, "change") }
             }
             pillButton("gearshape", "Settings", context: context) {

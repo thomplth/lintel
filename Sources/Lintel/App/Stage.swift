@@ -223,7 +223,19 @@ final class ControlChannel {
             }
         case "close": app.closePanel()
         case "assistant": app.openAssistant(draft: command["draft"].string)
-        case "studio": app.showStudio(module: command["module"].string, focusChat: command["chat"].bool ?? false)
+        case "window":
+            let destination = command["module"].string.map { MainWindowSection.module($0) }
+                ?? command["section"].string.flatMap(MainWindowSection.fromRoute)
+                ?? command["tab"].string.flatMap(MainWindowSection.fromRoute)
+            app.showWindow(
+                destination,
+                showAssistant: command["assistant"].bool,
+                focusChat: command["chat"].bool ?? false,
+                draft: command["draft"].string
+            )
+        case "studio":
+            let destination = command["module"].string.map { MainWindowSection.module($0) } ?? .dashboard
+            app.showWindow(destination, focusChat: command["chat"].bool ?? false)
         case "chat": if let text = command["text"].string { app.openAssistant(); app.chat.submit(text) }
         case "jobs":
             guard let path = command["path"].string else { return }
@@ -242,7 +254,7 @@ final class ControlChannel {
         case "hold": app.bar?.hold()
         case "dock": app.dockClicked()
         case "release": app.closePanel(); app.bar?.release()
-        case "settings": app.showSettings(tab: command["tab"].string.flatMap(SettingsTab.init(rawValue:)) ?? .general)
+        case "settings": app.showWindow(command["tab"].string.flatMap(MainWindowSection.fromRoute) ?? .general)
         case "action":
             if let slot = command["slot"].string, let action = command["action"].string {
                 Task { await app.host.perform(slot, action: action, payload: command["payload"]) }
@@ -297,7 +309,7 @@ final class ControlChannel {
         case "metrics":
             guard let path = command["path"].string, let line = try? app.perf.snapshot().line() else { return }
             try? line.write(toFile: path, atomically: true, encoding: .utf8)
-        case "close-settings": app.windows.first { $0.name == "settings" }?.window.close()
+        case "close-settings", "close-window": app.closeMainWindow()
         case "reveal-menu-bar": app.adoption.reveal {}
         case "quit": NSApp.terminate(nil)
         default: break

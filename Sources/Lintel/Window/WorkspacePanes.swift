@@ -2,233 +2,35 @@ import AppKit
 import LintelCore
 import SwiftUI
 
-struct StudioView: View {
-    let app: AppController
-    let controller: StudioWindowController
-    @ObservedObject var model: BarModel
-    @ObservedObject var jobs: JobHost
-    @ObservedObject var state: StudioState
-
-    var body: some View {
-        NavigationSplitView {
-            StudioSidebar(app: app, controller: controller, model: model, jobs: jobs, state: state)
-                .navigationSplitViewColumnWidth(min: 205, ideal: 235, max: 290)
-        } detail: {
-            Group {
-                switch state.selection {
-                case .dashboard:
-                    StudioDashboardPane(app: app, controller: controller, model: model, jobs: jobs, state: state)
-                case .module(let id):
-                    StudioModuleInspector(app: app, controller: controller, model: model, jobs: jobs, state: state, moduleID: id)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .inspector(isPresented: $state.showAssistant) {
-                StudioAssistantPane(app: app, controller: controller, model: model, state: state)
-                    .inspectorColumnWidth(min: 300, ideal: 350, max: 460)
-            }
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                Button {
-                    controller.refresh()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .help("Refresh modules and previews")
-
-                Button {
-                    state.selection = .dashboard
-                    state.showAssistant = true
-                    model.chatDraft = "Build a new module that "
-                    model.chatFocusRequests += 1
-                } label: {
-                    Label("New Module", systemImage: "plus")
-                }
-                .help("Ask the assistant to build a new module")
-
-                Button {
-                    app.showSettings(tab: .general)
-                } label: {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .help("Open Lintel Settings")
-
-                Button {
-                    state.showAssistant.toggle()
-                } label: {
-                    Label("Assistant", systemImage: "sparkles")
-                }
-                .help(state.showAssistant ? "Hide Assistant" : "Show Assistant")
-            }
-        }
-        .frame(minWidth: 920, minHeight: 560)
-    }
-}
-
-// MARK: Sidebar
-
-private struct StudioSidebar: View {
-    let app: AppController
-    let controller: StudioWindowController
-    @ObservedObject var model: BarModel
-    @ObservedObject var jobs: JobHost
-    @ObservedObject var state: StudioState
-
-    private var alertCount: Int {
-        let failingModules = state.listings.filter { $0.failure != nil || $0.needsApproval }.count
-        return failingModules + jobs.failingCount
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            List(selection: $state.selection) {
-                Section("Overview") {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.grid.2x2")
-                            .foregroundStyle(.tint)
-                            .frame(width: 18)
-                        Text("Dashboard")
-                            .fontWeight(.medium)
-                        Spacer()
-                        if alertCount > 0 {
-                            Text("\(alertCount)")
-                                .font(.caption2.weight(.semibold))
-                                .monospacedDigit()
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 1)
-                                .background(Color.red.opacity(0.18), in: Capsule())
-                                .foregroundStyle(.red)
-                        } else if jobs.runningCount > 0 {
-                            ProgressView().controlSize(.mini)
-                        }
-                    }
-                    .tag(StudioSelection.dashboard)
-                }
-
-                ForEach([ModuleListing.Origin.user, .library, .builtIn], id: \.self) { origin in
-                    let group = state.listings.filter { $0.origin == origin }
-                    if !group.isEmpty {
-                        Section(origin == .user ? "Yours" : origin == .library ? "Library" : "Built in") {
-                            ForEach(group) { listing in
-                                SidebarModuleRow(app: app, model: model, jobs: jobs, listing: listing)
-                                    .tag(StudioSelection.module(listing.id))
-                            }
-                        }
-                    }
-                }
-            }
-            .listStyle(.sidebar)
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button {
-                    state.showAssistant = true
-                    model.chatDraft = "Build a new module that "
-                    model.chatFocusRequests += 1
-                } label: {
-                    Label("New", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-
-                Spacer()
-
-                Button {
-                    ModuleSharing.importModule(app: app) { controller.refresh() }
-                } label: {
-                    Label("Import…", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderless)
-            }
-            .font(.footnote)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-    }
-}
-
-private struct SidebarModuleRow: View {
-    let app: AppController
-    @ObservedObject var model: BarModel
-    @ObservedObject var jobs: JobHost
-    let listing: ModuleListing
-
-    private var moduleJobs: [JobSnapshot] { jobs.snapshots(for: listing.id) }
-    private var liveNeedsApproval: Bool { model.slot(listing.id)?.needsApproval ?? listing.needsApproval }
-    private var liveFailure: String? { model.slot(listing.id)?.failure ?? listing.failure }
-    private var isHiddenFromBar: Bool { listing.isEnabled && model.layout.isHidden(listing.id) }
-
-    private var statusColor: Color {
-        if liveFailure != nil || moduleJobs.contains(where: { $0.effectiveStatus == .failed }) { return .red }
-        if liveNeedsApproval { return .orange }
-        if isHiddenFromBar { return .secondary }
-        if moduleJobs.contains(where: { $0.effectiveStatus == .running }) { return .blue }
-        return listing.isEnabled ? .green : .secondary.opacity(0.45)
-    }
-
-    private var trailingText: String {
-        if isHiddenFromBar { return "hidden" }
-        if !moduleJobs.isEmpty {
-            return moduleJobs.count == 1 ? "1 job" : "\(moduleJobs.count) jobs"
-        }
-        if let manifest = app.host.manifest(of: listing.id) {
-            let s = Int(manifest.refreshSeconds)
-            return s >= 60 && s % 60 == 0 ? "\(s / 60)m" : "\(s)s"
-        }
-        return listing.isEnabled ? "" : "off"
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
-            Image(systemName: listing.icon)
-                .foregroundStyle(listing.isEnabled ? .primary : .secondary)
-                .frame(width: 16)
-            Text(listing.title)
-                .lineLimit(1)
-                .foregroundStyle(listing.isEnabled ? .primary : .secondary)
-            Spacer(minLength: 4)
-            if !trailingText.isEmpty {
-                Text(trailingText)
-                    .font(.caption2)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 // MARK: Dashboard
 
-private struct StudioDashboardPane: View {
+struct DashboardPane: View {
     let app: AppController
-    let controller: StudioWindowController
+    let controller: MainWindowController
     @ObservedObject var model: BarModel
     @ObservedObject var jobs: JobHost
-    @ObservedObject var state: StudioState
+    @ObservedObject var state: MainWindowState
 
-    private var enabledListings: [ModuleListing] { state.listings.filter(\.isEnabled) }
+    private var enabledListings: [ModuleListing] {
+        state.listings
+            .filter(\.isEnabled)
+            .sorted { lhs, rhs in
+                let lhsHidden = model.layout.isHidden(lhs.id)
+                let rhsHidden = model.layout.isHidden(rhs.id)
+                if lhsHidden != rhsHidden { return !lhsHidden }
+                return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
     private var issueListings: [ModuleListing] { state.listings.filter { $0.failure != nil || $0.needsApproval } }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Dashboard")
-                            .font(.title2.weight(.semibold))
-                        Text("Live overview of all modules, background poll loops, and scheduled jobs.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
+                PaneHeader("Dashboard", subtitle: "Live overview of active modules, background poll loops, and scheduled jobs.") {
                     if let pid = app.runner.processIdentifier {
                         HStack(spacing: 6) {
                             Circle().fill(app.runner.isRunning ? Color.green : Color.red).frame(width: 8, height: 8)
-                            Text("Runtime PID \(pid)")
+                            Text("Runtime PID \(String(pid))")
                                 .font(.caption.monospaced())
                                 .foregroundStyle(.secondary)
                         }
@@ -238,15 +40,18 @@ private struct StudioDashboardPane: View {
                     }
                 }
 
-                // KPI cards
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
-                    KPICard(
-                        title: "Active Modules",
-                        value: "\(enabledListings.count)",
-                        caption: "of \(state.listings.count) installed",
-                        symbol: "puzzlepiece.extension",
-                        tint: .accentColor
-                    )
+                    Button { state.selection = .modules } label: {
+                        KPICard(
+                            title: "Active Modules",
+                            value: "\(enabledListings.count)",
+                            caption: "of \(state.listings.count) installed",
+                            symbol: "puzzlepiece.extension",
+                            tint: .accentColor
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     KPICard(
                         title: "Scheduled Jobs",
                         value: "\(jobs.snapshots.count)",
@@ -254,6 +59,7 @@ private struct StudioDashboardPane: View {
                         symbol: "clock.arrow.circlepath",
                         tint: jobs.runningCount > 0 ? .blue : .accentColor
                     )
+
                     let issues = issueListings.count + jobs.failingCount
                     KPICard(
                         title: "Needs Attention",
@@ -262,6 +68,7 @@ private struct StudioDashboardPane: View {
                         symbol: issues == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
                         tint: issues == 0 ? .green : .red
                     )
+
                     let cliCount = enabledListings.filter { !(app.host.backgroundActivity(of: $0.id)?.tools.isEmpty ?? true) }.count
                     KPICard(
                         title: "CLI & Web Hooks",
@@ -272,8 +79,7 @@ private struct StudioDashboardPane: View {
                     )
                 }
 
-                // Scheduled Jobs across all modules
-                StudioCard(
+                WindowCard(
                     title: "Scheduled Jobs",
                     subtitle: "Background tasks managed by Lintel (cron, interval, or dynamic reset schedules)."
                 ) {
@@ -300,13 +106,16 @@ private struct StudioDashboardPane: View {
                     }
                 }
 
-                // Modules & Background Processes table
-                StudioCard(
+                WindowCard(
                     title: "Modules & Background Activity",
                     subtitle: "Every active module’s poll cadence, scheduled jobs, network hosts, and CLI tools."
                 ) {
                     if enabledListings.isEmpty {
-                        Text("No enabled modules.").foregroundStyle(.secondary)
+                        HStack {
+                            Text("No enabled modules.").foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Browse Modules") { state.selection = .modules }
+                        }
                     } else {
                         ForEach(enabledListings) { listing in
                             DashboardModuleRow(app: app, jobs: jobs, listing: listing, isHiddenFromBar: model.layout.isHidden(listing.id)) {
@@ -317,9 +126,9 @@ private struct StudioDashboardPane: View {
                     }
                 }
             }
-            .padding(22)
+            .padding(24)
         }
-        .id(state.tick / 100000) // preserve scroll position while allowing reactive updates
+        .id(state.tick / 100000)
         .navigationTitle("Dashboard")
     }
 }
@@ -348,6 +157,7 @@ private struct KPICard: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
@@ -388,7 +198,6 @@ private struct DashboardModuleRow: View {
                         }
                     }
 
-                    // Explicit background process tags
                     HStack(spacing: 6) {
                         if let activity {
                             TagPill(text: "Poll \(formatSeconds(activity.refreshSeconds))", color: .secondary)
@@ -429,14 +238,229 @@ private struct DashboardModuleRow: View {
     }
 }
 
-// MARK: Module Inspector
+// MARK: Modules Catalog
 
-private struct StudioModuleInspector: View {
+struct ModulesCatalogPane: View {
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case enabled = "Enabled"
+        case user = "Yours"
+        case builtIn = "Built in"
+        case library = "Library"
+
+        var id: String { rawValue }
+    }
+
     let app: AppController
-    let controller: StudioWindowController
+    let controller: MainWindowController
     @ObservedObject var model: BarModel
     @ObservedObject var jobs: JobHost
-    @ObservedObject var state: StudioState
+    @ObservedObject var state: MainWindowState
+    @State private var filter: Filter = .all
+    @State private var searchText = ""
+
+    private var filteredListings: [ModuleListing] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return state.listings.filter { listing in
+            switch filter {
+            case .all: break
+            case .enabled: guard listing.isEnabled else { return false }
+            case .user: guard listing.origin == .user else { return false }
+            case .builtIn: guard listing.origin == .builtIn else { return false }
+            case .library: guard listing.origin == .library else { return false }
+            }
+            if query.isEmpty { return true }
+            return listing.title.lowercased().contains(query)
+                || listing.id.lowercased().contains(query)
+                || listing.summary.lowercased().contains(query)
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                PaneHeader("Modules", subtitle: "Enable built-in and library modules, inspect code and logs, or ask the assistant to build new ones.") {
+                    HStack(spacing: 8) {
+                        Button("Import…") { ModuleSharing.importModule(app: app) { controller.refresh() } }
+                        Button("Modules Folder") { NSWorkspace.shared.open(app.home.modulesDirectory) }
+                        Button("Build New") {
+                            state.showAssistant = true
+                            model.chatDraft = "Build a new module that "
+                            model.chatFocusRequests += 1
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Picker("Filter", selection: $filter) {
+                        ForEach(Filter.allCases) { item in
+                            Text(item.rawValue).tag(item)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 360)
+
+                    Spacer()
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField("Filter modules…", text: $searchText)
+                            .textFieldStyle(.plain)
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .frame(width: 220)
+                }
+
+                let groups: [ModuleListing.Origin] = [.user, .builtIn, .library]
+                let nonEmptyGroups = groups.filter { origin in
+                    filteredListings.contains { $0.origin == origin }
+                }
+
+                if nonEmptyGroups.isEmpty {
+                    WindowCard(title: "No matching modules") {
+                        Text(searchText.isEmpty ? "No modules in this category yet." : "No modules match “\(searchText)”.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    ForEach(nonEmptyGroups, id: \.self) { origin in
+                        let group = filteredListings.filter { $0.origin == origin }
+                        WindowCard(title: origin == .user ? "Yours" : origin == .builtIn ? "Built in" : "Library") {
+                            ForEach(group) { listing in
+                                CatalogModuleRow(
+                                    app: app,
+                                    controller: controller,
+                                    jobs: jobs,
+                                    listing: listing,
+                                    isHidden: model.layout.isHidden(listing.id),
+                                    isWidget: model.layout.isWidget(listing.id),
+                                    onInspect: { state.selection = .module(listing.id) }
+                                )
+                                if listing.id != group.last?.id { Divider() }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationTitle("Modules")
+    }
+}
+
+private struct CatalogModuleRow: View {
+    let app: AppController
+    let controller: MainWindowController
+    @ObservedObject var jobs: JobHost
+    let listing: ModuleListing
+    let isHidden: Bool
+    let isWidget: Bool
+    let onInspect: () -> Void
+
+    var body: some View {
+        let modJobs = jobs.snapshots(for: listing.id)
+        HStack(alignment: .center, spacing: 10) {
+            Button(action: onInspect) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: listing.icon)
+                        .font(.title3)
+                        .frame(width: 26)
+                        .foregroundStyle(listing.isEnabled ? Color.accentColor : Color.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(listing.title).fontWeight(.medium)
+                            if isWidget {
+                                TagPill(text: "Widget", color: .accentColor)
+                            }
+                            if !modJobs.isEmpty {
+                                TagPill(text: modJobs.count == 1 ? "1 job" : "\(modJobs.count) jobs", color: .blue)
+                            }
+                            if listing.needsApproval {
+                                TagPill(text: "Needs approval", color: .orange)
+                            } else if listing.failure != nil {
+                                TagPill(text: "Error", color: .red)
+                            } else if listing.isEnabled && isHidden {
+                                TagPill(text: "Hidden from bar", color: .orange)
+                            }
+                        }
+                        if !listing.summary.isEmpty {
+                            Text(listing.summary)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !listing.permissions.isEmpty {
+                            Text("Uses: " + listing.permissions.joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        if let failure = listing.failure {
+                            Text(failure).font(.footnote).foregroundStyle(.red).lineLimit(2)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if listing.isEnabled && isHidden {
+                Button("Show in Bar") {
+                    app.host.showInBar(listing.id)
+                }
+                .controlSize(.small)
+            }
+
+            Button("Inspect", action: onInspect)
+                .controlSize(.small)
+
+            if listing.origin == .user {
+                Menu {
+                    Button("Open File") { NSWorkspace.shared.open(listing.file) }
+                    Button("Export…") { ModuleSharing.export(listing, app: app) }
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([listing.file]) }
+                    Divider()
+                    Button("Remove", role: .destructive) {
+                        app.host.remove(listing.id)
+                        controller.refresh()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 28)
+            }
+
+            Toggle("", isOn: Binding(get: { listing.isEnabled }, set: { isOn in
+                app.host.setEnabled(listing.id, isOn, origin: listing.origin)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { controller.refresh() }
+            }))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+}
+
+// MARK: Module Inspector
+
+struct ModuleInspectorPane: View {
+    let app: AppController
+    let controller: MainWindowController
+    @ObservedObject var model: BarModel
+    @ObservedObject var jobs: JobHost
+    @ObservedObject var state: MainWindowState
     let moduleID: String
 
     private var listing: ModuleListing? { state.listings.first { $0.id == moduleID } }
@@ -449,7 +473,7 @@ private struct StudioModuleInspector: View {
                 inspectorHeader(listing)
                 Divider()
                 Picker("", selection: $state.inspectorTab) {
-                    ForEach(StudioInspectorTab.allCases) { tab in
+                    ForEach(ModuleInspectorTab.allCases) { tab in
                         Text(tab.title).tag(tab)
                     }
                 }
@@ -469,7 +493,7 @@ private struct StudioModuleInspector: View {
                     codeTab(listing)
                 }
             } else {
-                ContentUnavailableView("Module not found", systemImage: "puzzlepiece.extension", description: Text("Select a module from the sidebar."))
+                ContentUnavailableView("Module not found", systemImage: "puzzlepiece.extension", description: Text("Select a module from the sidebar or browse Modules."))
             }
         }
         .navigationTitle(listing?.title ?? moduleID)
@@ -493,6 +517,9 @@ private struct StudioModuleInspector: View {
                     Text(listing.id)
                         .font(.caption.monospaced())
                         .foregroundStyle(.tertiary)
+                    if model.layout.isWidget(listing.id) {
+                        TagPill(text: "Desktop widget", color: .accentColor)
+                    }
                 }
                 if !listing.summary.isEmpty {
                     Text(listing.summary).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
@@ -522,7 +549,7 @@ private struct StudioModuleInspector: View {
                     Divider()
                     Button("Delete Module", role: .destructive) {
                         app.host.remove(listing.id)
-                        state.selection = .dashboard
+                        state.selection = .modules
                         controller.refresh()
                     }
                 } label: {
@@ -609,9 +636,8 @@ private struct StudioModuleInspector: View {
                     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
-                // Live Preview
                 if listing.isEnabled && !needsApproval {
-                    StudioCard(title: "Live Preview", subtitle: "Real-time render of the bar chip and panel using your current theme.") {
+                    WindowCard(title: "Live Preview", subtitle: "Real-time render of the bar chip and panel using your current theme.") {
                         VStack(alignment: .leading, spacing: 14) {
                             HStack(spacing: 12) {
                                 Text("Bar Chip").font(.caption).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
@@ -660,9 +686,8 @@ private struct StudioModuleInspector: View {
                     }
                 }
 
-                // Scheduled Jobs owned by this module
                 if !moduleJobs.isEmpty {
-                    StudioCard(title: "Scheduled Jobs", subtitle: "Background jobs declared by this module’s jobs: { … } block.") {
+                    WindowCard(title: "Scheduled Jobs", subtitle: "Background jobs declared by this module’s jobs: { … } block.") {
                         ForEach(moduleJobs) { snap in
                             JobRowView(jobs: jobs, snapshot: snap, showModuleLink: false, onSelectModule: {})
                             if snap.id != moduleJobs.last?.id { Divider() }
@@ -670,8 +695,7 @@ private struct StudioModuleInspector: View {
                     }
                 }
 
-                // Background Activity Breakdown
-                StudioCard(title: "Background Processes & Permissions", subtitle: "Everything this module runs or accesses behind the scenes.") {
+                WindowCard(title: "Background Processes & Permissions", subtitle: "Everything this module runs or accesses behind the scenes.") {
                     if let activity = app.host.backgroundActivity(of: listing.id) {
                         ActivityRow(label: "Render Poll Loop", value: "Every \(formatSeconds(activity.refreshSeconds)) (panel: \(formatSeconds(activity.panelRefreshSeconds)))")
                         Divider()
@@ -730,7 +754,7 @@ private struct StudioModuleInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if !recentJobRuns.isEmpty {
-                        StudioCard(title: "Recent Job Runs") {
+                        WindowCard(title: "Recent Job Runs") {
                             ForEach(Array(recentJobRuns.prefix(15).enumerated()), id: \.offset) { item in
                                 let entry = item.element
                                 HStack(alignment: .top, spacing: 8) {
@@ -755,7 +779,7 @@ private struct StudioModuleInspector: View {
                         }
                     }
 
-                    StudioCard(title: "Console Output") {
+                    WindowCard(title: "Console Output") {
                         if lines.isEmpty {
                             Text("No logs yet. Call host.log(...) inside your module or trigger a job to see live output here.")
                                 .font(.footnote)
@@ -878,7 +902,7 @@ private struct StudioModuleInspector: View {
 
 // MARK: Shared Job Row
 
-private struct JobRowView: View {
+struct JobRowView: View {
     @ObservedObject var jobs: JobHost
     let snapshot: JobSnapshot
     let showModuleLink: Bool
@@ -992,327 +1016,4 @@ private struct JobRowView: View {
         }
         .padding(.vertical, 2)
     }
-}
-
-// MARK: Interactive Assistant Chat Inspector
-
-private struct StudioAssistantPane: View {
-    let app: AppController
-    let controller: StudioWindowController
-    @ObservedObject var model: BarModel
-    @ObservedObject var state: StudioState
-    @FocusState private var isComposerFocused: Bool
-
-    private var focusedListing: ModuleListing? {
-        guard let id = model.studioFocusedModuleID else { return nil }
-        return state.listings.first { $0.id == id }
-    }
-
-    private var quickPrompts: [String] {
-        if let focused = focusedListing {
-            if let err = focused.failure {
-                return ["Fix this error: \(err.prefix(80))", "Add a scheduled background job to \(focused.title)", "Improve the panel layout"]
-            }
-            return ["Add a scheduled job to \(focused.title)", "Add error alerts to \(focused.title)", "Refine \(focused.title)'s bar chip"]
-        }
-        return [
-            "Build a module with a scheduled background job",
-            "Switch to the Ink look",
-            "Add a module with the Bitcoin price",
-        ]
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Assistant").font(.headline)
-                    if !model.engineName.isEmpty {
-                        Text(model.engineName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Spacer()
-                if model.isChatBusy {
-                    ProgressView().controlSize(.small)
-                }
-                Button {
-                    app.chat.command("clear", nil)
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Clear conversation")
-                .disabled(model.chat.isEmpty || model.isChatBusy)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-
-            if let focused = focusedListing {
-                HStack(spacing: 6) {
-                    Image(systemName: focused.icon).font(.caption).foregroundStyle(.tint)
-                    Text("Context: \(focused.title)").font(.caption).lineLimit(1)
-                    Spacer()
-                    Button {
-                        model.studioFocusedModuleID = nil
-                    } label: {
-                        Image(systemName: "xmark").font(.caption2)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Chat globally instead of focusing \(focused.title)")
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
-            }
-
-            Divider()
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if model.chat.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Develop, debug, and extend your modules here. Selecting a module shares its source, job status, and recent logs automatically.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                ForEach(quickPrompts, id: \.self) { prompt in
-                                    Button {
-                                        submit(prompt)
-                                    } label: {
-                                        HStack {
-                                            Text(prompt).font(.footnote).multilineTextAlignment(.leading)
-                                            Spacer(minLength: 6)
-                                            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 7)
-                                        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.top, 4)
-                        }
-
-                        ForEach(model.chat) { message in
-                            chatBubble(message).id(message.id)
-                        }
-
-                        if model.isChatBusy {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                Text(model.chatActivity.isEmpty ? "Thinking…" : model.chatActivity)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .id("studio-activity")
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .onChange(of: model.chat.count) { scroll(proxy) }
-                .onChange(of: model.isChatBusy) { scroll(proxy) }
-                .onAppear { scroll(proxy) }
-            }
-
-            Divider()
-
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(
-                    focusedListing.map { "Change \($0.title)…" } ?? "Build a module or change the bar…",
-                    text: $model.chatDraft,
-                    axis: .vertical
-                )
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .focused($isComposerFocused)
-                .onSubmit { submit(model.chatDraft) }
-
-                Button {
-                    submit(model.chatDraft)
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(
-                            model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isChatBusy
-                                ? Color.secondary.opacity(0.4)
-                                : Color.accentColor
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(model.isChatBusy || model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding(12)
-        }
-        .onChange(of: model.chatFocusRequests) { isComposerFocused = true }
-    }
-
-    private func submit(_ text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !model.isChatBusy else { return }
-        model.chatDraft = ""
-        app.chat.submit(trimmed)
-    }
-
-    private func scroll(_ proxy: ScrollViewProxy) {
-        DispatchQueue.main.async {
-            if model.isChatBusy {
-                proxy.scrollTo("studio-activity", anchor: .bottom)
-            } else if let last = model.chat.last {
-                proxy.scrollTo(last.id, anchor: .bottom)
-            }
-        }
-    }
-
-    @ViewBuilder private func chatBubble(_ message: ChatMessage) -> some View {
-        if message.role == .user {
-            HStack {
-                Spacer(minLength: 28)
-                Text(message.text)
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .textSelection(.enabled)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(message.text)
-                    .font(.callout)
-                    .foregroundStyle(message.isError ? Color.red : Color.primary)
-                    .textSelection(.enabled)
-                if let detail = message.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                if message.needsApproval || message.canUndoTheme || message.moduleID != nil {
-                    let pendingApproval = message.needsApproval && message.moduleID.map { model.slot($0)?.needsApproval == true } == true
-                    HStack(spacing: 8) {
-                        if pendingApproval, let id = message.moduleID {
-                            Button("Allow Permissions") {
-                                app.host.approve(id)
-                                app.chat.markApproved(id)
-                                state.selection = .module(id)
-                                controller.refresh()
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { controller.refresh() }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                        } else if message.needsApproval {
-                            Label("Allowed", systemImage: "checkmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.green)
-                        }
-                        if let id = message.moduleID {
-                            Button("Inspect") {
-                                state.selection = .module(id)
-                                controller.refresh()
-                            }
-                            .controlSize(.small)
-                        }
-                        if message.canUndoTheme {
-                            Button("Undo Theme") { app.chat.command("undo", message) }
-                                .controlSize(.small)
-                        }
-                    }
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-    }
-}
-
-// MARK: Helpers
-
-private struct StudioCard<Content: View>: View {
-    let title: String
-    var subtitle: String?
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            VStack(alignment: .leading, spacing: 10) {
-                content
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-    }
-}
-
-private struct TagPill: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.14), in: Capsule())
-            .foregroundStyle(color)
-            .lineLimit(1)
-    }
-}
-
-private struct ActivityRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).font(.callout.monospaced()).foregroundStyle(.primary).textSelection(.enabled)
-        }
-        .font(.callout)
-    }
-}
-
-private func formatSeconds(_ seconds: Double) -> String {
-    let s = Int(seconds)
-    if s >= 3600 && s % 3600 == 0 { return "\(s / 3600)h" }
-    if s >= 60 && s % 60 == 0 { return "\(s / 60)m" }
-    return "\(s)s"
-}
-
-private func formatRelative(_ date: Date) -> String {
-    let secs = max(0, Int(Date().timeIntervalSince(date)))
-    if secs < 45 { return "just now" }
-    if secs < 3600 { return "\(secs / 60)m ago" }
-    if secs < 86400 { return "\(secs / 3600)h ago" }
-    return "\(secs / 86400)d ago"
-}
-
-private func formatCountdown(_ date: Date) -> String {
-    let secs = Int(date.timeIntervalSinceNow)
-    if secs <= 5 { return "due now" }
-    let h = secs / 3600
-    let m = (secs % 3600) / 60
-    if h > 0 { return "in \(h)h \(String(format: "%02d", m))m" }
-    if m > 0 { return "in \(m)m" }
-    return "in \(secs)s"
-}
-
-private func formatTimestamp(_ date: Date) -> String {
-    let f = DateFormatter()
-    f.dateFormat = "MM-dd HH:mm:ss"
-    return f.string(from: date)
 }

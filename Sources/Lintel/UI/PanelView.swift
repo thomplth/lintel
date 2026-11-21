@@ -115,7 +115,7 @@ struct PanelView: View {
                 }
                 headerButton("trash", "Clear conversation", context) { model.onChatCommand("clear", nil) }
             } else if slot?.kind == .module {
-                headerButton("sparkles", "Open in Lintel Studio", context) { model.onPanelCommand("change") }
+                headerButton("sparkles", "Open in Lintel", context) { model.onPanelCommand("change") }
             }
             headerButton("gearshape", "Settings", context) { model.onPanelCommand("settings") }
         }

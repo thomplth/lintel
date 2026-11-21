@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showSettings(_ sender: Any?) {
-        app?.showSettings(tab: .general)
+        app?.showWindow(.general)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

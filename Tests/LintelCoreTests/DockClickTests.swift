@@ -6,7 +6,12 @@ import Testing
         #expect(DockClick.response(isBarOpen: false) == .openBar)
     }
 
-    @Test func aClickWhileTheFullBarIsShownOpensSettings() {
-        #expect(DockClick.response(isBarOpen: true) == .openSettings)
+    @Test func aClickWhileTheFullBarIsShownOpensTheMainWindow() {
+        #expect(DockClick.response(isBarOpen: true) == .openWindow)
+    }
+
+    @Test func aClickWhileTheMainWindowIsOpenBringsItToFront() {
+        #expect(DockClick.response(isBarOpen: false, hasMainWindow: true) == .focusWindow)
+        #expect(DockClick.response(isBarOpen: true, hasMainWindow: true) == .focusWindow)
     }
 }
