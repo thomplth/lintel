@@ -603,35 +603,39 @@ private func sampleMyPRsGraphQLResponse() -> String {
         let widgetSections = sections(in: widget)
         // First section is the 3-PR stack in GoodNotes/app; second section is standalone GoodNotes/infra
         #expect(widgetSections.count == 2)
-        #expect(widgetSections[0].string("title")?.contains("Stack") == true)
-        #expect(widgetSections[0].string("title")?.contains("app") == true)
+        #expect(widgetSections[0].string("title") == "app")
+        #expect(widgetSections[0].string("trailing") == "Stack 3")
 
         let stackRows = items(in: widgetSections[0])
         #expect(stackRows.count == 3)
         #expect(stackRows.allSatisfy { ($0.string("url") ?? "").hasPrefix("https://github.com/") })
 
         // Layer 1 (#301): base of stack, approved by 2, CI 12/12, Ready
-        #expect(stackRows[0].string("title")?.contains("[1/3]") == true)
+        #expect(stackRows[0].string("title") == "Add FreeText writer core")
         #expect(stackRows[0].string("badge") == "Ready")
         #expect(stackRows[0].string("tone") == "good")
+        #expect(stackRows[0].string("subtitle")?.hasPrefix("1/3 · #301") == true)
         #expect(stackRows[0].string("subtitle")?.contains("Approved (2)") == true)
         #expect(stackRows[0].string("subtitle")?.contains("CI 12/12") == true)
 
         // Layer 2 (#302): stacked on #301, requesting @dave & @xp, 2 unresolved threads, CI running
-        #expect(stackRows[1].string("title")?.contains("└─") == true)
-        #expect(stackRows[1].string("title")?.contains("[2/3]") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("← #301") == true)
+        #expect(stackRows[1].string("title")?.hasPrefix("└ ") == true)
+        #expect(stackRows[1].string("subtitle")?.contains("2/3 · #302 ← #301") == true)
         #expect(stackRows[1].string("subtitle")?.contains("@dave") == true)
         #expect(stackRows[1].string("subtitle")?.contains("2 unresolved") == true)
         #expect(stackRows[1].string("subtitle")?.contains("CI 9/12") == true)
 
         // Layer 3 (#303): stacked on #302, conflicting + 2 CI failures across 218 checks
-        #expect(stackRows[2].string("title")?.contains("[3/3]") == true)
+        #expect(stackRows[2].string("title")?.hasPrefix("  └ ") == true)
         #expect(stackRows[2].string("badge") == "Conflict")
         #expect(stackRows[2].string("tone") == "bad")
-        #expect(stackRows[2].string("subtitle")?.contains("← #302") == true)
+        #expect(stackRows[2].string("subtitle")?.contains("3/3 · #303 ← #302") == true)
         #expect(stackRows[2].string("subtitle")?.contains("CI 2 fail") == true)
         #expect(stackRows[2].string("subtitle")?.contains("@bob") == true)
+
+        // Footer note stays short enough for narrow ~167pt widgets.
+        let notes = widget.descendants.filter { $0.component == .note }.compactMap { $0.string("value") }
+        #expect(notes.allSatisfy { $0.count <= 28 })
 
         // Standalone PR #549 in infra: Draft + Changes requested by @frank
         let standaloneRows = items(in: widgetSections[1])
@@ -709,8 +713,10 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(secs.count == 2)
         let stackItems = items(in: secs[0])
         #expect(stackItems.count == 3)
-        #expect(stackItems[1].string("title")?.hasPrefix("├─ [2/3]") == true)
-        #expect(stackItems[2].string("title")?.hasPrefix("└─ [3/3]") == true)
+        #expect(stackItems[1].string("title")?.hasPrefix("├ ") == true)
+        #expect(stackItems[2].string("title")?.hasPrefix("└ ") == true)
+        #expect(stackItems[1].string("subtitle")?.hasPrefix("2/3 · #11 ← #10") == true)
+        #expect(stackItems[2].string("subtitle")?.hasPrefix("3/3 · #12 ← #10") == true)
 
         let externalItem = items(in: secs[1]).first
         #expect(externalItem?.string("subtitle")?.contains("← teammate/shared") == true)

@@ -582,6 +582,10 @@ struct AdaptiveListView: View {
         node.bool("compact") || context.isCompactWidget
     }
 
+    private var stripsSubtitle: Bool {
+        node.bool("compact") || context.isShortWidget
+    }
+
     private var footerHeight: CGFloat {
         CGFloat(context.metrics.fontSize(role: "caption") + context.metrics.unit * 2.5)
     }
@@ -595,7 +599,7 @@ struct AdaptiveListView: View {
                     if entry.offset > 0 {
                         Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
                     }
-                    AdaptiveItemRow(node: entry.element, context: context, compact: isCompact)
+                    AdaptiveItemRow(node: entry.element, context: context, compact: stripsSubtitle)
                 }
             }
             ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in

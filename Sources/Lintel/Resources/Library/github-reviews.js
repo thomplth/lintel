@@ -404,20 +404,20 @@ defineModule({
     const blocks = [
       row([
         icon('arrow.triangle.pull', { tone: visible.length > 0 ? 'warn' : 'good' }),
-        text(`${visible.length} to review`, { role: 'title', mono: true }),
+        text(`${visible.length} ${visible.length === 1 ? 'PR' : 'PRs'}`, { role: 'label', tone: 'primary', weight: 'semibold', mono: true }),
         spacer(),
         ...(directCount > 0 ? [badge(`${directCount} direct`, { tone: 'accent' })] : []),
-      ]),
+      ], { spacing: 'tight' }),
       ...groups.slice(0, 10).map((group) => section(group.title, [
         list(group.items.slice(0, 30).map((entry) => renderReviewItem(host, entry, showScopeHint))),
       ], { trailing: String(group.items.length) })),
     ];
 
     if (failure) {
-      blocks.push(note(`Showing cached data. ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
+      blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
     } else {
-      const metaParts = [`Updated ${host.format.ago(loadedAt)}`, `${cfg.refreshLabel} cadence`];
-      if (hiddenCount > 0) metaParts.push(`${hiddenCount} hidden by filters`);
+      const metaParts = [host.format.ago(loadedAt)];
+      if (hiddenCount > 0) metaParts.push(`${hiddenCount} hidden`);
       blocks.push(note(metaParts.join(' · '), { priority: 'detail' }));
     }
     return blocks;

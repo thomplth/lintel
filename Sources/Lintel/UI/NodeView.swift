@@ -25,7 +25,7 @@ struct NodeView: View {
             HStack(alignment: rowAlignment, spacing: spacing(default: context.surface == .chip ? context.metrics.chipContentSpacing : context.metrics.spacing(nil))) {
                 children
             }
-        case .spacer: Spacer(minLength: context.metrics.unit * 2)
+        case .spacer: Spacer(minLength: context.isCompactWidget ? context.metrics.unit : context.metrics.unit * 2)
         case .column: columnView
         case .split: splitView
         case .section: sectionView
@@ -128,6 +128,7 @@ struct NodeView: View {
             .padding(.vertical, 1)
             .frame(minWidth: context.metrics.fontSize(role: "caption") * 1.35)
             .background(color, in: Capsule())
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     @ViewBuilder private var gaugeView: some View {
@@ -216,16 +217,21 @@ struct NodeView: View {
         let childGap = context.isCompactWidget ? context.metrics.unit * 1.25 : context.metrics.spacing(nil)
         return VStack(alignment: .leading, spacing: gap) {
             if let title = node.string("title"), !title.isEmpty {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(title)
                         .font(context.font(role: "caption", weight: "semibold"))
                         .foregroundStyle(context.secondary)
                         .textCase(.uppercase)
                         .kerning(0.4)
                         .lineLimit(1)
-                    Spacer(minLength: 8)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
                     if let trailing = node.string("trailing") {
-                        Text(trailing).font(context.font(role: "caption", mono: true)).foregroundStyle(context.tertiary).lineLimit(1)
+                        Text(trailing)
+                            .font(context.font(role: "caption", mono: true))
+                            .foregroundStyle(context.tertiary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
             }
@@ -558,44 +564,106 @@ private struct ItemRow: View {
         compactOverride || context.isCompactWidget
     }
 
+    private var isNarrow: Bool {
+        context.isNarrowWidget
+    }
+
+    private func itemBadge(_ badge: String) -> some View {
+        Text(badge)
+            .font(context.font(role: "caption", weight: "semibold", mono: true))
+            .foregroundStyle(context.color(node.tone(), fallback: context.accent))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, context.metrics.unit * 1.25)
+            .padding(.vertical, 1)
+            .background(context.color(node.tone(), fallback: context.accent).opacity(0.16), in: Capsule())
+    }
+
     var body: some View {
-        HStack(spacing: context.metrics.unit * (isCompact ? 1.75 : 2.5)) {
-            if let name = node.string("icon") {
-                SymbolGlyph(name: name, size: context.metrics.fontSize(role: isCompact ? "label" : nil), weight: context.weight(nil), symbolMode: context.symbolMode)
-                    .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
-                    .frame(width: context.theme.fontSize * (isCompact ? 1.15 : 1.4))
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                Text(node.string("title") ?? "").font(context.font(role: "label", weight: context.theme.fontWeight))
-                    .foregroundStyle(context.primary).lineLimit(1)
-                if !compactOverride, let subtitle = node.string("subtitle"), !subtitle.isEmpty {
-                    Text(subtitle).font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
+        Group {
+            if isNarrow {
+                let subtitle = compactOverride ? nil : node.string("subtitle")
+                let hasMeta = !compactOverride && !context.isShortWidget
+                    && (node.string("badge") != nil || node.string("value") != nil || (subtitle?.isEmpty == false))
+                VStack(alignment: .leading, spacing: context.metrics.unit * 0.75) {
+                    HStack(spacing: context.metrics.unit * 1.5) {
+                        if let name = node.string("icon") {
+                            SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                                .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
+                                .frame(width: context.theme.fontSize * 1.05)
+                        }
+                        Text(node.string("title") ?? "")
+                            .font(context.font(role: "label", weight: context.theme.fontWeight))
+                            .foregroundStyle(context.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 2)
+                        if let accessory = node.string("accessoryAction") {
+                            ItemAccessory(
+                                symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                                focusKey: node.focusKey + "|accessory", context: context
+                            ) { context.perform(accessory, node.props["payload"] ?? .null) }
+                        }
+                    }
+                    if hasMeta {
+                        HStack(spacing: context.metrics.unit * 1.25) {
+                            if let badge = node.string("badge") {
+                                itemBadge(badge)
+                            }
+                            if let value = node.string("value") {
+                                Text(value)
+                                    .font(context.font(role: "caption", mono: true))
+                                    .foregroundStyle(context.secondary)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: true, vertical: false)
+                            }
+                            if let subtitle, !subtitle.isEmpty {
+                                Text(subtitle)
+                                    .font(context.font(role: "caption"))
+                                    .foregroundStyle(context.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: context.metrics.unit * (isCompact ? 1.75 : 2.5)) {
+                    if let name = node.string("icon") {
+                        SymbolGlyph(name: name, size: context.metrics.fontSize(role: isCompact ? "label" : nil), weight: context.weight(nil), symbolMode: context.symbolMode)
+                            .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
+                            .frame(width: context.theme.fontSize * (isCompact ? 1.15 : 1.4))
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(node.string("title") ?? "").font(context.font(role: "label", weight: context.theme.fontWeight))
+                            .foregroundStyle(context.primary).lineLimit(1)
+                        if !compactOverride, let subtitle = node.string("subtitle"), !subtitle.isEmpty {
+                            Text(subtitle).font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 6)
+                    if let value = node.string("value") {
+                        Text(value).font(context.font(role: "label", mono: true)).foregroundStyle(context.secondary).lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    if let badge = node.string("badge") {
+                        itemBadge(badge)
+                    }
+                    if let accessory = node.string("accessoryAction") {
+                        ItemAccessory(
+                            symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                            focusKey: node.focusKey + "|accessory", context: context
+                        ) { context.perform(accessory, node.props["payload"] ?? .null) }
+                    } else if isClickable {
+                        Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
+                            .font(.system(size: context.metrics.fontSize(role: "caption") * 0.9, weight: .semibold))
+                            .foregroundStyle(context.tertiary)
+                    }
                 }
             }
-            Spacer(minLength: 6)
-            if let value = node.string("value") {
-                Text(value).font(context.font(role: "label", mono: true)).foregroundStyle(context.secondary).lineLimit(1)
-            }
-            if let badge = node.string("badge") {
-                Text(badge)
-                    .font(context.font(role: "caption", weight: "semibold", mono: true))
-                    .foregroundStyle(context.color(node.tone(), fallback: context.accent))
-                    .padding(.horizontal, context.metrics.unit * 1.5)
-                    .padding(.vertical, 1)
-                    .background(context.color(node.tone(), fallback: context.accent).opacity(0.16), in: Capsule())
-            }
-            if let accessory = node.string("accessoryAction") {
-                ItemAccessory(
-                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
-                    focusKey: node.focusKey + "|accessory", context: context
-                ) { context.perform(accessory, node.props["payload"] ?? .null) }
-            } else if isClickable {
-                Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
-                    .font(.system(size: context.metrics.fontSize(role: "caption") * 0.9, weight: .semibold))
-                    .foregroundStyle(context.tertiary)
-            }
         }
-        .padding(.horizontal, isCompact ? context.metrics.unit * 2 : context.metrics.tilePadding)
+        .padding(.horizontal, isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
         .padding(.vertical, context.metrics.unit * (isCompact ? 1.35 : 2))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isHovered && isClickable ? context.fill : .clear)

@@ -353,12 +353,12 @@ function buildStacks(summaries, groupByStack) {
       const walk = (node, depth, parentNumber, ancestorGuides, isLastSibling) => {
         if (visited.has(node.pr.number)) return;
         visited.add(node.pr.number);
-        const prefix = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '└─ ' : '├─ '}`;
+        const prefix = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '└ ' : '├ '}`;
         nodes.push({ entry: node, depth, prefix, parentNumber });
         const kids = (childrenMap.get(node.pr.number) || [])
           .filter((k) => !visited.has(k.pr.number))
           .sort((a, b) => a.pr.number - b.pr.number);
-        const nextGuides = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '   ' : '│  '}`;
+        const nextGuides = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '  ' : '│ '}`;
         kids.forEach((child, idx) => {
           walk(child, depth + 1, node.pr.number, nextGuides, idx === kids.length - 1);
         });
@@ -369,17 +369,10 @@ function buildStacks(summaries, groupByStack) {
         const size = nodes.length;
         const rows = nodes.map((n, idx) => ({ ...n, stackIndex: idx + 1, stackSize: size }));
         const latest = Math.max(...rows.map((r) => new Date(r.entry.pr.updatedAt).getTime() || 0));
-        const readyInStack = rows.filter((r) => r.entry.isReady).length;
-        const blockedInStack = rows.filter((r) => r.entry.isBlocked).length;
-        const baseName = root.pr.baseRefName || root.defaultBranch;
-        let trailing = `${size} PRs`;
-        if (blockedInStack > 0) trailing += ` · ${blockedInStack} blocked`;
-        else if (readyInStack > 0) trailing += ` · ${readyInStack}/${size} ready`;
-        else trailing += ` · base ${baseName}`;
         stackSections.push({
           kind: 'stack',
-          title: `Stack · ${repoTitle}`,
-          trailing,
+          title: repoTitle,
+          trailing: `Stack ${size}`,
           latest,
           rows,
         });
@@ -408,20 +401,19 @@ function buildStacks(summaries, groupByStack) {
 function renderPRRow(host, rowInfo) {
   const { entry, prefix, parentNumber, stackIndex, stackSize } = rowInfo;
   const pr = entry.pr;
-  const title = stackSize >= 2
-    ? `${prefix}[${stackIndex}/${stackSize}] ${pr.title}`
-    : pr.title;
+  const title = stackSize >= 2 && prefix ? `${prefix}${pr.title}` : pr.title;
 
   const refPart = parentNumber
     ? `#${pr.number} ← #${parentNumber}`
     : (pr.baseRefName && pr.baseRefName !== entry.defaultBranch ? `#${pr.number} ← ${pr.baseRefName}` : `#${pr.number}`);
 
-  const parts = [refPart];
+  const parts = [];
+  if (stackSize >= 2) parts.push(`${stackIndex}/${stackSize}`);
+  parts.push(refPart);
   if (pr.isDraft && (entry.hasConflict || entry.hasChanges || entry.ci.state === 'failed' || entry.isApproved)) {
     parts.push('Draft');
   }
-  if (entry.hasConflict) parts.push('Conflict');
-  else if (entry.isBehind) parts.push('Behind');
+  if (!entry.hasConflict && entry.isBehind) parts.push('Behind');
 
   if (entry.ci.label) parts.push(entry.ci.label);
 
@@ -602,19 +594,19 @@ defineModule({
     const blocks = [
       row([
         icon('arrow.triangle.branch', { tone: blockedCount > 0 ? 'bad' : readyCount > 0 ? 'good' : undefined }),
-        text(`${summaries.length} open`, { role: 'title', mono: true }),
+        text(`${summaries.length} open`, { role: 'label', tone: 'primary', weight: 'semibold', mono: true }),
         spacer(),
         ...(headerBadge ? [headerBadge] : []),
-      ]),
+      ], { spacing: 'tight' }),
       ...groups.slice(0, 10).map((group) => section(group.title, [
         list(group.rows.slice(0, 30).map((r) => renderPRRow(host, r))),
       ], { trailing: group.trailing })),
     ];
 
     if (failure) {
-      blocks.push(note(`Showing cached data. ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
+      blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
     } else {
-      const meta = [`Updated ${host.format.ago(loadedAt)}`, `${cfg.refreshLabel} cadence`];
+      const meta = [host.format.ago(loadedAt)];
       if (stackCount > 0) meta.push(`${stackCount} ${stackCount === 1 ? 'stack' : 'stacks'}`);
       blocks.push(note(meta.join(' · '), { priority: 'detail' }));
     }
