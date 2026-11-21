@@ -97,6 +97,24 @@ import Testing
             notchStripHeight: 0,
             ownPID: ownPID,
             desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 300,
+            frontmostAXFullScreen: false
+        )
+        #expect(result)
+    }
+
+    @Test func shieldingPresentationWindowOfFrontmostRegularAppIsDetected() {
+        let windows = [
+            ScreenWindow(owner: "Game", ownerPID: 500, layer: 2_147_483_628, bounds: screen),
+            ScreenWindow(owner: "Finder", ownerPID: 200, layer: desktopIconLayer, bounds: screen),
+        ]
+        let result = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 500,
             frontmostAXFullScreen: false
         )
         #expect(result)
@@ -135,5 +153,95 @@ import Testing
             frontmostAXFullScreen: nil
         )
         #expect(!result)
+    }
+
+    @Test func appSwitcherOverlayCoveringScreenDoesNotTriggerFullScreen() {
+        let windows = [
+            ScreenWindow(owner: "Debut", ownerPID: 350, layer: 25, bounds: screen),
+            ScreenWindow(owner: "Safari", ownerPID: 100, layer: 0, bounds: CGRect(x: 100, y: 100, width: 1200, height: 900)),
+            ScreenWindow(owner: "Finder", ownerPID: 200, layer: desktopIconLayer, bounds: screen),
+        ]
+        // Another app is frontmost while Debut shows its Cmd+Tab overlay.
+        let whileOtherFrontmost = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 100,
+            frontmostAXFullScreen: false
+        )
+        #expect(!whileOtherFrontmost)
+
+        // Even if Debut itself happens to be frontmost, a status-bar-level overlay is not presentation full screen.
+        let whileSwitcherFrontmost = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 350,
+            frontmostAXFullScreen: false
+        )
+        #expect(!whileSwitcherFrontmost)
+    }
+
+    @Test func screenshotCaptureOverlaysDoNotTriggerFullScreen() {
+        let windows = [
+            ScreenWindow(owner: "screencapture", ownerPID: 769, layer: 1498, bounds: screen),
+            ScreenWindow(owner: "Screenshot", ownerPID: 770, layer: 24, bounds: screen),
+            ScreenWindow(owner: "Finder", ownerPID: 200, layer: desktopIconLayer, bounds: screen),
+        ]
+        let result = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 200,
+            frontmostAXFullScreen: false
+        )
+        #expect(!result)
+
+        // Even if the system screenshot helper were treated as frontmost, system owners stay excluded.
+        let evenIfFrontmost = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 769,
+            frontmostAXFullScreen: false
+        )
+        #expect(!evenIfFrontmost)
+    }
+
+    @Test func accessoryHighLayerOverlayDoesNotTriggerFullScreen() {
+        let windows = [
+            ScreenWindow(owner: "CleanShot X", ownerPID: 600, layer: 1500, bounds: screen),
+            ScreenWindow(owner: "Finder", ownerPID: 200, layer: desktopIconLayer, bounds: screen),
+        ]
+        // Accessory apps never yield a frontmostRegularPID, and non-frontmost regular apps do not match.
+        let accessoryActive = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: nil,
+            frontmostAXFullScreen: false
+        )
+        #expect(!accessoryActive)
+
+        let otherAppActive = FullScreenDetection.isFullScreen(
+            windows: windows,
+            screenBounds: screen,
+            notchStripHeight: 0,
+            ownPID: ownPID,
+            desktopIconLayer: desktopIconLayer,
+            frontmostRegularPID: 200,
+            frontmostAXFullScreen: false
+        )
+        #expect(!otherAppActive)
     }
 }

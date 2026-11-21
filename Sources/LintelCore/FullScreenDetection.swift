@@ -21,7 +21,7 @@ public struct ScreenWindow: Equatable, Sendable {
 public enum FullScreenDetection {
     private static let systemOwners: Set<String> = [
         "Window Server", "WindowManager", "Dock", "Control Center", "Notification Center", "Wallpaper",
-        "Spotlight", "SystemUIServer",
+        "Spotlight", "SystemUIServer", "screencapture", "Screenshot",
     ]
     private static let tolerance: CGFloat = 2
 
@@ -32,6 +32,8 @@ public enum FullScreenDetection {
         ownPID: Int32,
         desktopIconLayer: Int,
         normalLayer: Int = 0,
+        presentationLayer: Int = 1000,
+        frontmostRegularPID: Int32? = nil,
         frontmostAXFullScreen: Bool?
     ) -> Bool {
         if frontmostAXFullScreen == true { return true }
@@ -41,11 +43,17 @@ public enum FullScreenDetection {
             $0.alpha > 0 && $0.ownerPID != ownPID && !systemOwners.contains($0.owner)
         }
 
-        // Non-native / presentation full-screen windows sit above normal windows and cover the display.
-        let hasPresentationFullScreen = userWindows.contains { window in
-            window.layer > normalLayer && coversScreen(window.bounds, screen: screenBounds, notchStripHeight: notchStripHeight)
+        // Non-native / presentation full-screen windows (e.g. Keynote slideshows, NSView.enterFullScreenMode,
+        // display-shielded games) belong to the frontmost regular application and sit at or above the
+        // screen-saver window layer, excluding transient HUDs, app switchers and screenshot capture overlays.
+        if let frontmostRegularPID {
+            let hasPresentationFullScreen = userWindows.contains { window in
+                window.ownerPID == frontmostRegularPID
+                    && window.layer >= presentationLayer
+                    && coversScreen(window.bounds, screen: screenBounds, notchStripHeight: notchStripHeight)
+            }
+            if hasPresentationFullScreen { return true }
         }
-        if hasPresentationFullScreen { return true }
 
         // On a normal desktop Space, Finder's desktop icon window covers the display at `desktopIconLayer`.
         // In a native full-screen Space (single window or Split View), that desktop window is absent while

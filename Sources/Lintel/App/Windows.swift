@@ -259,6 +259,8 @@ final class BarWindowController {
                 alpha: entry[kCGWindowAlpha as String] as? Double ?? 1
             )
         }
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let frontmostRegularPID = frontmost?.activationPolicy == .regular ? frontmost?.processIdentifier : nil
         return FullScreenDetection.isFullScreen(
             windows: windows,
             screenBounds: screenBounds,
@@ -266,6 +268,8 @@ final class BarWindowController {
             ownPID: ProcessInfo.processInfo.processIdentifier,
             desktopIconLayer: Int(CGWindowLevelForKey(.desktopIconWindow)),
             normalLayer: Int(CGWindowLevelForKey(.normalWindow)),
+            presentationLayer: Int(CGWindowLevelForKey(.screenSaverWindow)),
+            frontmostRegularPID: frontmostRegularPID,
             frontmostAXFullScreen: axFullScreen
         )
     }
