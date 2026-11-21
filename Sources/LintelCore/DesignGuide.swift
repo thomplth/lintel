@@ -57,8 +57,9 @@ public enum DesignGuide {
             pinned: false,                     // true = always visible; false = visible only while the bar is active
             order: 50,                         // lower sorts further left
             refreshSeconds: 60,                // how often render runs (minimum 1); be gentle with remote services
-            panelRefreshSeconds: 5,            // optional faster refresh while the panel is open
-            panelWidth: 'medium',              // 'small' | 'medium' | 'large'
+            panelRefreshSeconds: 5,            // optional faster refresh while a widget is visible or peeked
+            sizes: ['chip', 'small', 'wide', 'medium', 'large'], // supported sizes: 'chip' | 'small' (1x1) | 'wide' (2x1) | 'medium' (2x2) | 'large' (3x2) | 'tall' (2x3)
+            defaultSize: 'medium',             // widget size shown on click-to-peek
             permissions: ['api.example.com'],  // every host contacted, plus capabilities: 'notify', 'audio',
                                                // 'clipboard', 'jobs', 'exec:<tool>', 'secret:<name>'
           },
@@ -72,24 +73,41 @@ public enum DesignGuide {
               async run(host) { return { summary: 'ok' }; }
             },
           },
-          render(host) { return <bar item view>; },        // required; may be async
-          panel(host) { return [<view>, <view>, ...]; },    // optional; may be async; shown when the item is clicked
+          views: {                                          // preferred: one view per supported size (or use render(host, ctx))
+            chip(host) { return <bar item view>; },
+            small(host) { return [<hero view>]; },          // 1x1 square tile: one hero answer, zero scrolling
+            wide(host) { return [split([<left>, <right>])]; }, // 2x1 horizontal tile: hero + companion
+            medium(host) { return [<view>, ...]; },         // 2x2 balanced card: hero + detail/controls
+            large(host) { return [split([<left>, <right>])]; }, // 3x2 landscape dashboard
+          },
+          configure(host) { return [<settings controls>]; }, // optional: hover-revealed backside for formatting/config
           actions: {                                        // optional; run by buttons, toggles, fields, list rows
-            name(host, payload) { ... },                    // may be async; both views re-render afterwards
+            name(host, payload) { ... },                    // may be async; views re-render afterwards
           },
         });
+
+        Legacy render(host) + panel(host) modules still work automatically (chip + medium), or render(host, ctx) may
+        inspect ctx.size ('chip' | 'small' | 'wide' | 'medium' | 'large' | 'tall').
 
         Variables declared at the top of the file live as long as the module is loaded, so keep in-memory state there.
         Use host.storage for anything that must survive a restart.
 
-        ## The three surfaces
+        ## The unified size continuum
 
-        1. Bar item (render): what is always or often on screen. One glance, one line: an icon plus one or two short
-           values. At most 8 elements and about 30 characters. No sentences.
-        2. Panel (panel): opens under the item on click. The app draws the header (icon, title) and the background;
-           you return the content as an array of views, top to bottom. Structure it with section(). Lead with the
-           numbers that matter (stat tiles in a grid), then detail (meters, charts, lists), then controls.
-        3. Stage (web or app inside a panel): a live web page or a small web app, for what native components cannot do.
+        1. Chip ('chip'): one glance, one line in the top bar: an icon plus one or two short values. At most 8 elements
+           and about 30 characters. No sentences.
+        2. Widgets ('small' 1x1, 'wide' 2x1, 'medium' 2x2, 'large' 3x2, 'tall' 2x3): dragging a chip's corner handle
+           morphs it directly into a desktop widget; clicking a chip peeks its defaultSize. Widgets NEVER scroll—every
+           block adapts dynamically to the allocated frame:
+           - Use split([left, right]) for crisp 2-column layouts in 'wide' and 'large' widgets.
+           - Pass full candidate arrays to list(items, { compact: true }) — the layout engine automatically renders as
+             many complete rows as fit and appends '+N more' instead of clipping or scrolling.
+           - Leave chart() height unset (or 'fill') inside widgets so charts expand smoothly to fill available height.
+           - Put secondary settings (date formats, bar style toggles, city picker) in configure(host), shown on hover.
+           - Mark optional sections with { priority: 'detail' } or { priority: 'supporting' } so they yield cleanly
+             under large font sizes.
+        3. Stage (web or app inside a widget): fills the allocated widget frame automatically. Prefer native components
+           whenever they can do the job; reserve web() embeds for 'large' tiers.
 
         ## Components
 

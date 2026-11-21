@@ -187,13 +187,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let state = parts.last ?? "idle"
             app.model.theme = parts.count == 2 ? (Theme.preset(parts[0]) ?? baseTheme) : baseTheme
             app.host.closePanel()
-            app.model.isActive = state != "idle"
-            if state.hasPrefix("panel:") {
-                let id = String(state.dropFirst(6))
-                if id == AppController.assistantSlot {
-                    app.model.panel = PanelState(slotID: id, content: .assistant)
-                } else {
-                    app.host.openPanel(id)
+            for id in Array(app.model.layout.sizes.keys) {
+                app.host.setWidgetSize(id, to: .chip)
+            }
+            if state.hasPrefix("widget:") {
+                let spec = String(state.dropFirst(7))
+                for entry in spec.split(separator: "+").map(String.init) {
+                    let parts = entry.split(separator: ":").map(String.init)
+                    if let id = parts.first, let size = parts.dropFirst().first.flatMap(WidgetSize.init(rawValue:)) {
+                        app.host.setWidgetSize(id, to: size)
+                    }
+                }
+                app.model.isActive = false
+            } else {
+                app.model.isActive = state != "idle"
+                if state.hasPrefix("panel:") {
+                    let id = String(state.dropFirst(6))
+                    if id == AppController.assistantSlot {
+                        app.model.panel = PanelState(slotID: id, content: .assistant)
+                    } else {
+                        app.host.openPanel(id)
+                    }
                 }
             }
             try? await Task.sleep(for: .seconds(Double(option("settle") ?? "1.6") ?? 1.6))

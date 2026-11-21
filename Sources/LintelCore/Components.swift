@@ -27,7 +27,7 @@ public enum Tone: String, Sendable, CaseIterable {
 
 public enum Component: String, Sendable, CaseIterable {
     case text, icon, dot, badge, gauge, ring, sparkline, row, spacer
-    case column, section, grid, stat, meter, chart, list, item, keyValue, button, toggle, segmented, slider, field
+    case column, split, section, grid, stat, meter, chart, list, item, keyValue, button, toggle, segmented, slider, field
     case divider, note, progress, image, empty, web, app
 }
 
@@ -163,10 +163,26 @@ public enum Catalog {
             doc: "Stacks children top to bottom. A panel's root is already a column, so this is only for nesting."
         ),
         ComponentSpec(
+            component: .split, surfaces: panel,
+            props: [
+                PropSpec("weights", .numbers),
+                PropSpec("spacing", .token(spacingTokens)),
+                PropSpec("align", .token(["top", "center", "bottom"])),
+            ],
+            hasChildren: true,
+            signature: "split(children, { weights?, spacing?, align? })",
+            doc: "Lays 2 to 3 columns side by side inside wide or large widgets. weights sets relative widths (e.g. [1, 2]); defaults to equal widths."
+        ),
+        ComponentSpec(
             component: .section, surfaces: panel,
-            props: [PropSpec("title", .string), PropSpec("trailing", .string)], hasChildren: true,
-            signature: "section(title, children, { trailing? })",
-            doc: "A titled group. Use sections to structure any panel with more than one kind of content. trailing: short right-aligned note in the header."
+            props: [
+                PropSpec("title", .string),
+                PropSpec("trailing", .string),
+                PropSpec("priority", .token(["essential", "supporting", "detail"])),
+            ],
+            hasChildren: true,
+            signature: "section(title, children, { trailing?, priority? })",
+            doc: "A titled group. Use sections to structure any panel or widget with more than one kind of content. trailing: short right-aligned note in the header. priority: 'essential' (default) | 'supporting' | 'detail' — lower-priority sections yield cleanly when a widget is tight."
         ),
         ComponentSpec(
             component: .grid, surfaces: panel,
@@ -199,17 +215,22 @@ public enum Catalog {
             component: .chart, surfaces: panel,
             props: [
                 PropSpec("values", .numbers), PropSpec("series", .series), PropSpec("kind", .token(["line", "area", "bar"])),
-                PropSpec("tone", .tone), PropSpec("height", .token(heights)), PropSpec("min", .number), PropSpec("max", .number),
+                PropSpec("tone", .tone), PropSpec("height", .token(heights + ["fill"])), PropSpec("min", .number), PropSpec("max", .number),
                 PropSpec("labels", .strings),
             ],
             hasChildren: false,
             signature: "chart(numbersOrSeries, { kind?, tone?, height?, min?, max?, labels? })",
-            doc: "A chart across the panel width. Pass numbers, or series as [{ label, values, tone }] for several lines with a legend. kind: 'area' (default) | 'line' | 'bar'. labels: [leftLabel, rightLabel] under the x axis, e.g. ['60 s ago', 'now']."
+            doc: "A chart across the widget width. Pass numbers, or series as [{ label, values, tone }] for several lines with a legend. kind: 'area' (default) | 'line' | 'bar'. height: 'small' | 'medium' | 'large' | 'fill' (default in widgets: fills remaining height). labels: [leftLabel, rightLabel] under the x axis, e.g. ['60 s ago', 'now']."
         ),
         ComponentSpec(
-            component: .list, surfaces: panel, props: [], hasChildren: true,
-            signature: "list(items)",
-            doc: "A list of item() rows with separators. Show at most about 8; say how many more there are in a note."
+            component: .list, surfaces: panel,
+            props: [
+                PropSpec("compact", .bool),
+                PropSpec("overflow", .token(["summary", "none"])),
+            ],
+            hasChildren: true,
+            signature: "list(items, { compact?, overflow? })",
+            doc: "An adaptive list of item() rows with separators. Inside widgets, automatically fits as many complete rows as the height allows and appends '+N more' (overflow: 'summary', default) instead of scrolling. compact: true drops subtitles when tight to fit more rows."
         ),
         ComponentSpec(
             component: .item, surfaces: panel,
@@ -322,19 +343,19 @@ public enum Catalog {
         ComponentSpec(
             component: .web, surfaces: panel,
             props: [
-                PropSpec("url", .url, required: true), PropSpec("height", .token(heights)), PropSpec("selector", .string),
+                PropSpec("url", .url, required: true), PropSpec("height", .token(heights + ["fill"])), PropSpec("selector", .string),
                 PropSpec("interactive", .bool), PropSpec("zoom", .number), PropSpec("reloadSeconds", .number),
             ],
             hasChildren: false,
             signature: "web(url, { height?, selector?, interactive?, zoom?, reloadSeconds? })",
-            doc: "A live web page inside the panel, using the app's signed-in browser profile. selector scrolls to and frames one element of the page (a live clip of a scoreboard, a queue position, a build log). interactive: true lets the user click and type in it. Its host must be listed in permissions."
+            doc: "A live web page inside the widget, using the app's signed-in browser profile. selector scrolls to and frames one element of the page (a live clip of a scoreboard, a queue position, a build log). interactive: true lets the user click and type in it. Its host must be listed in permissions."
         ),
         ComponentSpec(
             component: .app, surfaces: panel,
-            props: [PropSpec("html", .string, required: true), PropSpec("height", .token(heights + ["tall"])), PropSpec("state", .any)],
+            props: [PropSpec("html", .string, required: true), PropSpec("height", .token(heights + ["tall", "fill"])), PropSpec("state", .any)],
             hasChildren: false,
             signature: "app(html, { height?, state? })",
-            doc: "A small web app inside the panel for things the native components cannot draw (canvas, drag interactions, custom visualisations). html is a body fragment plus <style> and <script>; the Lintel kit stylesheet and the `lintel` bridge are already loaded (see 'Mini apps'). Prefer native components whenever they can do the job."
+            doc: "A small web app inside the widget for things the native components cannot draw (canvas, drag interactions, custom visualisations). html is a body fragment plus <style> and <script>; the Lintel kit stylesheet and the `lintel` bridge are already loaded (see 'Mini apps'). Prefer native components whenever they can do the job."
         ),
     ]
 }

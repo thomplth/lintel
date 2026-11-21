@@ -34,18 +34,26 @@ struct RenderContext {
     var material: SurfaceMaterial
     var moduleID: String
     var manifest: ModuleManifest?
+    var widgetSize: WidgetSize?
     var panelFocus: PanelFocusMemory?
     var perform: (String, JSONValue) -> Void = { _, _ in }
     var performForResult: (String, JSONValue) async -> JSONValue = { _, _ in .null }
 
-    init(theme: Theme, surface: Surface, material: SurfaceMaterial, moduleID: String = "", manifest: ModuleManifest? = nil) {
+    init(
+        theme: Theme, surface: Surface, material: SurfaceMaterial, moduleID: String = "",
+        manifest: ModuleManifest? = nil, widgetSize: WidgetSize? = nil
+    ) {
         self.theme = theme
         metrics = Metrics(theme)
         self.surface = surface
         self.material = material
         self.moduleID = moduleID
         self.manifest = manifest
+        self.widgetSize = widgetSize
     }
+
+    var isInWidget: Bool { widgetSize != nil }
+    var isCompactWidget: Bool { widgetSize == .small || widgetSize == .wide }
 
     static func color(hex: String) -> Color {
         HexColor(hex).map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? .white
@@ -191,6 +199,10 @@ struct RenderContext {
 
     var panelShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: metrics.panelCornerRadius, style: .continuous)
+    }
+
+    var widgetShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: metrics.widgetCornerRadius, style: .continuous)
     }
 
     var surfaceFill: Color {

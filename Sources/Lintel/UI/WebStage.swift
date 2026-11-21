@@ -10,14 +10,16 @@ struct WebClipView: View {
 
     var body: some View {
         let address = node.string("url") ?? ""
+        let heightToken = node.string("height")
+        let fillsWidget = context.isInWidget && (heightToken == nil || heightToken == "fill")
+        let fixedHeight = CGFloat(context.metrics.blockHeight(heightToken ?? "large"))
         if let url = URL(string: address), let manifest = context.manifest, manifest.allows(url) {
             WebClip(
                 url: url, selector: node.string("selector"), isInteractive: node.bool("interactive"),
                 zoom: min(max(node.number("zoom") ?? 1, 0.25), 3),
                 reloadSeconds: node.number("reloadSeconds").map { max($0, 15) }, manifest: manifest
             )
-            .frame(maxWidth: .infinity)
-            .frame(height: context.metrics.blockHeight(node.string("height") ?? "large"))
+            .frame(maxWidth: .infinity, minHeight: fillsWidget ? 80 : fixedHeight, maxHeight: fillsWidget ? .infinity : fixedHeight)
             .clipShape(context.tileShape)
             .overlay(context.tileShape.stroke(context.separator, lineWidth: 1))
         } else {
@@ -132,12 +134,14 @@ struct MiniAppView: View {
     let context: RenderContext
 
     var body: some View {
+        let heightToken = node.string("height")
+        let fillsWidget = context.isInWidget && (heightToken == nil || heightToken == "fill")
+        let fixedHeight = CGFloat(context.metrics.blockHeight(heightToken ?? "large"))
         MiniApp(
             html: node.string("html") ?? "", state: node.props["state"] ?? .null, variables: Self.variables(context),
             hosts: context.manifest?.hosts ?? [], perform: context.performForResult
         )
-        .frame(maxWidth: .infinity)
-        .frame(height: context.metrics.blockHeight(node.string("height") ?? "large"))
+        .frame(maxWidth: .infinity, minHeight: fillsWidget ? 80 : fixedHeight, maxHeight: fillsWidget ? .infinity : fixedHeight)
         .clipShape(context.tileShape)
     }
 

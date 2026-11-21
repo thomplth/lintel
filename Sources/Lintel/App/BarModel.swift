@@ -22,10 +22,21 @@ struct Slot: Identifiable, Equatable {
     var failure: String?
     var needsApproval = false
     var hasPanel = false
+    var hasConfigure = false
     var panelWidth = "medium"
+    var supportedSizes: [WidgetSize] = [.chip]
+    var defaultWidgetSize: WidgetSize?
+    var widgetNode: ViewNode?
+    var widgetSize: WidgetSize = .chip
+    var configureNode: ViewNode?
+    var isConfiguring = false
     var permissions: [String] = []
     var isUserModule = false
     var isRaised = false
+
+    var supportsResize: Bool {
+        kind == .module && supportedSizes.contains(where: \.isWidget) && !needsApproval && failure == nil
+    }
 
     var isClickable: Bool {
         switch kind {
@@ -52,10 +63,36 @@ struct PanelState: Equatable {
 
     var slotID: String
     var content: Content
+    var widgetSize: WidgetSize = .medium
     var node: ViewNode?
+    var configureNode: ViewNode?
+    var isConfiguring = false
     var failure: String?
     var isLoading = false
     var isPinnedOpen = false
+}
+
+/// Live corner-drag resize state kept outside BarModel so 120Hz drag ticks never redraw unrelated chips or widgets.
+@MainActor
+final class ResizeDragState: ObservableObject {
+    @Published var activeSlotID: String?
+    @Published var isPeek = false
+    @Published var startTier: WidgetSize = .chip
+    @Published var targetTier: WidgetSize = .chip
+    @Published var startRect: CGRect = .zero
+    @Published var proposedSize: CGSize = .zero
+    @Published var corner: ResizeCorner = .bottomLeft
+
+    var isActive: Bool { activeSlotID != nil }
+
+    func reset() {
+        activeSlotID = nil
+        isPeek = false
+        startTier = .chip
+        targetTier = .chip
+        startRect = .zero
+        proposedSize = .zero
+    }
 }
 
 struct SelectionBump: Equatable {
@@ -128,6 +165,11 @@ final class BarModel: ObservableObject {
     /// Kept outside the model's own changes: the pointer moves every frame of a drag, and every view observing the
     /// model would otherwise be rebuilt each time.
     let carried = CarriedPointer()
+    /// Live corner-drag resize state, likewise kept outside BarModel to avoid redrawing unrelated modules mid-drag.
+    let resizeDrag = ResizeDragState()
+    @Published var resizingSlotID: String? {
+        didSet { if (oldValue == nil) != (resizingSlotID == nil) { onResizingChanged() } }
+    }
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
     @Published var showsPinDividers = false
     /// The bar was opened with the keyboard shortcut, so its keys move `keyboardSelection` and act on that module.
@@ -162,6 +204,7 @@ final class BarModel: ObservableObject {
     }
 
     private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
+    private var reportedWidgetFrames: [String: CGRect] = [:]
     /// Where the menu bar row's top-left corner lies in the bar window's top-left coordinates.
     var menuBarRowOffset = CGSize.zero
     /// The menu bar row's strip in the bar window's top-left coordinates, which takes drops even while empty.
@@ -169,13 +212,57 @@ final class BarModel: ObservableObject {
 
     /// Chip frames in the bar window's top-left coordinates, including chips drawn in the menu bar row.
     var slotFrames: [String: CGRect] {
-        reportedFrames.mapValues { reported in
+        var frames = reportedFrames.mapValues { reported in
             reported.isInMenuBar ? reported.frame.offsetBy(dx: menuBarRowOffset.width, dy: menuBarRowOffset.height) : reported.frame
         }
+        for (id, rect) in reportedWidgetFrames where layout.size(of: id).isWidget {
+            frames[id] = rect
+        }
+        return frames
     }
 
     func report(frame: CGRect, of id: String, isInMenuBar: Bool) {
         reportedFrames[id] = (frame, isInMenuBar)
+    }
+
+    func reportWidget(frame: CGRect, of id: String) {
+        reportedWidgetFrames[id] = frame
+    }
+
+    /// Visible chip and widget frames in the bar window's top-left coordinates, used for precise click-through hit testing.
+    var interactiveFramesInBarWindow: [CGRect] {
+        var rects: [CGRect] = []
+        let chipKeys = Set(visibleRows.joined().map(\.id))
+        for (id, entry) in reportedFrames where !entry.isInMenuBar && chipKeys.contains(id) {
+            rects.append(entry.frame)
+        }
+        for entry in visibleWidgets {
+            if let rect = reportedWidgetFrames[entry.slot.id] {
+                rects.append(rect)
+            }
+        }
+        return rects
+    }
+
+    /// True if `barPoint` (in bar window top-left coordinates) hits a visible desktop widget.
+    func isPointInWidget(_ barPoint: CGPoint) -> Bool {
+        for entry in visibleWidgets {
+            if let rect = reportedWidgetFrames[entry.slot.id], rect.insetBy(dx: -6, dy: -6).contains(barPoint) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// True if `barPoint` (in bar window top-left coordinates) hits a visible chip in the bar window.
+    func isPointInBarChip(_ barPoint: CGPoint) -> Bool {
+        let chipKeys = Set(visibleRows.joined().map(\.id))
+        for (id, entry) in reportedFrames where !entry.isInMenuBar && chipKeys.contains(id) {
+            if entry.frame.insetBy(dx: -4, dy: -4).contains(barPoint) {
+                return true
+            }
+        }
+        return false
     }
 
     var barWindowFrame = CGRect.zero
@@ -202,6 +289,11 @@ final class BarModel: ObservableObject {
     var onDragChanged: (CGSize) -> Void = { _ in }
     var onRearrange: (_ rows: [[String]], _ pins: [String: Bool], _ hiding: String?) -> Void = { _, _, _ in }
     var onRearrangingChanged: () -> Void = {}
+    var onResizeSlot: (_ id: String, _ size: WidgetSize) -> Void = { _, _ in }
+    var onResizePreview: (_ id: String, _ size: WidgetSize, _ isPeek: Bool) -> Void = { _, _, _ in }
+    var onResizingChanged: () -> Void = {}
+    var onToggleConfigure: (_ id: String, _ isConfiguring: Bool, _ isPeek: Bool) -> Void = { _, _, _ in }
+    var onWidgetCommand: (_ id: String, _ command: String) -> Void = { _, _ in }
     var manifestFor: (String) -> ModuleManifest? = { _ in nil }
 
     var alignment: HorizontalAlignment {
@@ -341,5 +433,82 @@ final class BarModel: ObservableObject {
         let start = rearrangement?.start ?? pinDividers(rows)
         let shown = rearrangement.flatMap { moving in moving.drop.map { start.moving(moving.key, to: $0) } } ?? start
         return shown.rows.map { row in row.compactMap { byID[$0] ?? (PinDividers.isDivider($0) ? .pinDivider($0) : nil) } }
+    }
+
+    /// Persistent desktop widgets shown on the Bento shelf below the chip rows (visible while idle too).
+    var visibleWidgets: [(slot: Slot, size: WidgetSize)] {
+        let byID = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return layout.arrangedWidgets(layoutItems).compactMap { entry in
+            guard let slot = byID[entry.key], slot.kind == .module, !slot.needsApproval, slot.failure == nil else { return nil }
+            let supported = slot.supportedSizes
+            let effective = supported.contains(entry.size) ? entry.size : (slot.defaultWidgetSize ?? .medium)
+            return (slot, effective)
+        }
+    }
+
+    /// The bar's modules as the keyboard steps through them; includes both chips and desktop widgets.
+    var selectableRowsWithWidgets: [[BarSelection.Chip]] {
+        let frames = slotFrames
+        let allIDs = visibleRows.joined().filter { $0.kind != .pinDivider }.map(\.id) + visibleWidgets.map(\.slot.id)
+        return BarSelection.rows(from: allIDs.compactMap { id in
+            guard let frame = frames[id] else { return nil }
+            return (id, frame)
+        })
+    }
+
+    // MARK: Live Corner Resize
+
+    func beginResizing(_ id: String, startTier: WidgetSize, startRect: CGRect, isPeek: Bool = false) {
+        let corner = WidgetResize.corner(for: settings.anchor)
+        resizeDrag.activeSlotID = id
+        resizeDrag.isPeek = isPeek
+        resizeDrag.startTier = startTier
+        resizeDrag.targetTier = startTier
+        resizeDrag.startRect = startRect
+        resizeDrag.proposedSize = startRect.size
+        resizeDrag.corner = corner
+        resizingSlotID = id
+    }
+
+    func updateResizing(translation: CGSize) {
+        guard let id = resizeDrag.activeSlotID, let slot = slot(id) else { return }
+        let metrics = Metrics(theme)
+        let allowed = resizeDrag.isPeek ? slot.supportedSizes.filter(\.isWidget) : slot.supportedSizes
+        guard !allowed.isEmpty else { return }
+        let raw = WidgetResize.proposedSize(from: resizeDrag.startRect.size, translation: translation, corner: resizeDrag.corner)
+        let minTier = allowed.sorted { $0.rank < $1.rank }.first ?? .chip
+        let maxTier = allowed.sorted { $0.rank < $1.rank }.last ?? .medium
+        let minDim = minTier.isWidget ? metrics.widgetSize(minTier) : CGSize(width: min(resizeDrag.startRect.width, 84), height: 28)
+        let maxDim = metrics.widgetSize(maxTier)
+        resizeDrag.proposedSize = WidgetResize.rubberySize(proposed: raw, min: minDim, max: maxDim)
+
+        let target = WidgetResize.targetSize(
+            from: resizeDrag.startTier,
+            startSize: resizeDrag.startRect.size,
+            translation: translation,
+            corner: resizeDrag.corner,
+            allowed: allowed,
+            metrics: metrics
+        )
+        if target != resizeDrag.targetTier {
+            resizeDrag.targetTier = target
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            onResizePreview(id, target, resizeDrag.isPeek)
+        }
+    }
+
+    func endResizing() {
+        guard let id = resizeDrag.activeSlotID else { return }
+        let target = resizeDrag.targetTier
+        let isPeek = resizeDrag.isPeek
+        resizeDrag.reset()
+        resizingSlotID = nil
+        if isPeek {
+            if target.isWidget, panel?.slotID == id {
+                onResizePreview(id, target, true)
+            }
+        } else {
+            onResizeSlot(id, target)
+        }
     }
 }

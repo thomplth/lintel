@@ -170,14 +170,15 @@ function dateOrderExamples(host, now, c) {
   return new Set(today).size === today.length ? today : examples(new Date(2026, 11, 31));
 }
 
-function worldSection(now, zones, c) {
+function worldSection(now, zones, c, options) {
+  const o = options || {};
   return section('World', [
     zones.length
-      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour)))
+      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour)), { compact: o.compact })
       : note('Add a city to compare its time with yours.'),
-    field('Add a city', 'addZone', { icon: 'plus', suggest: 'suggestZones' }),
-    ...(unmatchedZone ? [note(`No city or time zone matches “${unmatchedZone}”.`, { tone: 'warn' })] : []),
-  ]);
+    ...(o.withField !== false ? [field('Add a city', 'addZone', { icon: 'plus', suggest: 'suggestZones' })] : []),
+    ...(unmatchedZone && o.withField !== false ? [note(`No city or time zone matches “${unmatchedZone}”.`, { tone: 'warn' })] : []),
+  ], { priority: o.priority });
 }
 
 function barSections(host, now, c) {
@@ -201,31 +202,93 @@ function barSections(host, now, c) {
   ];
 }
 
+function renderChip(host) {
+  const c = choices(host);
+  const now = new Date();
+  const parts = [];
+  if (c.showDate) parts.push(host.format.date(now, { order: c.order, year: c.year, weekday: c.weekday }));
+  else if (c.weekday) parts.push(host.format.date(now, { weekday: true }).split(' ')[0]);
+  if (c.showTime || parts.length === 0) parts.push(host.format.time(now, { seconds: c.seconds, twelveHour: c.twelveHour }));
+  return text(parts.join('  '), { mono: true });
+}
+
 defineModule({
   meta: {
     id: 'clock',
     title: 'Clock',
     icon: 'clock',
-    summary: 'The date and time in the bar, in a format you choose; a calendar and world clocks in the panel.',
+    summary: 'Date and time in the bar; calendar and world clocks across every widget size.',
     pinned: true,
     order: 90,
     refreshSeconds: 1,
     panelRefreshSeconds: 1,
-    panelWidth: 'small',
+    sizes: ['chip', 'small', 'wide', 'medium', 'large'],
+    defaultSize: 'medium',
   },
   render(host) {
-    const c = choices(host);
-    const now = new Date();
-    const parts = [];
-    if (c.showDate) parts.push(host.format.date(now, { order: c.order, year: c.year, weekday: c.weekday }));
-    else if (c.weekday) parts.push(host.format.date(now, { weekday: true }).split(' ')[0]);
-    if (c.showTime || parts.length === 0) parts.push(host.format.time(now, { seconds: c.seconds, twelveHour: c.twelveHour }));
-    return text(parts.join('  '), { mono: true });
+    return renderChip(host);
   },
   panel(host) {
     const now = new Date();
     const c = choices(host);
     return [header(host, now, c), calendar(now), worldSection(now, savedZones(host), c), ...barSections(host, now, c)];
+  },
+  views: {
+    chip(host) {
+      return renderChip(host);
+    },
+    small(host) {
+      const now = new Date();
+      const c = choices(host);
+      const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+      return [
+        column([
+          text(longWeekdays[now.getDay()], { role: 'caption', tone: 'accent', weight: 'semibold' }),
+          text(host.format.time(now, { seconds: false, twelveHour: c.twelveHour }), { role: 'display', mono: true }),
+          text(`${now.getDate()} ${longMonths[now.getMonth()]} ${now.getFullYear()}`, { role: 'label' }),
+          spacer(),
+          text(`${cityOf(localZone)} · Week ${isoWeek(now)}`, { role: 'caption', tone: 'tertiary' }),
+        ], { spacing: 'tight' }),
+      ];
+    },
+    wide(host) {
+      const now = new Date();
+      const c = choices(host);
+      return [
+        split([
+          header(host, now, c),
+          worldSection(now, savedZones(host), c, { compact: true, withField: false }),
+        ], { weights: [1, 1.25] }),
+      ];
+    },
+    medium(host) {
+      const now = new Date();
+      const c = choices(host);
+      return [
+        row([
+          text(host.format.time(now, { seconds: true, twelveHour: c.twelveHour }), { role: 'title', mono: true }),
+          spacer(),
+          text(`${longWeekdays[now.getDay()].slice(0, 3)}, ${now.getDate()} ${longMonths[now.getMonth()].slice(0, 3)}`, { role: 'caption', tone: 'secondary' }),
+        ]),
+        calendar(now),
+        worldSection(now, savedZones(host), c, { compact: true, withField: false, priority: 'supporting' }),
+      ];
+    },
+    large(host) {
+      const now = new Date();
+      const c = choices(host);
+      return [
+        split([
+          column([header(host, now, c), calendar(now)], { spacing: 'normal' }),
+          worldSection(now, savedZones(host), c),
+        ], { weights: [1.05, 1] }),
+      ];
+    },
+  },
+  configure(host) {
+    const now = new Date();
+    const c = choices(host);
+    return [...barSections(host, now, c), worldSection(now, savedZones(host), c)];
   },
   actions: {
     suggestZones(host, typed) {

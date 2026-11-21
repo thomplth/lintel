@@ -124,6 +124,7 @@ final class BarWindowController {
         model.onDragChanged = { [weak self] translation in self?.drag(translation) }
         model.onDragEnded = { [weak self] _ in self?.endDrag() }
         model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
+        model.onResizingChanged = { [weak self] in self?.updateMouseCapture() }
         let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.updateMouseCapture() } }
         mouseMonitors = [
             NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .flagsChanged], handler: follow) as Any,
@@ -344,14 +345,23 @@ final class BarWindowController {
         // Other apps' items come and go beside the menu bar row and push it along.
         if let menuBarRow, menuBarRow.screenFrame != menuBarRowFrame { place() }
         if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
-        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil else { return }
+        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil, model.resizingSlotID == nil else { return }
         let pointer = NSEvent.mouseLocation
-        var isInside = contentFrame.insetBy(dx: -2, dy: -2).contains(pointer)
+        let inBarCoords = barPoint(pointer)
+        let isOverWidget = model.isPointInWidget(inBarCoords)
+        let isOverChip = model.isPointInBarChip(inBarCoords)
+        var isInside = isOverChip || isOverWidget
         if let menuBarRowFrame, menuBarRowFrame.contains(pointer) { isInside = true }
         if activation.isActive, let frame = panelFrame(), frame.insetBy(dx: -4, dy: -10).contains(pointer) { isInside = true }
         if !model.settings.hoverActivates, activation.state == .idle { isInside = false }
         // A pressed mouse button means a drag or selection is passing over the bar, not a visit to it.
         if activation.state == .idle, NSEvent.pressedMouseButtons != 0 { isInside = false }
+        // Hovering a desktop widget directly should let the user interact immediately without expanding the unpinned chip bar,
+        // while hovering the chip strip still triggers normal dwell activation.
+        if isOverWidget && !isOverChip && activation.state == .idle {
+            updateMouseCapture()
+            return
+        }
         activation.pointer(inside: isInside, at: ProcessInfo.processInfo.systemUptime)
         applyActivation()
         updateMouseCapture()
@@ -373,15 +383,24 @@ final class BarWindowController {
         Placement.content(size: contentSize, in: panel.frame, anchor: model.settings.anchor)
     }
 
-    /// The canvas would swallow clicks meant for the windows under it; it takes the pointer only over the open bar,
-    /// or while a press that began there is still held.
+    /// The canvas would swallow clicks meant for the windows under it; it takes the pointer only over an actual
+    /// chip (when active), an actual desktop widget (even while idle!), or while a drag/resize press is held.
     private func updateMouseCapture() {
+        let pointer = NSEvent.mouseLocation
+        let inBarCoords = barPoint(pointer)
         let isPressing = !panel.ignoresMouseEvents && NSEvent.pressedMouseButtons != 0
-        let isOverBar = contentFrame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
-        let captures = !model.isHidden && activation.isActive
-            && (isOverBar || isPressing || dragOrigin != nil || model.rearrangement != nil)
+        let isOverWidget = model.isPointInWidget(inBarCoords)
+        let isOverBarChip = model.isPointInBarChip(inBarCoords) || contentFrame.insetBy(dx: -2, dy: -2).contains(pointer) && model.visibleWidgets.isEmpty
+        let captures = !model.isHidden && (
+            isOverWidget
+            || (activation.isActive && isOverBarChip)
+            || isPressing
+            || dragOrigin != nil
+            || model.rearrangement != nil
+            || model.resizingSlotID != nil
+        )
         if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
-        updatePinDividers(isOverBar: isOverBar)
+        updatePinDividers(isOverBar: isOverBarChip)
     }
 
     /// ⌘ over the open bar shows each row's pin divider, ready to be ⌘-dragged, and keeps it while a drag goes on.
@@ -393,12 +412,17 @@ final class BarWindowController {
         withAnimation(BarModel.reflow) { model.showsPinDividers = shows }
     }
 
-    /// Wide enough for the widest row the bar may have, and deep enough for several, so the canvas rarely has to grow
-    /// while modules reflow; resizing the window mid-animation shifts every module for a frame.
+    /// Wide enough for the widest row and Bento widget shelf, and tall enough for large/tall widgets, so the window
+    /// rarely needs to resize mid-animation.
     private func canvas(around content: CGRect) -> CGRect {
-        Placement.canvas(
-            around: content, width: model.maxBarWidth + Placement.barSidePadding * 2,
-            height: max(360, (screen?.visibleFrame.height ?? 800) * 0.4), anchor: model.settings.anchor
+        let metrics = Metrics(model.theme)
+        let shelfWidth = metrics.widgetSize(.large).width + Placement.barSidePadding * 2 + 24
+        let screenHeight = screen?.visibleFrame.height ?? 800
+        return Placement.canvas(
+            around: content,
+            width: max(model.maxBarWidth + Placement.barSidePadding * 2, shelfWidth, content.width + 24),
+            height: max(480, screenHeight * 0.72, content.height + 40),
+            anchor: model.settings.anchor
         )
     }
 

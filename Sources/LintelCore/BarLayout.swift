@@ -19,18 +19,23 @@ public struct BarLayout: Equatable, Codable, Sendable {
     public var hidden: [String] = []
     public var pinned: [String: Bool] = [:]
     public var symbols: [String: String] = [:]
+    public var sizes: [String: WidgetSize] = [:]
 
     public init() {}
 
-    public init(rows: [[String]], hidden: [String] = [], pinned: [String: Bool] = [:], symbols: [String: String] = [:]) {
+    public init(
+        rows: [[String]], hidden: [String] = [], pinned: [String: Bool] = [:],
+        symbols: [String: String] = [:], sizes: [String: WidgetSize] = [:]
+    ) {
         self.rows = rows
         self.hidden = hidden
         self.pinned = pinned
         self.symbols = symbols
+        self.sizes = sizes.filter { $0.value.isWidget }
     }
 
     private enum Key: String, CodingKey {
-        case rows, hidden, pinned, symbols
+        case rows, hidden, pinned, symbols, sizes
     }
 
     public init(from decoder: Decoder) throws {
@@ -39,13 +44,48 @@ public struct BarLayout: Equatable, Codable, Sendable {
         hidden = try container.decodeIfPresent([String].self, forKey: .hidden) ?? []
         pinned = try container.decodeIfPresent([String: Bool].self, forKey: .pinned) ?? [:]
         symbols = try container.decodeIfPresent([String: String].self, forKey: .symbols) ?? [:]
+        let decodedSizes = try container.decodeIfPresent([String: WidgetSize].self, forKey: .sizes) ?? [:]
+        sizes = decodedSizes.filter { $0.value.isWidget }
+    }
+
+    public func size(of key: String) -> WidgetSize {
+        sizes[key] ?? .chip
+    }
+
+    public mutating func setSize(_ size: WidgetSize, for key: String) {
+        if size.isWidget {
+            sizes[key] = size
+        } else {
+            sizes[key] = nil
+        }
+    }
+
+    /// Resized widgets live on the Bento shelf below the chip rows and stay visible while idle too.
+    public func arrangedWidgets(_ items: [Item]) -> [(key: String, size: WidgetSize)] {
+        let shown = items.filter { !hidden.contains($0.key) && size(of: $0.key).isWidget }
+        guard !shown.isEmpty else { return [] }
+        let byKey = Dictionary(shown.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for row in rows {
+            for key in row where byKey[key] != nil && seen.insert(key).inserted {
+                ordered.append(key)
+            }
+        }
+        let unlisted = shown
+            .filter { !seen.contains($0.key) }
+            .sorted { ($0.order, $0.key) < ($1.order, $1.key) }
+            .map(\.key)
+        ordered += unlisted
+        return ordered.map { ($0, size(of: $0)) }
     }
 
     /// `raised` holds items asking for attention; they show while idle whatever their pin says.
     /// With `keepsFirstRow`, the first row lives in the system menu bar: it keeps all its items while idle and keeps
     /// its place even when empty, so the rows below never rise into the menu bar.
+    /// Items currently sized as desktop widgets leave the chip rows while keeping their remembered row slots.
     public func arranged(_ items: [Item], isActive: Bool, raised: Set<String> = [], keepsFirstRow: Bool = false) -> [[String]] {
-        let shown = items.filter { !hidden.contains($0.key) }
+        let shown = items.filter { !hidden.contains($0.key) && !size(of: $0.key).isWidget }
         let byKey = Dictionary(shown.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var placed = Set<String>()
         var result = rows.map { row in row.filter { byKey[$0] != nil && placed.insert($0).inserted } }

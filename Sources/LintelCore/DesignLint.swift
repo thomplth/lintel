@@ -39,6 +39,23 @@ public enum DesignLint {
         return problems
     }
 
+    /// Validates one widget size tier (or configure view), checking component rules and structural fit.
+    public static func checkWidget(
+        _ node: ViewNode, size: WidgetSize, manifest: ModuleManifest, actions: [String],
+        limits: Limits = Limits(), symbolExists: (String) -> Bool
+    ) -> [ViewProblem] {
+        var problems: [ViewProblem] = []
+        checkPanel(node, limits: limits, problems: &problems)
+        checkShared(node, surface: "the \(size.rawValue) widget", manifest: manifest, actions: actions, symbolExists: symbolExists, problems: &problems)
+        if size == .small {
+            let sections = node.descendants.filter { $0.component == .section }.count
+            if sections > 2 {
+                problems.append(.warning("the small widget has \(sections) sections; keep small tiles focused on one hero view"))
+            }
+        }
+        return problems
+    }
+
     private static func checkChip(_ chip: ViewNode, limits: Limits, problems: inout [ViewProblem]) {
         let nodes = chip.descendants
         for node in nodes where !Catalog.chipComponents.contains(node.component) {
@@ -105,6 +122,10 @@ public enum DesignLint {
             case .grid:
                 let columns = node.number("columns") ?? 0
                 if columns < 1 || columns > 7 { problems.append(.error("grid columns must be 1 to 7")) }
+            case .split:
+                if node.children.count < 2 || node.children.count > 3 {
+                    problems.append(.error("split takes 2 to 3 children; it has \(node.children.count)"))
+                }
             case .segmented:
                 let count = node.strings("options").count
                 if count < 2 || count > 5 { problems.append(.error("segmented takes 2 to 5 options; it has \(count)")) }

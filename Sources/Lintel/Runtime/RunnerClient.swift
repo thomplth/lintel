@@ -19,6 +19,8 @@ struct ModuleFailure: Error, Equatable {
 struct ModuleDescription {
     var manifest: ModuleManifest
     var hasPanel: Bool
+    var hasConfigure: Bool = false
+    var declaredViews: [WidgetSize] = []
     var actions: [String]
     var jobs: [JobManifest] = []
 }
@@ -111,6 +113,8 @@ final class RunnerClient {
         return ModuleDescription(
             manifest: try ModuleManifest(reply["meta"]),
             hasPanel: reply["hasPanel"].bool ?? false,
+            hasConfigure: reply["hasConfigure"].bool ?? false,
+            declaredViews: (reply["declaredViews"].array ?? []).compactMap { $0.string.flatMap(WidgetSize.init(rawValue:)) },
             actions: (reply["actions"].array ?? []).compactMap(\.string),
             jobs: jobs
         )
@@ -118,6 +122,14 @@ final class RunnerClient {
 
     func render(key: String, surface: Surface) async throws -> JSONValue {
         try await request(["op": "render", "module": key, "surface": surface.rawValue])
+    }
+
+    func render(key: String, size: WidgetSize) async throws -> JSONValue {
+        try await request(["op": "render", "module": key, "surface": size.rawValue])
+    }
+
+    func renderConfigure(key: String) async throws -> JSONValue {
+        try await request(["op": "render", "module": key, "surface": "configure"])
     }
 
     func act(key: String, action: String, payload: JSONValue) async throws -> JSONValue {

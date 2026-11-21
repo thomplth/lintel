@@ -50,6 +50,12 @@ final class AppController {
         model.onSlotClick = { [weak self] slot in self?.clicked(slot) }
         model.onSlotSecondaryAction = { [weak self] slot, command in self?.edit(slot, command) }
         model.onRearrange = { [weak self] rows, pins, hiding in self?.rearrange(rows: rows, pins: pins, hiding: hiding) }
+        model.onResizeSlot = { [weak self] id, size in self?.host.setWidgetSize(id, to: size) }
+        model.onResizePreview = { [weak self] id, size, isPeek in self?.host.previewResize(id, size: size, isPeek: isPeek) }
+        model.onToggleConfigure = { [weak self] id, isConfiguring, isPeek in
+            self?.host.setConfiguring(id, isConfiguring: isConfiguring, isPeek: isPeek)
+        }
+        model.onWidgetCommand = { [weak self] id, command in self?.widgetCommand(id, command) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         model.onPanelCommand = { [weak self] command in self?.panelCommand(command) }
         model.onChatSubmit = { [weak self] message in self?.chat.submit(message) }
@@ -99,7 +105,12 @@ final class AppController {
             self.host.update(settings)
         }
         bar.onActiveChanged = { [weak self] isActive in
-            if isActive { self?.adoption.scanIfNeeded(force: false) } else { self?.closePanel(releasing: false) }
+            if isActive {
+                self?.adoption.scanIfNeeded(force: false)
+            } else {
+                self?.closePanel(releasing: false)
+                self?.host.clearIdleConfigurations()
+            }
         }
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
         bar.onGuardedTopEdgeChanged = { [weak self] span in self?.pointerTap.guardSpan(span) }
@@ -206,7 +217,7 @@ final class AppController {
     }
 
     private func perform(_ command: BarKey.Command) {
-        let rows = model.selectableRows
+        let rows = model.selectableRowsWithWidgets
         let selected = model.keyboardSelection.flatMap { id in model.slot(id) }
         switch command {
         case .select(let step):
@@ -341,12 +352,42 @@ final class AppController {
             let tab: SettingsTab = model.panel?.content == .assistant ? .assistant : .modules
             closePanel()
             showSettings(tab: tab)
+        case "pin-widget":
+            let size = model.panel?.widgetSize ?? .medium
+            closePanel()
+            host.setWidgetSize(id, to: size)
+        default:
+            break
+        }
+    }
+
+    private func widgetCommand(_ id: String, _ command: String) {
+        switch command {
+        case "collapse":
+            host.setWidgetSize(id, to: .chip)
+        case "change":
+            closePanel()
+            showStudio(module: id, focusChat: true)
+        case "settings":
+            closePanel()
+            showSettings(tab: .modules)
         default:
             break
         }
     }
 
     private func edit(_ slot: Slot, _ command: String) {
+        if command.hasPrefix("size:"), let size = WidgetSize(rawValue: String(command.dropFirst(5))) {
+            host.setWidgetSize(slot.id, to: size)
+            return
+        }
+        if command == "grow" || command == "shrink" {
+            guard slot.supportsResize else { return }
+            let current = model.layout.size(of: slot.id)
+            let target = current.step(by: command == "grow" ? 1 : -1, within: slot.supportedSizes)
+            if target != current { host.setWidgetSize(slot.id, to: target) }
+            return
+        }
         var layout = model.layout
         layout.materialise(model.layoutItems.filter { item in
             !item.isOptIn || layout.rows.contains { $0.contains(item.key) }

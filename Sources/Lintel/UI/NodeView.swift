@@ -26,9 +26,8 @@ struct NodeView: View {
                 children
             }
         case .spacer: Spacer(minLength: context.metrics.unit * 2)
-        case .column:
-            VStack(alignment: columnAlignment, spacing: spacing(default: context.metrics.spacing(nil))) { children }
-                .frame(maxWidth: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .center))
+        case .column: columnView
+        case .split: splitView
         case .section: sectionView
         case .grid: gridView
         case .stat: statView
@@ -158,10 +157,50 @@ struct NodeView: View {
         .animation(context.animates ? .easeOut(duration: 0.3) : nil, value: node.number("value"))
     }
 
-    // MARK: Panel blocks
+    // MARK: Panel & Widget blocks
+
+    @ViewBuilder private var columnView: some View {
+        let gap = spacing(default: context.metrics.spacing(nil))
+        if context.isInWidget {
+            AdaptiveStackLayout(spacing: gap, alignment: columnAlignment) {
+                adaptiveChildren(node.children)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .top))
+        } else {
+            VStack(alignment: columnAlignment, spacing: gap) { children }
+                .frame(maxWidth: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .center))
+        }
+    }
+
+    private var splitView: some View {
+        let weights = node.numbers("weights")
+        let gap = spacing(default: context.metrics.spacing(nil))
+        let vAlign: VerticalAlignment = switch node.string("align") {
+        case "center": .center
+        case "bottom": .bottom
+        default: .top
+        }
+        return SplitLayout(weights: weights, spacing: gap, alignment: vAlign) {
+            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                NodeView(node: child.element, context: context)
+                    .frame(maxWidth: .infinity, maxHeight: context.isInWidget ? .infinity : nil, alignment: .topLeading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: context.isInWidget ? .infinity : nil, alignment: .topLeading)
+    }
+
+    @ViewBuilder private func adaptiveChildren(_ nodes: [ViewNode]) -> some View {
+        ForEach(Array(nodes.enumerated()), id: \.offset) { child in
+            NodeView(node: child.element, context: context)
+                .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
+                .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
+        }
+    }
 
     private var sectionView: some View {
-        VStack(alignment: .leading, spacing: context.metrics.unit * 2) {
+        let gap = context.isCompactWidget ? context.metrics.unit * 1.5 : context.metrics.unit * 2
+        let childGap = context.isCompactWidget ? context.metrics.unit * 1.25 : context.metrics.spacing(nil)
+        return VStack(alignment: .leading, spacing: gap) {
             if let title = node.string("title"), !title.isEmpty {
                 HStack(alignment: .firstTextBaseline) {
                     Text(title)
@@ -169,13 +208,21 @@ struct NodeView: View {
                         .foregroundStyle(context.secondary)
                         .textCase(.uppercase)
                         .kerning(0.4)
+                        .lineLimit(1)
                     Spacer(minLength: 8)
                     if let trailing = node.string("trailing") {
-                        Text(trailing).font(context.font(role: "caption", mono: true)).foregroundStyle(context.tertiary)
+                        Text(trailing).font(context.font(role: "caption", mono: true)).foregroundStyle(context.tertiary).lineLimit(1)
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: context.metrics.spacing(nil)) { children }
+            if context.isInWidget && node.containsFlexibleBlock {
+                AdaptiveStackLayout(spacing: childGap, alignment: .leading) {
+                    adaptiveChildren(node.children)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                VStack(alignment: .leading, spacing: childGap) { children }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -204,17 +251,18 @@ struct NodeView: View {
     }
 
     private var statView: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        let pad = context.isCompactWidget ? context.metrics.unit * 2 : context.metrics.tilePadding
+        return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: context.metrics.unit) {
                 if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "caption") }
                 Text(node.string("label") ?? "").font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
             }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(node.string("value") ?? "")
-                    .font(context.font(role: "display", mono: true))
+                    .font(context.font(role: context.isCompactWidget ? "title" : "display", mono: true))
                     .foregroundStyle(context.color(node.tone()))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+                    .minimumScaleFactor(0.55)
                     .contentTransition(context.animates ? .numericText() : .identity)
                 if let unit = node.string("unit") {
                     Text(unit).font(context.font(role: "label")).foregroundStyle(context.secondary).lineLimit(1)
@@ -229,7 +277,7 @@ struct NodeView: View {
                 Text(caption).font(context.font(role: "caption")).foregroundStyle(context.tertiary).lineLimit(1)
             }
         }
-        .padding(context.metrics.tilePadding)
+        .padding(pad)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(context.fill, in: context.tileShape)
     }
@@ -251,17 +299,21 @@ struct NodeView: View {
         }
     }
 
-    private var listView: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
-                if child.offset > 0 {
-                    Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+    @ViewBuilder private var listView: some View {
+        if context.isInWidget {
+            AdaptiveListView(node: node, context: context)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                    if child.offset > 0 {
+                        Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+                    }
+                    NodeView(node: child.element, context: context)
                 }
-                NodeView(node: child.element, context: context)
             }
+            .background(context.fill, in: context.tileShape)
+            .clipShape(context.tileShape)
         }
-        .background(context.fill, in: context.tileShape)
-        .clipShape(context.tileShape)
     }
 
     private var keyValueView: some View {
@@ -458,27 +510,32 @@ struct TokenButtonStyle: ButtonStyle {
 private struct ItemRow: View {
     let node: ViewNode
     let context: RenderContext
+    var compactOverride = false
     @State private var isHovered = false
 
     private var isClickable: Bool {
         node.string("action") != nil || node.string("url") != nil
     }
 
+    private var isCompact: Bool {
+        compactOverride || context.isCompactWidget
+    }
+
     var body: some View {
-        HStack(spacing: context.metrics.unit * 2.5) {
+        HStack(spacing: context.metrics.unit * (isCompact ? 1.75 : 2.5)) {
             if let name = node.string("icon") {
-                SymbolGlyph(name: name, size: context.metrics.fontSize(role: nil), weight: context.weight(nil), symbolMode: context.symbolMode)
+                SymbolGlyph(name: name, size: context.metrics.fontSize(role: isCompact ? "label" : nil), weight: context.weight(nil), symbolMode: context.symbolMode)
                     .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
-                    .frame(width: context.theme.fontSize * 1.4)
+                    .frame(width: context.theme.fontSize * (isCompact ? 1.15 : 1.4))
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(node.string("title") ?? "").font(context.font(role: "label", weight: context.theme.fontWeight))
                     .foregroundStyle(context.primary).lineLimit(1)
-                if let subtitle = node.string("subtitle"), !subtitle.isEmpty {
+                if !compactOverride, let subtitle = node.string("subtitle"), !subtitle.isEmpty {
                     Text(subtitle).font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
                 }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 6)
             if let value = node.string("value") {
                 Text(value).font(context.font(role: "label", mono: true)).foregroundStyle(context.secondary).lineLimit(1)
             }
@@ -501,8 +558,8 @@ private struct ItemRow: View {
                     .foregroundStyle(context.tertiary)
             }
         }
-        .padding(.horizontal, context.metrics.tilePadding)
-        .padding(.vertical, context.metrics.unit * 2)
+        .padding(.horizontal, isCompact ? context.metrics.unit * 2 : context.metrics.tilePadding)
+        .padding(.vertical, context.metrics.unit * (isCompact ? 1.35 : 2))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(isHovered && isClickable ? context.fill : .clear)
         .contentShape(Rectangle())

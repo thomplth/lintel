@@ -17,9 +17,14 @@ struct ChartView: View {
         let series = node.series
         let kind = node.string("kind") ?? "area"
         let labels = node.strings("labels")
-        VStack(alignment: .leading, spacing: context.metrics.unit * 1.5) {
+        let heightToken = node.string("height")
+        let fillsWidget = context.isInWidget && (heightToken == nil || heightToken == "fill")
+        let fixedHeight = CGFloat(context.metrics.blockHeight(heightToken))
+        let minH: CGFloat = fillsWidget ? 40 : fixedHeight
+        let maxH: CGFloat = fillsWidget ? .infinity : fixedHeight
+        VStack(alignment: .leading, spacing: context.metrics.unit) {
             if series.contains(where: { !$0.label.isEmpty }) {
-                HStack(spacing: context.metrics.unit * 3) {
+                HStack(spacing: context.metrics.unit * 2.5) {
                     ForEach(Array(series.enumerated()), id: \.offset) { entry in
                         HStack(spacing: context.metrics.unit) {
                             Circle().fill(color(entry.element, at: entry.offset)).frame(width: 6, height: 6)
@@ -31,14 +36,13 @@ struct ChartView: View {
             if series.allSatisfy({ $0.values.count < 2 }) {
                 Text("Collecting data…")
                     .font(context.font(role: "caption")).foregroundStyle(context.tertiary)
-                    .frame(maxWidth: .infinity).frame(height: context.metrics.blockHeight(node.string("height")))
+                    .frame(maxWidth: .infinity, minHeight: minH, maxHeight: maxH)
                     .background(context.fill, in: context.tileShape)
             } else {
                 Canvas { canvas, size in draw(series, kind: kind, in: &canvas, size: size) }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: context.metrics.blockHeight(node.string("height")))
+                    .frame(maxWidth: .infinity, minHeight: minH, maxHeight: maxH)
             }
-            if !labels.isEmpty {
+            if !labels.isEmpty && !context.isCompactWidget {
                 HStack {
                     Text(labels.first ?? "")
                     Spacer()

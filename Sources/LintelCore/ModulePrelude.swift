@@ -35,10 +35,11 @@ public enum ModulePrelude {
     function row(children, options) { var o = __options(options); return __node('row', { spacing: o.spacing, align: o.align }, children); }
     function spacer() { return __node('spacer', {}); }
     function column(children, options) { var o = __options(options); return __node('column', { spacing: o.spacing, align: o.align }, children); }
+    function split(children, options) { var o = __options(options); return __node('split', { weights: o.weights, spacing: o.spacing, align: o.align }, children); }
     function section(title, children, options) {
       if (Array.isArray(title)) { options = children; children = title; title = undefined; }
       var o = __options(options);
-      return __node('section', { title: title, trailing: o.trailing }, children);
+      return __node('section', { title: title, trailing: o.trailing, priority: o.priority }, children);
     }
     function grid(columns, children, options) { var o = __options(options); return __node('grid', { columns: Number(columns), spacing: o.spacing }, children); }
     function stat(label, value, options) {
@@ -55,7 +56,7 @@ public enum ModulePrelude {
       return __node('chart', { values: isSeries ? undefined : data, series: isSeries ? data : undefined, kind: o.kind,
         tone: o.tone || o.color, height: o.height, min: o.min, max: o.max, labels: o.labels });
     }
-    function list(items) { return __node('list', {}, items); }
+    function list(items, options) { var o = __options(options); return __node('list', { compact: o.compact, overflow: o.overflow }, items); }
     function item(title, options) {
       var o = __options(options);
       return __node('item', { title: __string(title), subtitle: o.subtitle, icon: o.icon, value: o.value, badge: o.badge,
@@ -224,6 +225,18 @@ public enum ModulePrelude {
       var message = String((error && error.message) || error);
       return error && error.line ? message + ' (line ' + error.line + ')' : message;
     }
+    var __sizeSpecs = {
+      chip: { size: 'chip', cols: 0, rows: 0, isWidget: false, isCompact: true, isWide: false },
+      small: { size: 'small', cols: 1, rows: 1, isWidget: true, isCompact: true, isWide: false },
+      wide: { size: 'wide', cols: 2, rows: 1, isWidget: true, isCompact: true, isWide: true },
+      medium: { size: 'medium', cols: 2, rows: 2, isWidget: true, isCompact: false, isWide: true },
+      large: { size: 'large', cols: 3, rows: 2, isWidget: true, isCompact: false, isWide: true },
+      tall: { size: 'tall', cols: 2, rows: 3, isWidget: true, isCompact: false, isWide: true },
+    };
+    function __sizeContext(name) {
+      var spec = __sizeSpecs[name] || __sizeSpecs.medium;
+      return Object.assign({}, spec);
+    }
     function __describe() {
       if (!__module || typeof __module !== 'object') return null;
       var rawJobs = __module.jobs && typeof __module.jobs === 'object' ? __module.jobs : {};
@@ -239,18 +252,46 @@ public enum ModulePrelude {
           hasRun: typeof spec.run === 'function'
         };
       });
+      var views = __module.views && typeof __module.views === 'object' ? __module.views : {};
+      var declaredViews = Object.keys(views).filter(function (k) { return typeof views[k] === 'function'; });
+      var hasChipView = typeof views.chip === 'function';
+      var hasWidgetViews = declaredViews.some(function (k) { return k !== 'chip'; });
+      var hasSizeAwareRender = typeof __module.render === 'function' && (__module.render.length >= 2 || Array.isArray(__module.meta && __module.meta.sizes));
       return JSON.stringify({
         meta: __module.meta || null,
-        hasRender: typeof (__module.render || __module.chip) === 'function',
-        hasPanel: typeof __module.panel === 'function',
+        hasRender: typeof (__module.render || __module.chip) === 'function' || hasChipView,
+        hasPanel: typeof __module.panel === 'function' || hasWidgetViews || hasSizeAwareRender,
+        hasConfigure: typeof __module.configure === 'function',
+        declaredViews: declaredViews,
         actions: Object.keys(__module.actions || {}),
         jobs: jobs
       });
     }
     function __render(surface, done) {
-      var render = surface === 'panel' ? __module.panel : (__module.render || __module.chip);
+      var views = __module.views && typeof __module.views === 'object' ? __module.views : {};
+      var fn;
+      var arg = surface;
+      if (surface === 'configure') {
+        fn = __module.configure;
+      } else if (typeof views[surface] === 'function') {
+        fn = views[surface];
+      } else if (surface === 'chip') {
+        fn = __module.render || __module.chip || views.chip;
+      } else if (surface === 'panel') {
+        var defaultKey = (__module.meta && __module.meta.defaultSize) || 'medium';
+        fn = __module.panel || views[defaultKey] || views.medium || views.wide || views.small || views.large || __module.render;
+        arg = defaultKey;
+      } else if (typeof __module.panel === 'function' && (!__module.render || __module.render.length < 2) && !Array.isArray(__module.meta && __module.meta.sizes)) {
+        fn = __module.panel;
+      } else {
+        fn = __module.render || __module.panel;
+      }
       var pending;
-      try { pending = Promise.resolve(render.call(__module, host)); } catch (error) { pending = Promise.reject(error); }
+      if (typeof fn !== 'function') {
+        done('null', null);
+        return;
+      }
+      try { pending = Promise.resolve(fn.call(__module, host, __sizeContext(arg))); } catch (error) { pending = Promise.reject(error); }
       pending.then(
         function (tree) { done(JSON.stringify(tree === undefined ? null : tree), null); },
         function (error) { done(null, __message(error)); });

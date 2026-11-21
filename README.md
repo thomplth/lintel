@@ -34,6 +34,12 @@ Lintel, not among other apps' items (needs Accessibility; without it macOS moves
 Drag the open bar to move it to the left, centre or right of the screen; hold ⌘ and drag a module to move it beside
 another, into another row, or onto a row's top or bottom edge (or just below the bar) to start a new row there. Carry it
 well away from the bar until the pointer shows ✕ and let go to remove it; Settings › Bar Items brings it back.
+Hover any module to reveal a curved resize handle on its free bottom corner (bottom-left when right-anchored,
+bottom-right when left-anchored). Drag it outward to morph a chip smoothly into a desktop widget (`small` 1×1, `wide`
+2×1, `medium` 2×2, `large` 3×2, or `tall` 2×3) on the Bento shelf below the chip rows, or shrink it back into a chip.
+Desktop widgets stay visible while idle, dynamically adapt every block to fit without scrolling, and reveal a quiet
+utility pill (Configure, Collapse, Studio, Settings) on hover. Clicking a chip opens a transient peek widget; click its
+pin icon to keep it on the desktop. Right-click any module to jump straight to a size.
 Holding ⌘ over the open bar also shows a slim divider in each of its rows (except one in the menu bar, which shows all
 its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
 is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.
@@ -47,6 +53,7 @@ the standard keys; Settings › Keyboard changes any of them except Esc and 1–
 | Return or Space | Open the selected module, as a click would |
 | 1–9 | Open the module at that position |
 | ⌘← ⌘→ ⌘↑ ⌘↓ | Move the selected module along its row or to the row above or below |
+| ⌘= / ⌘- (or ] / [) | Resize the selected module larger or smaller across its supported widget tiers |
 | P | Pin it, so it shows while the bar is closed, or unpin it |
 | Delete | Hide it from the bar (Settings › Bar Items brings it back) |
 | A | Ask the assistant to change it; / opens the assistant |

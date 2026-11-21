@@ -17,33 +17,58 @@ struct PanelView: View {
             let slot = model.slot(panel.slotID)
             let material: SurfaceMaterial = model.theme.panelMaterial == "solid" ? .solid : .glass
             let context = makeContext(panel, material: material)
-            let width = context.metrics.panelWidth(panel.content == .assistant ? "medium" : slot?.panelWidth)
-            let headerHeight = context.metrics.fontSize(role: "title") + context.metrics.panelPadding * 2
-            VStack(alignment: .leading, spacing: 0) {
-                header(panel, slot: slot, context: context)
-                    .frame(height: headerHeight)
-                Rectangle().fill(context.separator).frame(height: 1)
-                if panel.content == .assistant {
-                    ChatView(model: model, context: context)
-                        .frame(height: min(max(maxHeight - headerHeight, 200), 460))
+            let usesUnifiedWidget = panel.content == .module && slot != nil && slot?.needsApproval == false && (panel.node != nil || panel.isLoading || panel.failure == nil)
+
+            Group {
+                if usesUnifiedWidget, let slot {
+                    WidgetCardView(
+                        slot: slot,
+                        size: panel.widgetSize,
+                        node: panel.node,
+                        configureNode: panel.configureNode,
+                        isConfiguring: panel.isConfiguring,
+                        isLoading: panel.isLoading,
+                        failure: panel.failure ?? slot.failure,
+                        theme: model.theme,
+                        anchor: model.settings.anchor,
+                        isPeek: true,
+                        isSelected: false,
+                        isResizingThis: model.resizingSlotID == slot.id,
+                        model: model
+                    )
+                    .equatable()
+                    .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onSize)
+                    .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
                 } else {
-                    ScrollView(.vertical) {
-                        moduleContent(panel, slot: slot, context: context)
-                            .padding(context.metrics.panelPadding)
-                            .frame(width: width, alignment: .leading)
-                            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: { contentHeight = $0 })
+                    let width = context.metrics.panelWidth(panel.content == .assistant ? "medium" : slot?.panelWidth)
+                    let headerHeight = context.metrics.fontSize(role: "title") + context.metrics.panelPadding * 2
+                    VStack(alignment: .leading, spacing: 0) {
+                        header(panel, slot: slot, context: context)
+                            .frame(height: headerHeight)
+                        Rectangle().fill(context.separator).frame(height: 1)
+                        if panel.content == .assistant {
+                            ChatView(model: model, context: context)
+                                .frame(height: min(max(maxHeight - headerHeight, 200), 460))
+                        } else {
+                            ScrollView(.vertical) {
+                                moduleContent(panel, slot: slot, context: context)
+                                    .padding(context.metrics.panelPadding)
+                                    .frame(width: width, alignment: .leading)
+                                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }, action: { contentHeight = $0 })
+                            }
+                            .scrollBounceBehavior(.basedOnSize)
+                            .scrollIndicators(contentHeight > maxHeight - headerHeight ? .automatic : .hidden)
+                            .frame(height: min(contentHeight, max(maxHeight - headerHeight, 120)))
+                        }
                     }
-                    .scrollBounceBehavior(.basedOnSize)
-                    .scrollIndicators(contentHeight > maxHeight - headerHeight ? .automatic : .hidden)
-                    .frame(height: min(contentHeight, max(maxHeight - headerHeight, 120)))
+                    .frame(width: width)
+                    .modifier(SurfaceBackground(context: context, material: material, shape: context.panelShape))
+                    .clipShape(context.panelShape)
+                    .shadow(color: .black.opacity(material == .solid ? 0.3 : 0.12), radius: 14, y: 6)
+                    .environment(\.colorScheme, context.colorScheme ?? systemScheme)
+                    .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onSize)
                 }
             }
-            .frame(width: width)
-            .modifier(SurfaceBackground(context: context, material: material, shape: context.panelShape))
-            .clipShape(context.panelShape)
-            .shadow(color: .black.opacity(material == .solid ? 0.3 : 0.12), radius: 14, y: 6)
-            .environment(\.colorScheme, context.colorScheme ?? systemScheme)
-            .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onSize)
             .padding(Self.margin)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .onExitCommand { model.onDismiss() }

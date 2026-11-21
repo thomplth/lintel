@@ -140,6 +140,10 @@ final class ControlChannel {
     private func handle(_ command: JSONValue) {
         switch command["cmd"].string {
         case "open": if let slot = command["slot"].string { app.openModulePanel(slot) }
+        case "resize":
+            if let slot = command["slot"].string, let sizeName = command["size"].string, let size = WidgetSize(rawValue: sizeName) {
+                app.host.setWidgetSize(slot, to: size)
+            }
         case "close": app.closePanel()
         case "assistant": app.openAssistant(draft: command["draft"].string)
         case "studio": app.showStudio(module: command["module"].string, focusChat: command["chat"].bool ?? false)
@@ -181,12 +185,17 @@ final class ControlChannel {
             let slots: [JSONValue] = app.model.slots.map { slot in
                 ["id": .string(slot.id), "title": .string(slot.title), "failure": slot.failure.map(JSONValue.string) ?? .null,
                  "needsApproval": .bool(slot.needsApproval), "hasChip": .bool(slot.chip != nil || slot.image != nil),
+                 "size": .string(app.model.layout.size(of: slot.id).rawValue),
+                 "supportedSizes": .array(slot.supportedSizes.map { .string($0.rawValue) }),
                  "frame": app.bar?.screenFrame(ofSlot: slot.id).map { [.number($0.minX), .number($0.minY), .number($0.width), .number($0.height)] } ?? .null]
             }
             let state: JSONValue = [
                 "active": .bool(app.model.isActive), "panel": app.model.panel.map { .string($0.slotID) } ?? .null,
+                "panelSize": app.model.panel.map { .string($0.widgetSize.rawValue) } ?? .null,
                 "panelFailure": app.model.panel?.failure.map(JSONValue.string) ?? .null,
-                "rows": .array(app.model.visibleRows.map { .array($0.map { .string($0.id) }) }), "slots": .array(slots),
+                "rows": .array(app.model.visibleRows.map { .array($0.map { .string($0.id) }) }),
+                "widgets": .array(app.model.visibleWidgets.map { ["id": .string($0.slot.id), "size": .string($0.size.rawValue)] }),
+                "slots": .array(slots),
                 "chat": .array(app.model.chat.suffix(6).map { ["role": .string($0.role.rawValue), "text": .string($0.text)] }),
                 "chatBusy": .bool(app.model.isChatBusy), "keyEventsSeen": .number(Double(keyEventsSeen)),
                 "keyWindow": app.windows.first { $0.window.isKeyWindow }.map { .string($0.name) } ?? .null, "hidden": .bool(app.model.isHidden),

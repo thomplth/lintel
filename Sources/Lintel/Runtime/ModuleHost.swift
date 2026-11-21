@@ -50,6 +50,7 @@ final class ModuleHost {
         var needsApproval = false
         var timer: Timer?
         var isRenderingChip = false
+        var isRenderingWidget = false
         var isRenderingPanel = false
         var generation: Int
     }
@@ -89,7 +90,9 @@ final class ModuleHost {
         }
         runner.onRestart = { [weak self] blamed in self?.recover(blamed: blamed) }
         services.onRefreshRequest = { [weak self] key in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self?.renderChip(key) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                self?.renderActiveSurface(key)
+            }
         }
         services.onAttention = { [weak self] key, isRaised in
             guard let self, let index = self.model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }),
@@ -125,11 +128,11 @@ final class ModuleHost {
         jobs.onChanged = { [weak self] affected in
             guard let self else { return }
             if let affected {
-                self.renderChip(affected)
+                self.renderActiveSurface(affected)
                 self.renderPanel(affected)
             }
             for (key, entry) in self.loaded where key != affected && entry.description?.manifest.allows(.jobs) == true {
-                self.renderChip(key)
+                self.renderActiveSurface(key)
                 self.renderPanel(key)
             }
             self.onModulesChanged()
@@ -190,7 +193,16 @@ final class ModuleHost {
         }
         if changed(home.layoutFile) {
             let layout = home.loadLayout()
-            if layout != model.layout { model.layout = layout }
+            if layout != model.layout {
+                let oldSizes = model.layout.sizes
+                model.layout = layout
+                if oldSizes != layout.sizes {
+                    for key in Set(oldSizes.keys).union(layout.sizes.keys) where loaded[key] != nil {
+                        schedule(key)
+                    }
+                }
+                updateSamplerDemand()
+            }
         }
         if changed(home.approvalsFile) { approvals = home.loadApprovals() }
 
@@ -281,12 +293,72 @@ final class ModuleHost {
     private func schedule(_ key: String) {
         guard let manifest = loaded[key]?.description?.manifest else { return }
         loaded[key]?.timer?.invalidate()
-        let timer = Timer.scheduledTimer(withTimeInterval: manifest.refreshSeconds, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.renderChip(key) }
+        let isWidget = model.layout.size(of: key).isWidget
+        let interval = isWidget ? manifest.panelRefreshSeconds : manifest.refreshSeconds
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.renderActiveSurface(key) }
         }
-        timer.tolerance = min(manifest.refreshSeconds / 10, 5)
+        timer.tolerance = min(interval / 10, 5)
         loaded[key]?.timer = timer
-        renderChip(key)
+        updateSamplerDemand()
+        renderActiveSurface(key)
+    }
+
+    private func updateSamplerDemand() {
+        sampler.isPanelOpen = model.panel != nil || !model.visibleWidgets.isEmpty
+    }
+
+    func renderActiveSurface(_ key: String) {
+        let size = model.layout.size(of: key)
+        if size.isWidget {
+            renderWidget(key, size: size)
+        } else {
+            renderChip(key)
+        }
+    }
+
+    func setWidgetSize(_ key: String, to size: WidgetSize) {
+        var layout = model.layout
+        layout.setSize(size, for: key)
+        update(layout)
+        if !size.isWidget, let idx = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
+            model.slots[idx].isConfiguring = false
+        }
+        schedule(key)
+        if size.isWidget, model.panel?.slotID == key {
+            closePanel()
+        }
+    }
+
+    func previewResize(_ key: String, size: WidgetSize, isPeek: Bool) {
+        if isPeek {
+            guard var panel = model.panel, panel.slotID == key, size.isWidget else { return }
+            panel.widgetSize = size
+            model.panel = panel
+            renderPanel(key)
+        } else if size.isWidget {
+            renderWidget(key, size: size)
+        } else {
+            renderChip(key)
+        }
+    }
+
+    func setConfiguring(_ key: String, isConfiguring: Bool, isPeek: Bool) {
+        if isPeek {
+            guard var panel = model.panel, panel.slotID == key else { return }
+            panel.isConfiguring = isConfiguring
+            model.panel = panel
+            if isConfiguring { renderConfigure(key, isPeek: true) }
+        } else if let idx = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
+            model.slots[idx].isConfiguring = isConfiguring
+            if isConfiguring { renderConfigure(key, isPeek: false) }
+        }
+    }
+
+    func clearIdleConfigurations() {
+        for index in model.slots.indices where model.slots[index].isConfiguring {
+            model.slots[index].isConfiguring = false
+        }
     }
 
     private func recover(blamed: String?) {
@@ -310,24 +382,41 @@ final class ModuleHost {
 
     // MARK: Publishing
 
-    private func publish(_ key: String, chip: ViewNode? = nil) {
+    private func publish(
+        _ key: String, chip: ViewNode? = nil, widget: (node: ViewNode?, size: WidgetSize)? = nil,
+        configure: ViewNode? = nil
+    ) {
         guard let entry = loaded[key] else { return }
         let previous = model.slot(key)
         var slot = Slot(id: key, title: entry.description?.manifest.title ?? key)
-        if let manifest = entry.description?.manifest {
+        if let desc = entry.description {
+            let manifest = desc.manifest
             slot.icon = Self.symbolExists(manifest.icon) ? manifest.icon : "puzzlepiece.extension"
             slot.isPinned = manifest.pinned
             slot.order = manifest.order
             slot.panelWidth = manifest.panelWidth
             slot.permissions = manifest.permissions
+            slot.hasPanel = desc.hasPanel
+            slot.hasConfigure = desc.hasConfigure
+            slot.supportedSizes = manifest.resolvedSizes(hasPanel: desc.hasPanel, declaredViews: desc.declaredViews)
+            slot.defaultWidgetSize = manifest.resolvedDefaultSize(hasPanel: desc.hasPanel, declaredViews: desc.declaredViews)
         } else {
             slot.order = 999
+            slot.hasPanel = false
         }
-        slot.hasPanel = entry.description?.hasPanel ?? false
         slot.failure = entry.failure
         slot.needsApproval = entry.needsApproval
         slot.isUserModule = entry.source.origin == .user
         slot.chip = chip ?? previous?.chip
+        if let widget {
+            slot.widgetNode = widget.node ?? previous?.widgetNode
+            slot.widgetSize = widget.size
+        } else {
+            slot.widgetNode = previous?.widgetNode
+            slot.widgetSize = previous?.widgetSize ?? .chip
+        }
+        slot.configureNode = configure ?? previous?.configureNode
+        slot.isConfiguring = previous?.isConfiguring ?? false
         slot.isRaised = previous?.isRaised ?? false
         if let index = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
             if model.slots[index] != slot {
@@ -352,6 +441,19 @@ final class ModuleHost {
         }
     }
 
+    private func rendered(_ key: String, size: WidgetSize) async -> (node: ViewNode?, failure: String?) {
+        do {
+            let parsed = ViewNode.parse(try await runner.render(key: key, size: size))
+            if let failure = parsed.errors.first { return (nil, failure) }
+            if size == .chip, let offender = parsed.node?.descendants.first(where: { !Catalog.chipComponents.contains($0.component) }) {
+                return (nil, "\(offender.component.rawValue) cannot go in the bar item")
+            }
+            return (parsed.node, parsed.node == nil ? "\(size.rawValue) view returned nothing" : nil)
+        } catch {
+            return (nil, ModuleFailure.describe(error))
+        }
+    }
+
     func renderChip(_ key: String) {
         guard let entry = loaded[key], entry.description != nil, !entry.needsApproval, !entry.isRenderingChip else { return }
         loaded[key]?.isRenderingChip = true
@@ -365,11 +467,52 @@ final class ModuleHost {
         }
     }
 
-    // MARK: Panels
+    func renderWidget(_ key: String, size: WidgetSize) {
+        guard size.isWidget, let entry = loaded[key], let desc = entry.description, desc.hasPanel,
+              !entry.needsApproval, !entry.isRenderingWidget
+        else { return }
+        loaded[key]?.isRenderingWidget = true
+        let current = entry.generation
+        Task {
+            let result = await Perf.measure("module.render.widget") { await rendered(key, size: size) }
+            guard loaded[key]?.generation == current else { return }
+            loaded[key]?.isRenderingWidget = false
+            if let failure = result.failure {
+                loaded[key]?.failure = failure
+            } else {
+                loaded[key]?.failure = nil
+            }
+            publish(key, widget: (result.node, size))
+        }
+    }
+
+    func renderConfigure(_ key: String, isPeek: Bool) {
+        guard let entry = loaded[key], entry.description?.hasConfigure == true, !entry.needsApproval else { return }
+        let current = entry.generation
+        Task {
+            let parsed: ParsedView
+            do {
+                parsed = ViewNode.parse(try await runner.renderConfigure(key: key))
+            } catch {
+                return
+            }
+            guard loaded[key]?.generation == current, let node = parsed.node else { return }
+            if isPeek {
+                guard var panel = model.panel, panel.slotID == key else { return }
+                panel.configureNode = node
+                if panel != model.panel { model.panel = panel }
+            } else {
+                publish(key, configure: node)
+            }
+        }
+    }
+
+    // MARK: Panels (Transient Click-to-Peek)
 
     func openPanel(_ key: String) {
-        model.panel = PanelState(slotID: key, content: .module, isLoading: true)
-        sampler.isPanelOpen = true
+        let defaultSize = model.slot(key)?.defaultWidgetSize ?? .medium
+        model.panel = PanelState(slotID: key, content: .module, widgetSize: defaultSize, isLoading: true)
+        updateSamplerDemand()
         sampler.refreshProcesses { [weak self] in
             self?.pushData()
             self?.renderPanel(key)
@@ -385,8 +528,8 @@ final class ModuleHost {
     func closePanel() {
         panelTimer?.invalidate()
         panelTimer = nil
-        sampler.isPanelOpen = false
         if model.panel != nil { model.panel = nil }
+        updateSamplerDemand()
     }
 
     func renderPanel(_ key: String) {
@@ -398,8 +541,9 @@ final class ModuleHost {
         guard !entry.isRenderingPanel else { return }
         loaded[key]?.isRenderingPanel = true
         let current = entry.generation
+        let targetSize = model.panel?.widgetSize ?? .medium
         Task {
-            let result = await rendered(key, .panel)
+            let result = await rendered(key, size: targetSize)
             guard loaded[key]?.generation == current else { return }
             loaded[key]?.isRenderingPanel = false
             guard model.panel?.slotID == key, model.panel?.content == .module else { return }
@@ -420,8 +564,12 @@ final class ModuleHost {
         } catch {
             if model.panel?.slotID == key { model.panel?.failure = ModuleFailure.describe(error) }
         }
-        renderChip(key)
-        renderPanel(key)
+        renderActiveSurface(key)
+        if model.slot(key)?.isConfiguring == true { renderConfigure(key, isPeek: false) }
+        if model.panel?.slotID == key {
+            renderPanel(key)
+            if model.panel?.isConfiguring == true { renderConfigure(key, isPeek: true) }
+        }
         return outcome
     }
 
@@ -443,23 +591,50 @@ final class ModuleHost {
             trial.failure = ModuleFailure.describe(error)
             return trial
         }
+        let desc = trial.description!
+        let manifest = desc.manifest
+        let widgetSizes = manifest.resolvedSizes(hasPanel: desc.hasPanel, declaredViews: desc.declaredViews).filter(\.isWidget)
+        var renderedWidgets: [(WidgetSize, ViewNode)] = []
+        var configureNode: ViewNode?
         do {
             let chip = ViewNode.parse(try await runner.render(key: key, surface: .chip))
             trial.chip = chip.node
             trial.problems += chip.problems
-            if trial.description?.hasPanel == true {
-                let panel = ViewNode.parse(try await runner.render(key: key, surface: .panel))
-                trial.panel = panel.node
-                trial.problems += panel.problems
+            for size in widgetSizes {
+                let rendered = ViewNode.parse(try await runner.render(key: key, size: size))
+                trial.problems += rendered.problems
+                if let node = rendered.node {
+                    renderedWidgets.append((size, node))
+                    if trial.panel == nil || size == manifest.resolvedDefaultSize(hasPanel: desc.hasPanel, declaredViews: desc.declaredViews) {
+                        trial.panel = node
+                    }
+                } else {
+                    trial.problems.append(.error("\(size.rawValue) view returned nothing"))
+                }
+            }
+            if desc.hasConfigure {
+                let conf = ViewNode.parse(try await runner.renderConfigure(key: key))
+                trial.problems += conf.problems
+                configureNode = conf.node
             }
         } catch {
             trial.failure = "it threw while rendering: \(ModuleFailure.describe(error)). Catch expected failures and return a calm fallback view"
             return trial
         }
         trial.problems += DesignLint.check(
-            chip: trial.chip, panel: trial.panel, manifest: trial.description!.manifest,
-            actions: trial.description!.actions, symbolExists: Self.symbolExists
+            chip: trial.chip, panel: nil, manifest: manifest,
+            actions: desc.actions, symbolExists: Self.symbolExists
         )
+        for (size, node) in renderedWidgets {
+            trial.problems += DesignLint.checkWidget(
+                node, size: size, manifest: manifest, actions: desc.actions, symbolExists: Self.symbolExists
+            )
+        }
+        if let configureNode {
+            trial.problems += DesignLint.checkWidget(
+                configureNode, size: .medium, manifest: manifest, actions: desc.actions, symbolExists: Self.symbolExists
+            )
+        }
         return trial
     }
 

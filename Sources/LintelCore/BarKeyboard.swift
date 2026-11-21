@@ -170,7 +170,7 @@ public struct BarKeyBinding: Hashable, Sendable, Codable {
 /// What the bar does that a key can be chosen for. Escape and 1–9 are fixed, so they are not among them.
 public enum BarAction: String, CaseIterable, Sendable {
     case previous, next, rowAbove, rowBelow, first, last, open
-    case moveLeft, moveRight, moveUp, moveDown, pin, hide, change, assistant, settings
+    case moveLeft, moveRight, moveUp, moveDown, grow, shrink, pin, hide, change, assistant, settings
 
     public var command: BarKey.Command {
         switch self {
@@ -185,6 +185,8 @@ public enum BarAction: String, CaseIterable, Sendable {
         case .moveRight: .edit("right")
         case .moveUp: .edit("up")
         case .moveDown: .edit("down")
+        case .grow: .edit("grow")
+        case .shrink: .edit("shrink")
         case .pin: .edit("pin")
         case .hide: .edit("hide")
         case .change: .edit("change")
@@ -206,6 +208,8 @@ public enum BarAction: String, CaseIterable, Sendable {
         case .moveRight: "Move it right"
         case .moveUp: "Move it up a row"
         case .moveDown: "Move it down a row"
+        case .grow: "Resize larger"
+        case .shrink: "Resize smaller"
         case .pin: "Pin or unpin it"
         case .hide: "Hide it from the bar"
         case .change: "Ask the assistant to change it"
@@ -227,6 +231,8 @@ public enum BarAction: String, CaseIterable, Sendable {
         case .moveRight: [BarKeyBinding(.right, [.command])]
         case .moveUp: [BarKeyBinding(.up, [.command])]
         case .moveDown: [BarKeyBinding(.down, [.command])]
+        case .grow: [BarKeyBinding(.character("="), [.command]), BarKeyBinding(.character("]"))]
+        case .shrink: [BarKeyBinding(.character("-"), [.command]), BarKeyBinding(.character("["))]
         case .pin: [BarKeyBinding(.character("p"))]
         case .hide: [BarKeyBinding(.delete)]
         case .change: [BarKeyBinding(.character("a"))]

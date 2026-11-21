@@ -7,6 +7,14 @@ function symbolFor(name) {
   return 'dot.radiowaves.left.and.right';
 }
 
+function deviceRows(host, devices, compact) {
+  return list(devices.slice(0, 12).map((device) => item(host.format.truncate(device.name, 28), {
+    icon: symbolFor(device.name),
+    value: device.battery === null ? undefined : `${device.battery}%`,
+    tone: device.battery !== null && device.battery <= 20 ? 'warn' : undefined,
+  })), { compact });
+}
+
 defineModule({
   meta: {
     id: 'bluetooth',
@@ -16,35 +24,54 @@ defineModule({
     pinned: false,
     order: 55,
     refreshSeconds: 30,
-    panelWidth: 'small',
+    sizes: ['chip', 'small', 'wide', 'medium'],
+    defaultSize: 'medium',
   },
-  render(host) {
-    const bluetooth = host.bluetooth();
-    const connected = bluetooth.devices.filter((device) => device.connected);
-    const lowest = connected.filter((device) => device.battery !== null).sort((a, b) => a.battery - b.battery)[0];
-    if (!bluetooth.on) return icon('dot.radiowaves.left.and.right', { tone: 'tertiary' });
-    if (lowest && lowest.battery <= 20) {
-      return row([icon(symbolFor(lowest.name), { tone: 'warn' }), text(`${lowest.battery}%`, { mono: true, tone: 'warn' })]);
-    }
-    return connected.length === 0
-      ? icon('dot.radiowaves.left.and.right', { tone: 'secondary' })
-      : row([icon('dot.radiowaves.left.and.right'), text(connected.length, { mono: true })]);
-  },
-  panel(host) {
-    const bluetooth = host.bluetooth();
-    if (!bluetooth.on) return [empty('dot.radiowaves.left.and.right', 'Bluetooth is off')];
-    const connected = bluetooth.devices.filter((device) => device.connected);
-    const others = bluetooth.devices.filter((device) => !device.connected);
-    const rows = (devices) => list(devices.slice(0, 10).map((device) => item(host.format.truncate(device.name, 30), {
-      icon: symbolFor(device.name),
-      value: device.battery === null ? undefined : `${device.battery}%`,
-      tone: device.battery !== null && device.battery <= 20 ? 'warn' : undefined,
-    })));
-    return [
-      connected.length > 0
-        ? section('Connected', [rows(connected)])
-        : empty('dot.radiowaves.left.and.right', 'Nothing connected'),
-      others.length > 0 ? section('Paired', [rows(others)]) : null,
-    ];
+  views: {
+    chip(host) {
+      const bluetooth = host.bluetooth();
+      const connected = bluetooth.devices.filter((device) => device.connected);
+      const lowest = connected.filter((device) => device.battery !== null).sort((a, b) => a.battery - b.battery)[0];
+      if (!bluetooth.on) return icon('dot.radiowaves.left.and.right', { tone: 'tertiary' });
+      if (lowest && lowest.battery <= 20) {
+        return row([icon(symbolFor(lowest.name), { tone: 'warn' }), text(`${lowest.battery}%`, { mono: true, tone: 'warn' })]);
+      }
+      return connected.length === 0
+        ? icon('dot.radiowaves.left.and.right', { tone: 'secondary' })
+        : row([icon('dot.radiowaves.left.and.right'), text(connected.length, { mono: true })]);
+    },
+    small(host) {
+      const bluetooth = host.bluetooth();
+      if (!bluetooth.on) return [empty('dot.radiowaves.left.and.right', 'Bluetooth off')];
+      const connected = bluetooth.devices.filter((device) => device.connected);
+      return [
+        row([icon('dot.radiowaves.left.and.right', { tone: 'accent' }), text('Bluetooth', { role: 'label', weight: 'semibold' }), spacer(), badge(connected.length)]),
+        connected.length > 0 ? deviceRows(host, connected, true) : empty('dot.radiowaves.left.and.right', 'No devices'),
+      ];
+    },
+    wide(host) {
+      const bluetooth = host.bluetooth();
+      if (!bluetooth.on) return [empty('dot.radiowaves.left.and.right', 'Bluetooth is off')];
+      const connected = bluetooth.devices.filter((device) => device.connected);
+      const others = bluetooth.devices.filter((device) => !device.connected);
+      return [
+        split([
+          section('Connected', [connected.length > 0 ? deviceRows(host, connected, true) : empty('dot.radiowaves.left.and.right', 'None')], { trailing: String(connected.length) }),
+          section('Paired', [others.length > 0 ? deviceRows(host, others, true) : note('No other paired devices.')], { trailing: String(others.length) }),
+        ]),
+      ];
+    },
+    medium(host) {
+      const bluetooth = host.bluetooth();
+      if (!bluetooth.on) return [empty('dot.radiowaves.left.and.right', 'Bluetooth is off')];
+      const connected = bluetooth.devices.filter((device) => device.connected);
+      const others = bluetooth.devices.filter((device) => !device.connected);
+      return [
+        connected.length > 0
+          ? section('Connected', [deviceRows(host, connected, false)], { trailing: String(connected.length) })
+          : empty('dot.radiowaves.left.and.right', 'Nothing connected'),
+        others.length > 0 ? section('Paired', [deviceRows(host, others, true)], { trailing: String(others.length), priority: 'supporting' }) : null,
+      ].filter(Boolean);
+    },
   },
 });
