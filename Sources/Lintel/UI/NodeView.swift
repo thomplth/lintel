@@ -346,12 +346,35 @@ struct NodeView: View {
         if context.isInWidget {
             AdaptiveListView(node: node, context: context)
         } else {
+            let hasRail = node.bool("rail")
+            let padH = context.metrics.tilePadding
+            let sepLead = hasRail ? padH + 15 : padH
             VStack(spacing: 0) {
+                ListCardHeader(node: node, context: context, isCompact: false)
                 ForEach(Array(node.children.enumerated()), id: \.offset) { child in
-                    if child.offset > 0 {
-                        Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+                    let railPos: RailPosition = if !hasRail {
+                        .none
+                    } else if node.children.count <= 1 {
+                        .only
+                    } else if child.offset == 0 {
+                        .first
+                    } else if child.offset == node.children.count - 1 {
+                        .last
+                    } else {
+                        .middle
                     }
-                    NodeView(node: child.element, context: context)
+                    Group {
+                        if child.element.component == .item {
+                            ItemRow(node: child.element, context: context, rail: railPos)
+                        } else {
+                            NodeView(node: child.element, context: context)
+                        }
+                    }
+                    .overlay(alignment: .top) {
+                        if child.offset > 0 {
+                            Rectangle().fill(context.separator).frame(height: 1).padding(.leading, sepLead)
+                        }
+                    }
                 }
             }
             .background(context.fill, in: context.tileShape)
@@ -550,11 +573,18 @@ struct TokenButtonStyle: ButtonStyle {
     }
 }
 
-private struct ItemRow: View {
+struct ItemRow: View {
     let node: ViewNode
     let context: RenderContext
     var compactOverride = false
+    var rail: RailPosition = .none
     @State private var isHovered = false
+
+    private struct TelemetrySlot {
+        let icon: String?
+        let value: String
+        let tone: ToneChoice?
+    }
 
     private var isClickable: Bool {
         node.string("action") != nil || node.string("url") != nil
@@ -568,6 +598,18 @@ private struct ItemRow: View {
         context.isNarrowWidget
     }
 
+    private var telemetrySlots: [TelemetrySlot] {
+        guard let raw = node.props["slots"]?.array, !raw.isEmpty else { return [] }
+        return raw.prefix(4).compactMap { entry in
+            guard entry.object != nil else { return nil }
+            let icon = entry["icon"].string
+            let value = entry["value"].string ?? ""
+            guard icon != nil || !value.isEmpty else { return nil }
+            let tone = ToneChoice(entry["tone"])
+            return TelemetrySlot(icon: icon, value: value, tone: tone)
+        }
+    }
+
     private func itemBadge(_ badge: String) -> some View {
         Text(badge)
             .font(context.font(role: "caption", weight: "semibold", mono: true))
@@ -579,7 +621,152 @@ private struct ItemRow: View {
             .background(context.color(node.tone(), fallback: context.accent).opacity(0.16), in: Capsule())
     }
 
+    private func telemetryBody(slots: [TelemetrySlot]) -> some View {
+        let displayTitle: String = {
+            if isNarrow, let compactTitle = node.string("compactTitle"), !compactTitle.isEmpty {
+                return compactTitle
+            }
+            return node.string("title") ?? ""
+        }()
+        let subtitle = compactOverride ? nil : node.string("subtitle")
+        let caption = compactOverride ? nil : node.string("caption")
+        let tag = node.string("tag")
+        let value = node.string("value")
+        let padH = isNarrow ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+        let padV = context.metrics.unit * (isCompact ? 1.4 : 1.85)
+        let railWidth: CGFloat = isNarrow ? 9 : 11
+        let railGap: CGFloat = isNarrow ? 3 : 4
+        let dotSize: CGFloat = isNarrow ? 6 : 7
+        let dotY = padV + context.metrics.fontSize(role: "label") * 0.58
+        let captionSize = context.metrics.fontSize(role: "caption")
+
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(displayTitle)
+                    .font(context.font(role: "label", weight: "semibold"))
+                    .foregroundStyle(context.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if let tag, !tag.isEmpty {
+                    Text(tag)
+                        .font(context.font(role: "caption", weight: "semibold"))
+                        .foregroundStyle(context.secondary)
+                        .textCase(.uppercase)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 0.5)
+                        .background(context.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+                }
+                Spacer(minLength: 3)
+                if let value, !value.isEmpty {
+                    Text(value)
+                        .font(.system(size: captionSize * (isNarrow ? 0.88 : 1.0), design: .monospaced))
+                        .foregroundStyle(context.tertiary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                if !isNarrow, isClickable, node.string("accessoryAction") == nil {
+                    Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
+                        .font(.system(size: captionSize * 0.85, weight: .semibold))
+                        .foregroundStyle(context.tertiary)
+                }
+            }
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(context.font(role: "caption"))
+                    .foregroundStyle(context.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            HStack(spacing: isNarrow ? 2 : 3) {
+                ForEach(Array(slots.enumerated()), id: \.offset) { entry in
+                    let slot = entry.element
+                    let isToned = slot.tone != nil
+                    let fg = isToned ? context.color(slot.tone) : context.secondary
+                    let bg = isToned ? fg.opacity(0.15) : context.primary.opacity(0.055)
+                    HStack(spacing: isNarrow ? 1 : 2) {
+                        if let icon = slot.icon {
+                            SymbolGlyph(
+                                name: icon,
+                                size: captionSize * (isNarrow ? 0.78 : 0.86),
+                                weight: isToned ? .semibold : .medium,
+                                symbolMode: context.symbolMode
+                            )
+                            .foregroundStyle(fg)
+                        }
+                        if !slot.value.isEmpty {
+                            Text(slot.value)
+                                .font(.system(size: captionSize * (isNarrow ? 0.86 : 1.0), weight: isToned ? .semibold : .regular, design: .monospaced))
+                                .foregroundStyle(fg)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.65)
+                                .allowsTightening(true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 2.5)
+                    .padding(.horizontal, isNarrow ? 1 : 2)
+                    .background(bg, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+            }
+            if let caption, !caption.isEmpty {
+                Text(caption)
+                    .font(context.font(role: "caption"))
+                    .foregroundStyle(context.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(.vertical, padV)
+        .padding(.leading, rail != .none ? padH + railWidth + railGap : padH)
+        .padding(.trailing, padH)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .leading) {
+            if rail != .none {
+                ZStack(alignment: .top) {
+                    VStack(spacing: 0) {
+                        Rectangle()
+                            .fill(rail == .middle || rail == .last ? context.primary.opacity(0.22) : .clear)
+                            .frame(width: 1.5, height: dotY)
+                        Rectangle()
+                            .fill(rail == .first || rail == .middle ? context.primary.opacity(0.22) : .clear)
+                            .frame(width: 1.5)
+                            .frame(maxHeight: .infinity)
+                    }
+                    Circle()
+                        .fill(context.color(node.tone(), fallback: context.secondary))
+                        .frame(width: dotSize, height: dotSize)
+                        .offset(y: dotY - dotSize / 2)
+                }
+                .frame(width: railWidth)
+                .padding(.leading, padH)
+                .allowsHitTesting(false)
+            }
+        }
+    }
+
     var body: some View {
+        let slots = telemetrySlots
+        Group {
+            if !slots.isEmpty {
+                telemetryBody(slots: slots)
+            } else {
+                standardBody
+                    .padding(.horizontal, isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+                    .padding(.vertical, context.metrics.unit * (isCompact ? 1.35 : 2))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isHovered && isClickable ? context.fill : .clear)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .modifier(OptionalTapAction(action: isClickable ? press : nil))
+        .modifier(OptionalKeyboardOperable(context: context, focusKey: node.focusKey, activate: isClickable ? press : nil))
+    }
+
+    @ViewBuilder
+    private var standardBody: some View {
         Group {
             if isNarrow {
                 let compactTitle = node.string("compactTitle")
@@ -718,14 +905,6 @@ private struct ItemRow: View {
                 }
             }
         }
-        .padding(.horizontal, isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
-        .padding(.vertical, context.metrics.unit * (isCompact ? 1.35 : 2))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isHovered && isClickable ? context.fill : .clear)
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        .modifier(OptionalTapAction(action: isClickable ? press : nil))
-        .modifier(OptionalKeyboardOperable(context: context, focusKey: node.focusKey, activate: isClickable ? press : nil))
     }
 
     private func press() {

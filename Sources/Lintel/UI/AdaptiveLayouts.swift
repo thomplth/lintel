@@ -568,6 +568,56 @@ private struct ElasticItemsLayout: Layout {
 
 // MARK: - Elastic Zero-Scroll List
 
+enum RailPosition: Equatable {
+    case none
+    case only
+    case first
+    case middle
+    case last
+}
+
+struct ListCardHeader: View {
+    let node: ViewNode
+    let context: RenderContext
+    let isCompact: Bool
+
+    var body: some View {
+        if let title = node.string("title"), !title.isEmpty {
+            let padH = context.isNarrowWidget ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(title)
+                    .font(context.font(role: "caption", weight: "bold"))
+                    .foregroundStyle(context.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 3)
+                if let trailing = node.string("trailing"), !trailing.isEmpty {
+                    if let tone = node.tone("trailingTone") {
+                        let color = context.color(tone, fallback: context.accent)
+                        Text(trailing)
+                            .font(context.font(role: "caption", weight: "semibold", mono: true))
+                            .foregroundStyle(color)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, context.metrics.unit * 1.1)
+                            .padding(.vertical, 1)
+                            .background(color.opacity(0.15), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    } else {
+                        Text(trailing)
+                            .font(context.font(role: "caption", mono: true))
+                            .foregroundStyle(context.tertiary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                }
+            }
+            .padding(.horizontal, padH)
+            .padding(.top, context.metrics.unit * (isCompact ? 1.45 : 2))
+            .padding(.bottom, context.metrics.unit * 0.65)
+        }
+    }
+}
+
 /// Elastic zero-scroll list: fits as many whole item() rows as the widget height allows, auto-compacts subtitles when
 /// tight, and shows "+N more" cleanly in a single pure `Layout` pass with zero `@State` mutation.
 struct AdaptiveListView: View {
@@ -586,35 +636,58 @@ struct AdaptiveListView: View {
         node.bool("compact") || context.isShortWidget
     }
 
+    private var hasRail: Bool {
+        node.bool("rail")
+    }
+
     private var footerHeight: CGFloat {
         CGFloat(context.metrics.fontSize(role: "caption") + context.metrics.unit * 2.5)
+    }
+
+    private func railPosition(at index: Int, total: Int) -> RailPosition {
+        guard hasRail else { return .none }
+        if total <= 1 { return .only }
+        if index == 0 { return .first }
+        if index == total - 1 { return .last }
+        return .middle
     }
 
     var body: some View {
         let items = node.children
         let footerLabels = showsSummary ? AdaptiveOverflowFit.footerLabels(itemCount: items.count) : []
-        AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary && !footerLabels.isEmpty, footerHeight: footerHeight) {
-            ForEach(Array(items.enumerated()), id: \.offset) { entry in
-                VStack(spacing: 0) {
-                    if entry.offset > 0 {
-                        Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+        let padH = context.isNarrowWidget ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+        let railOffset: CGFloat = context.isNarrowWidget ? 12 : 15
+        let sepLead = hasRail ? padH + railOffset : padH
+        VStack(spacing: 0) {
+            ListCardHeader(node: node, context: context, isCompact: isCompact)
+            AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary && !footerLabels.isEmpty, footerHeight: footerHeight) {
+                ForEach(Array(items.enumerated()), id: \.offset) { entry in
+                    AdaptiveItemRow(
+                        node: entry.element,
+                        context: context,
+                        compact: stripsSubtitle,
+                        rail: railPosition(at: entry.offset, total: items.count)
+                    )
+                    .overlay(alignment: .top) {
+                        if entry.offset > 0 {
+                            Rectangle().fill(context.separator).frame(height: 1).padding(.leading, sepLead)
+                        }
                     }
-                    AdaptiveItemRow(node: entry.element, context: context, compact: stripsSubtitle)
                 }
-            }
-            ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in
-                HStack(spacing: context.metrics.unit) {
-                    Text(entry.element)
-                        .font(context.font(role: "caption", weight: "medium", mono: true))
-                        .foregroundStyle(context.tertiary)
-                    Spacer(minLength: 0)
+                ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in
+                    HStack(spacing: context.metrics.unit) {
+                        Text(entry.element)
+                            .font(context.font(role: "caption", weight: "medium", mono: true))
+                            .foregroundStyle(context.tertiary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, padH)
+                    .frame(height: footerHeight)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(context.separator).frame(height: 1).padding(.leading, padH)
+                    }
+                    .allowsHitTesting(false)
                 }
-                .padding(.horizontal, isCompact ? context.metrics.unit * 2 : context.metrics.tilePadding)
-                .frame(height: footerHeight)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
-                }
-                .allowsHitTesting(false)
             }
         }
         .background(context.fill, in: context.tileShape)
@@ -626,9 +699,10 @@ private struct AdaptiveItemRow: View {
     let node: ViewNode
     let context: RenderContext
     let compact: Bool
+    var rail: RailPosition = .none
 
     var body: some View {
-        NodeView(node: compact ? strippedSubtitle : node, context: context)
+        ItemRow(node: compact ? strippedSubtitle : node, context: context, compactOverride: compact, rail: rail)
     }
 
     private var strippedSubtitle: ViewNode {

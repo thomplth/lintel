@@ -221,6 +221,7 @@ function analyzePull(pr, viewer, ignoreBots) {
     hasChanges,
     alreadyReviewed,
     hasConflict,
+    ciState,
     ciFailed,
   };
 }
@@ -258,9 +259,15 @@ function groupByRepo(entries) {
       if (a.isDirect !== b.isDirect) return a.isDirect ? -1 : 1;
       return new Date(b.pr.updatedAt).getTime() - new Date(a.pr.updatedAt).getTime();
     });
+    group.directCount = group.items.filter((e) => e.isDirect).length;
     group.latest = group.items.reduce((max, e) => Math.max(max, new Date(e.pr.updatedAt).getTime() || 0), 0);
   }
-  groups.sort((a, b) => b.latest - a.latest || a.title.localeCompare(b.title));
+  groups.sort((a, b) => {
+    const aHasDirect = a.directCount > 0 ? 1 : 0;
+    const bHasDirect = b.directCount > 0 ? 1 : 0;
+    if (aHasDirect !== bHasDirect) return bHasDirect - aHasDirect;
+    return b.latest - a.latest || a.title.localeCompare(b.title);
+  });
   return groups;
 }
 
@@ -275,78 +282,81 @@ function cleanTitle(raw) {
     : value;
 }
 
-function renderReviewItem(host, entry, showScopeHint) {
+function compactAge(isoString) {
+  const ts = new Date(isoString).getTime();
+  if (!Number.isFinite(ts)) return { label: '—', stale: false };
+  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (sec < 60) return { label: 'now', stale: false };
+  if (sec < 3600) return { label: `${Math.floor(sec / 60)}m`, stale: false };
+  if (sec < 86400) return { label: `${Math.floor(sec / 3600)}h`, stale: false };
+  const days = Math.floor(sec / 86400);
+  if (days < 14) return { label: `${days}d`, stale: days >= 3 };
+  return { label: `${Math.floor(days / 7)}w`, stale: true };
+}
+
+function renderReviewItem(host, entry) {
   const pr = entry.pr;
-  let iconName = 'arrow.triangle.pull';
-  let badgeLabel;
-  let tone;
+  const cleaned = cleanTitle(pr.title);
 
+  let rowTone;
+  if (entry.hasConflict || entry.ciFailed) rowTone = 'bad';
+  else if (entry.hasChanges) rowTone = 'warn';
+  else if (entry.isApproved) rowTone = 'good';
+  else if (pr.isDraft) rowTone = 'secondary';
+  else if (entry.isDirect) rowTone = 'info';
+
+  // Fixed 4-slot telemetry bar: [0] Health (Conflict/CI), [1] Scope/Review, [2] Diff, [3] Age
+  let healthSlot;
   if (entry.hasConflict) {
-    iconName = 'exclamationmark.triangle.fill';
-    badgeLabel = 'Conflict';
-    tone = 'bad';
-  } else if (entry.hasChanges) {
-    iconName = 'xmark.circle.fill';
-    badgeLabel = 'Changes';
-    tone = 'warn';
-  } else if (entry.isApproved) {
-    iconName = 'checkmark.circle.fill';
-    badgeLabel = 'Approved';
-    tone = 'good';
-  } else if (pr.isDraft) {
-    iconName = 'pencil';
-    badgeLabel = 'Draft';
-    tone = 'secondary';
+    healthSlot = { icon: 'exclamationmark.triangle.fill', value: '', tone: 'bad' };
   } else if (entry.ciFailed) {
-    iconName = 'exclamationmark.triangle.fill';
-    badgeLabel = 'CI fail';
-    tone = 'bad';
-  } else if (entry.commentedBy.length > 0) {
-    iconName = 'bubble.left';
-    badgeLabel = 'Reviewed';
-    tone = 'info';
-  } else if (showScopeHint && entry.isDirect) {
-    badgeLabel = 'Direct';
-    tone = 'accent';
+    healthSlot = { icon: 'xmark', value: 'CI', tone: 'bad' };
+  } else if (entry.ciState === 'PENDING' || entry.ciState === 'EXPECTED') {
+    healthSlot = { icon: 'clock', value: 'CI', tone: 'warn' };
+  } else if (entry.ciState === 'SUCCESS') {
+    healthSlot = { icon: 'checkmark', value: 'CI', tone: 'good' };
+  } else {
+    healthSlot = { value: '—' };
   }
 
-  const hasDiff = typeof pr.additions === 'number' && typeof pr.deletions === 'number';
-  const diffCompact = hasDiff ? `+${host.format.compact(pr.additions)} −${host.format.compact(pr.deletions)}` : null;
-  const valueLabel = !badgeLabel && diffCompact ? diffCompact : undefined;
+  let scopeSlot;
+  if (entry.hasChanges) {
+    scopeSlot = { value: 'Chg', tone: 'warn' };
+  } else if (entry.isApproved) {
+    scopeSlot = { icon: 'checkmark', value: 'Ok', tone: 'good' };
+  } else if (entry.commentedBy.length > 0) {
+    scopeSlot = { icon: 'bubble.left', value: 'Rev', tone: 'info' };
+  } else if (entry.isDirect) {
+    scopeSlot = { value: 'Dir', tone: 'info' };
+  } else {
+    scopeSlot = { value: 'Team' };
+  }
 
-  const parts = [`@${entry.authorLogin}`];
-  const compactParts = [`@${entry.authorLogin}`];
+  const diffSlot = typeof pr.additions === 'number'
+    ? { value: `+${host.format.compact(pr.additions)}` }
+    : { value: '—' };
+
+  const age = compactAge(pr.updatedAt);
+  const ageSlot = { value: age.label, tone: age.stale ? 'warn' : undefined };
+
+  const authorParts = [`@${entry.authorLogin}`];
   if (entry.changesBy.length > 0) {
-    parts.push(`Changes (@${entry.changesBy[0]})`);
-    compactParts.push(`Changes (@${entry.changesBy[0]})`);
+    authorParts.push(`Changes @${entry.changesBy[0]}`);
   } else if (entry.approvedBy.length > 0) {
-    parts.push(`Approved (${entry.approvedBy.length})`);
-    compactParts.push(`Approved (${entry.approvedBy.length})`);
+    authorParts.push(`Approved (${entry.approvedBy.length})`);
   } else if (entry.commentedBy.length > 0) {
-    parts.push(`Commented (@${entry.commentedBy[0]})`);
-    compactParts.push(`Commented (@${entry.commentedBy[0]})`);
+    authorParts.push(`Commented @${entry.commentedBy[0]}`);
+  } else if (!entry.isDirect && entry.teams.length > 0) {
+    authorParts.push(`@${entry.teams[0]}`);
   }
-  if (entry.ciFailed && badgeLabel !== 'CI fail') {
-    parts.push('CI fail');
-    compactParts.push('CI fail');
-  }
-  if (hasDiff && !valueLabel) {
-    parts.push(`+${pr.additions} −${pr.deletions}`);
-    compactParts.push(diffCompact);
-  }
-  if (showScopeHint && !entry.isDirect && entry.teams.length > 0) parts.push(`@${entry.teams[0]}`);
-  parts.push(`#${pr.number}`);
-  parts.push(host.format.ago(pr.updatedAt));
-  if (compactParts.length === 1) compactParts.push(host.format.ago(pr.updatedAt));
 
-  return item(cleanTitle(pr.title), {
-    subtitle: parts.join(' · '),
-    compactTitle: `#${pr.number}`,
-    compactSubtitle: compactParts.join(' · '),
-    icon: iconName,
-    value: valueLabel,
-    badge: badgeLabel,
-    tone,
+  return item(cleaned, {
+    compactTitle: cleaned,
+    subtitle: authorParts.join(' · '),
+    tag: pr.isDraft ? 'Draft' : undefined,
+    value: `#${pr.number}`,
+    tone: rowTone,
+    slots: [healthSlot, scopeSlot, diffSlot, ageSlot],
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,
   });
 }
@@ -366,7 +376,7 @@ defineModule({
     order: 25,
     refreshSeconds: 15,
     panelRefreshSeconds: 15,
-    defaultShape: 'wide',
+    defaultShape: 'sidebar',
     permissions: ['api.github.com', 'exec:gh', 'notify'],
   },
   async chip(host) {
@@ -429,21 +439,16 @@ defineModule({
     }
 
     const groups = groupByRepo(visible);
-    const directCount = visible.filter((entry) => entry.isDirect).length;
-    const showScopeHint = cfg.scope === 'Direct + Team' && visible.some((e) => !e.isDirect);
     const hiddenCount = Math.max(0, pulls.length - visible.length);
 
-    const blocks = [
-      row([
-        icon('arrow.triangle.pull', { tone: visible.length > 0 ? 'warn' : 'good' }),
-        text(`${visible.length} ${visible.length === 1 ? 'PR' : 'PRs'}`, { role: 'label', tone: 'primary', weight: 'semibold', mono: true }),
-        spacer(),
-        ...(directCount > 0 ? [badge(`${directCount} direct`, { tone: 'accent' })] : []),
-      ], { spacing: 'tight' }),
-      ...groups.slice(0, 10).map((group) => section(group.title, [
-        list(group.items.slice(0, 30).map((entry) => renderReviewItem(host, entry, showScopeHint))),
-      ], { trailing: String(group.items.length) })),
-    ];
+    const blocks = groups.slice(0, 10).map((group) => list(
+      group.items.slice(0, 30).map((entry) => renderReviewItem(host, entry)),
+      {
+        title: group.title,
+        trailing: group.directCount > 0 ? `${group.directCount} direct` : `${group.items.length} ${group.items.length === 1 ? 'PR' : 'PRs'}`,
+        trailingTone: group.directCount > 0 ? 'info' : undefined,
+      }
+    ));
 
     if (failure) {
       blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));

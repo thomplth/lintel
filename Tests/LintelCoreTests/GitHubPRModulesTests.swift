@@ -160,16 +160,20 @@ private func jsonString(_ object: Any) -> String {
     return String(decoding: data, as: UTF8.self)
 }
 
-private func sections(in node: ViewNode) -> [ViewNode] {
-    node.descendants.filter { $0.component == .section }
+private func lists(in node: ViewNode) -> [ViewNode] {
+    node.descendants.filter { $0.component == .list }
 }
 
-private func items(in section: ViewNode) -> [ViewNode] {
-    section.descendants.filter { $0.component == .item }
+private func items(in list: ViewNode) -> [ViewNode] {
+    list.descendants.filter { $0.component == .item }
 }
 
 private func allItems(in node: ViewNode) -> [ViewNode] {
     node.descendants.filter { $0.component == .item }
+}
+
+private func slots(of item: ViewNode) -> [JSONValue] {
+    item.props["slots"]?.array ?? []
 }
 
 private func sampleReviewsGraphQLResponse() -> String {
@@ -490,17 +494,32 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(harness.attentionLog.last == true)
 
         let widget = try harness.render("widget")
-        let repoSections = sections(in: widget)
-        #expect(repoSections.map { $0.string("title") ?? "" } == ["app", "infra"])
+        let repoCards = lists(in: widget)
+        #expect(repoCards.map { $0.string("title") ?? "" } == ["app", "infra"])
+        #expect(repoCards[0].string("trailing") == "1 direct")
+        #expect(repoCards[0].string("trailingTone") == "info")
+        #expect(repoCards[1].string("trailing") == "1 PR")
 
         let allRows = allItems(in: widget)
         #expect(allRows.count == 2)
         #expect(allRows.allSatisfy { ($0.string("url") ?? "").hasPrefix("https://github.com/") })
         #expect(allRows[0].string("title")?.contains("Fix offline sync") == true)
-        #expect(allRows[0].string("compactTitle") == "#101")
-        #expect(allRows[0].string("compactSubtitle")?.contains("@bob") == true)
-        #expect(allRows[1].string("compactTitle") == "#202")
-        #expect(allRows[1].string("badge") == "Conflict")
+        #expect(allRows[0].string("value") == "#101")
+        #expect(allRows[0].string("subtitle")?.contains("@bob") == true)
+        let row0Slots = slots(of: allRows[0])
+        #expect(row0Slots.count == 4)
+        #expect(row0Slots[0]["icon"].string == "checkmark")
+        #expect(row0Slots[0]["tone"].string == "good")
+        #expect(row0Slots[1]["value"].string == "Dir")
+        #expect(row0Slots[1]["tone"].string == "info")
+        #expect(row0Slots[2]["value"].string == "+120")
+
+        #expect(allRows[1].string("value") == "#202")
+        let row1Slots = slots(of: allRows[1])
+        #expect(row1Slots.count == 4)
+        #expect(row1Slots[0]["icon"].string == "exclamationmark.triangle.fill")
+        #expect(row1Slots[0]["tone"].string == "bad")
+        #expect(row1Slots[1]["value"].string == "Team")
 
         let configure = try harness.render("configure")
         let lintErrors = DesignLint.check(chip: chip, panel: nil, manifest: desc.manifest, actions: desc.actions, symbolExists: { _ in true })
@@ -536,7 +555,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
         try harness.act("setScope", payload: "Direct only")
         let directWidget = try harness.render("widget")
         #expect(allItems(in: directWidget).count == 4)
-        #expect(sections(in: directWidget).map { $0.string("title") ?? "" } == ["app"])
+        #expect(lists(in: directWidget).map { $0.string("title") ?? "" } == ["app"])
 
         // Back to Unreviewed + Direct + Team, turn off ignoreBots -> bot approval on #202 now hides #202.
         try harness.act("setStatusFilter", payload: "Unreviewed")
@@ -550,7 +569,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
         try harness.act("setRepoMode", payload: "Only selected")
         try harness.act("toggleRepo", payload: "GoodNotes/infra")
         let repoFiltered = try harness.render("widget")
-        #expect(sections(in: repoFiltered).map { $0.string("title") ?? "" } == ["infra"])
+        #expect(lists(in: repoFiltered).map { $0.string("title") ?? "" } == ["infra"])
         #expect(allItems(in: repoFiltered).count == 1)
     }
 
@@ -603,54 +622,65 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(chip.descendants.contains { $0.component == .badge && $0.string("value") == "4" && $0.string("tone") == "bad" })
 
         let widget = try harness.render("widget")
-        let widgetSections = sections(in: widget)
-        // First section is the 3-PR stack in GoodNotes/app; second section is standalone GoodNotes/infra
-        #expect(widgetSections.count == 2)
-        #expect(widgetSections[0].string("title") == "app")
-        #expect(widgetSections[0].string("trailing") == "Stack 3")
+        let cards = lists(in: widget)
+        // First card is the 3-PR stack in GoodNotes/app with vertical rail; second card is standalone GoodNotes/infra
+        #expect(cards.count == 2)
+        #expect(cards[0].string("title") == "app")
+        #expect(cards[0].string("trailing") == "3 → dev")
+        #expect(cards[0].bool("rail") == true)
+        #expect(cards[1].string("title") == "infra")
+        #expect(cards[1].string("trailing") == "Draft")
+        #expect(cards[1].bool("rail") == false)
 
-        let stackRows = items(in: widgetSections[0])
+        let stackRows = items(in: cards[0])
         #expect(stackRows.count == 3)
         #expect(stackRows.allSatisfy { ($0.string("url") ?? "").hasPrefix("https://github.com/") })
 
-        // Layer 1 (#301): base of stack, approved by 2, CI 12/12, Ready
+        // Layer 1 (#301): base of stack, approved by 2, CI 12 passed, Ready
         #expect(stackRows[0].string("title") == "Add FreeText writer core")
-        #expect(stackRows[0].string("compactTitle") == "#301")
-        #expect(stackRows[0].string("compactSubtitle") == "Approved (2) · CI 12/12")
-        #expect(stackRows[0].string("badge") == "Ready")
+        #expect(stackRows[0].string("compactTitle") == "freetext-1")
+        #expect(stackRows[0].string("value") == "#301")
         #expect(stackRows[0].string("tone") == "good")
-        #expect(stackRows[0].string("subtitle")?.hasPrefix("Approved (2)") == true)
-        #expect(stackRows[0].string("subtitle")?.contains("CI 12/12") == true)
-        #expect(stackRows[0].string("subtitle")?.contains("1/3 · #301") == true)
+        #expect(stackRows[0].string("caption") == "Approved @bob, @carol")
+        let s0 = slots(of: stackRows[0])
+        #expect(s0.count == 4)
+        #expect(s0[0]["value"].string == "12" && s0[0]["tone"].string == "good")
+        #expect(s0[1]["value"].string == "2" && s0[1]["tone"].string == "good")
+        #expect(s0[2]["value"].string == "3" && s0[2]["tone"].string == nil)
+        #expect(s0[3]["icon"].string == "checkmark" && s0[3]["tone"].string == "good")
 
-        // Layer 2 (#302): stacked on #301, requesting @dave & @xp, 2 unresolved threads, CI running
-        #expect(stackRows[1].string("title")?.hasPrefix("└ ") == true)
-        #expect(stackRows[1].string("compactTitle") == "└ #302")
-        #expect(stackRows[1].string("compactSubtitle")?.contains("@dave") == true)
-        #expect(stackRows[1].string("compactSubtitle")?.contains("2 unresolved") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("2/3 · #302 ← #301") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("@dave") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("2 unresolved") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("9/12") == true)
+        // Layer 2 (#302): stacked on #301, requesting @dave & @xp, 2 unresolved threads, 3 CI pending
+        #expect(stackRows[1].string("compactTitle") == "freetext-2")
+        #expect(stackRows[1].string("value") == "#302")
+        #expect(stackRows[1].string("caption") == "Req @dave, @xp")
+        let s1 = slots(of: stackRows[1])
+        #expect(s1.count == 4)
+        #expect(s1[0]["icon"].string == "clock" && s1[0]["value"].string == "3" && s1[0]["tone"].string == "warn")
+        #expect(s1[1]["value"].string == "2" && s1[1]["tone"].string == "info")
+        #expect(s1[2]["value"].string == "2" && s1[2]["tone"].string == "warn")
 
         // Layer 3 (#303): stacked on #302, conflicting + 2 CI failures across 218 checks
-        #expect(stackRows[2].string("title")?.hasPrefix("└ ") == true)
-        #expect(stackRows[2].string("compactTitle") == "└ #303")
-        #expect(stackRows[2].string("badge") == "Conflict")
+        #expect(stackRows[2].string("compactTitle") == "freetext-3")
+        #expect(stackRows[2].string("value") == "#303")
         #expect(stackRows[2].string("tone") == "bad")
-        #expect(stackRows[2].string("subtitle")?.contains("3/3 · #303 ← #302") == true)
-        #expect(stackRows[2].string("subtitle")?.contains("CI 2 fail") == true)
-        #expect(stackRows[2].string("subtitle")?.contains("@bob") == true)
+        #expect(stackRows[2].string("caption") == "Req @bob")
+        let s2 = slots(of: stackRows[2])
+        #expect(s2.count == 4)
+        #expect(s2[0]["icon"].string == "xmark" && s2[0]["value"].string == "2" && s2[0]["tone"].string == "bad")
+        #expect(s2[3]["icon"].string == "exclamationmark.triangle.fill" && s2[3]["tone"].string == "bad")
 
         // Footer note stays short enough for narrow ~167pt widgets.
         let notes = widget.descendants.filter { $0.component == .note }.compactMap { $0.string("value") }
         #expect(notes.allSatisfy { $0.count <= 28 })
 
-        // Standalone PR #549 in infra: Draft + Changes requested by @frank
-        let standaloneRows = items(in: widgetSections[1])
+        // Standalone PR #549 in infra: Draft card header + Changes requested by @frank
+        let standaloneRows = items(in: cards[1])
         #expect(standaloneRows.count == 1)
-        #expect(standaloneRows[0].string("badge") == "Changes")
-        #expect(standaloneRows[0].string("subtitle")?.contains("@frank") == true)
+        #expect(standaloneRows[0].string("compactTitle") == "loosen")
+        #expect(standaloneRows[0].string("caption") == "Changes @frank")
+        let sStandalone = slots(of: standaloneRows[0])
+        #expect(sStandalone.count == 4)
+        #expect(sStandalone[1]["icon"].string == "xmark" && sStandalone[1]["tone"].string == "bad")
 
         // Hiding drafts removes #549
         try harness.act("setIncludeDrafts", payload: false)
@@ -718,23 +748,22 @@ private func sampleMyPRsGraphQLResponse() -> String {
         )
 
         let widget = try harness.render("widget")
-        let secs = sections(in: widget)
-        #expect(secs.count == 2)
-        let stackItems = items(in: secs[0])
+        let cards = lists(in: widget)
+        #expect(cards.count == 2)
+        #expect(cards[0].bool("rail") == true)
+        let stackItems = items(in: cards[0])
         #expect(stackItems.count == 3)
-        #expect(stackItems[1].string("title")?.hasPrefix("├ ") == true)
-        #expect(stackItems[2].string("title")?.hasPrefix("└ ") == true)
-        #expect(stackItems[1].string("subtitle")?.contains("2/3 · #11 ← #10") == true)
-        #expect(stackItems[2].string("subtitle")?.contains("3/3 · #12 ← #10") == true)
+        #expect(stackItems.map { $0.string("value") ?? "" } == ["#10", "#11", "#12"])
 
-        let externalItem = items(in: secs[1]).first
-        #expect(externalItem?.string("subtitle")?.contains("← teammate/shared") == true)
+        let externalItem = items(in: cards[1]).first
+        #expect(externalItem?.string("caption")?.contains("← teammate/shared") == true)
 
-        // Flat mode collapses stacks into a single repo section.
+        // Flat mode collapses stacks into a single repo card with no rail.
         try harness.act("setGroupByStack", payload: false)
-        let flatSections = sections(in: try harness.render("widget"))
-        #expect(flatSections.count == 1)
-        #expect(items(in: flatSections[0]).count == 4)
+        let flatCards = lists(in: try harness.render("widget"))
+        #expect(flatCards.count == 1)
+        #expect(flatCards[0].bool("rail") == false)
+        #expect(items(in: flatCards[0]).count == 4)
     }
 
     @Test func reviewsModuleSuggestsAndAddsReposAndShowAllResetsFilters() throws {
@@ -758,7 +787,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(allItems(in: try harness.render("widget")).count == 5)
     }
 
-    @Test func modulesStripLeadingBracketAndTicketPrefixesForScannableTitles() throws {
+    @Test func modulesStripLeadingBracketAndTicketPrefixesForScannableTitlesAndBranchSlugs() throws {
         let mySource = try #require(loadModuleSource("github-my-prs"))
         let ticketed = jsonString([
             "data": [
@@ -768,7 +797,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
                         [
                             "number": 1, "title": "[XP DX] XPLATFORM-22095: write text boxes as FreeText",
                             "url": "https://github.com/org/repo/pull/1", "isDraft": false, "updatedAt": "2026-11-21T15:00:00Z",
-                            "additions": 10, "deletions": 2, "baseRefName": "main", "headRefName": "feat/1",
+                            "additions": 10, "deletions": 2, "baseRefName": "main", "headRefName": "thomplth/XPLATFORM-22095-freetext-pdfium-writer",
                             "reviewDecision": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
                             "repository": ["nameWithOwner": "org/repo", "name": "repo", "defaultBranchRef": ["name": "main"]],
                             "reviewRequests": ["nodes": []], "latestOpinionatedReviews": ["nodes": []], "reviews": ["nodes": []],
@@ -785,5 +814,6 @@ private func sampleMyPRsGraphQLResponse() -> String {
         )
         let row = try #require(allItems(in: try harness.render("widget")).first)
         #expect(row.string("title") == "Write text boxes as FreeText")
+        #expect(row.string("compactTitle") == "freetext-pdfium-writer")
     }
 }

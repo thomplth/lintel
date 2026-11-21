@@ -56,11 +56,18 @@ public enum ModulePrelude {
       return __node('chart', { values: isSeries ? undefined : data, series: isSeries ? data : undefined, kind: o.kind,
         tone: o.tone || o.color, height: o.height, min: o.min, max: o.max, labels: o.labels });
     }
-    function list(items, options) { var o = __options(options); return __node('list', { compact: o.compact, overflow: o.overflow }, items); }
+    function list(items, options) {
+      var o = __options(options);
+      return __node('list', {
+        title: o.title, trailing: o.trailing, trailingTone: o.trailingTone || o.trailingColor,
+        rail: o.rail, compact: o.compact, overflow: o.overflow
+      }, items);
+    }
     function item(title, options) {
       var o = __options(options);
       return __node('item', { title: __string(title), subtitle: o.subtitle,
         compactTitle: o.compactTitle, compactSubtitle: o.compactSubtitle,
+        tag: o.tag, caption: o.caption, slots: o.slots,
         icon: o.icon, value: o.value, badge: o.badge,
         tone: o.tone || o.color, action: o.action, payload: o.payload, url: o.url,
         accessoryIcon: o.accessoryIcon || (o.accessoryAction ? 'minus.circle' : undefined), accessoryAction: o.accessoryAction, accessoryLabel: o.accessoryLabel });

@@ -189,6 +189,13 @@ public enum DesignLint {
                     break
                 }
             }
+            if node.component == .item, let slots = node.props["slots"]?.array {
+                for slot in slots {
+                    if let icon = slot["icon"].string, !symbolExists(icon), SVGIcon.parse(icon) == nil {
+                        problems.append(.error("no SF Symbol is named '\(icon)' (in item.slots, \(surface))"))
+                    }
+                }
+            }
             if node.component == .button, node.string("action") == nil, node.string("url") == nil {
                 problems.append(.error("button '\(node.string("label") ?? "")' needs an action or a url"))
             }

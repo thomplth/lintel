@@ -238,26 +238,31 @@ public enum Catalog {
         ComponentSpec(
             component: .list, surfaces: panel,
             props: [
+                PropSpec("title", .string),
+                PropSpec("trailing", .string),
+                PropSpec("trailingTone", .tone),
+                PropSpec("rail", .bool),
                 PropSpec("compact", .bool),
                 PropSpec("overflow", .token(["summary", "none"])),
             ],
             hasChildren: true,
-            signature: "list(items, { compact?, overflow? })",
-            doc: "An adaptive list of item() rows with separators. Inside widgets, automatically fits as many complete rows as the height allows and appends '+N more' (overflow: 'summary', default) instead of scrolling. compact: true drops subtitles when tight to fit more rows."
+            signature: "list(items, { title?, trailing?, trailingTone?, rail?, compact?, overflow? })",
+            doc: "An adaptive list of item() rows with separators. Inside widgets, automatically fits as many complete rows as the height allows and appends '+N more' (overflow: 'summary', default) instead of scrolling. Optional title/trailing renders a compact card header inside the tile; rail: true connects rows with a vertical status rail and tone-colored node dots. compact: true drops subtitles when tight to fit more rows."
         ),
         ComponentSpec(
             component: .item, surfaces: panel,
             props: [
                 PropSpec("title", .string, required: true), PropSpec("subtitle", .string),
                 PropSpec("compactTitle", .string), PropSpec("compactSubtitle", .string),
+                PropSpec("tag", .string), PropSpec("caption", .string), PropSpec("slots", .any),
                 PropSpec("icon", .symbol),
                 PropSpec("value", .string), PropSpec("badge", .string), PropSpec("tone", .tone), PropSpec("action", .action),
                 PropSpec("payload", .any), PropSpec("url", .url), PropSpec("accessoryIcon", .symbol),
                 PropSpec("accessoryAction", .action), PropSpec("accessoryLabel", .string),
             ],
             hasChildren: false,
-            signature: "item(title, { subtitle?, compactTitle?, compactSubtitle?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
-            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. compactTitle and compactSubtitle are optional shorter labels used automatically when the widget is narrow so tight sidebar cards stay unclipped while widening reveals full titles. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
+            signature: "item(title, { subtitle?, compactTitle?, compactSubtitle?, tag?, caption?, slots?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
+            doc: "One list row: icon, title and subtitle at the left, value or badge at the right. compactTitle and compactSubtitle are optional shorter labels used automatically when the widget is narrow. slots: [{ icon?, value, tone? }] renders a fixed equal-width telemetry bar (2 to 4 slots) with optional tag and caption underneath. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
         ),
         ComponentSpec(
             component: .keyValue, surfaces: panel,

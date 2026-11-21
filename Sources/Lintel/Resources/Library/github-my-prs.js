@@ -282,6 +282,24 @@ function filteredSummaries(host) {
     .map((pr) => summarizePR(pr, viewerLogin, cfg.ignoreBots));
 }
 
+function shortBranch(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return 'main';
+  if (raw === 'develop') return 'dev';
+  const last = raw.split('/').pop() || raw;
+  return last.length > 14 ? `${last.slice(0, 13)}…` : last;
+}
+
+function branchSlug(headRefName, fallbackTitle) {
+  const raw = String(headRefName || '').trim();
+  if (!raw) return fallbackTitle;
+  const last = raw.split('/').pop() || raw;
+  const stripped = last.replace(/^[A-Z][A-Z0-9_]+-\d+[-_\s]+/i, '').trim();
+  const candidate = stripped || last;
+  if (!candidate || /^\d+$/.test(candidate)) return fallbackTitle;
+  return candidate;
+}
+
 function buildStacks(summaries, groupByStack) {
   const byRepo = new Map();
   for (const entry of summaries) {
@@ -306,6 +324,7 @@ function buildStacks(summaries, groupByStack) {
           kind: 'repo',
           title: singleOwner ? repo.shortName : repo.nameWithOwner,
           trailing: String(repo.entries.length),
+          trailingTone: undefined,
           latest: Math.max(...repo.entries.map((e) => new Date(e.pr.updatedAt).getTime() || 0)),
           rows: repo.entries.map((entry) => ({ entry, depth: 0, prefix: '', parentNumber: null, stackIndex: 0, stackSize: 1 })),
         };
@@ -368,10 +387,12 @@ function buildStacks(summaries, groupByStack) {
         const size = nodes.length;
         const rows = nodes.map((n, idx) => ({ ...n, stackIndex: idx + 1, stackSize: size }));
         const latest = Math.max(...rows.map((r) => new Date(r.entry.pr.updatedAt).getTime() || 0));
+        const baseName = shortBranch(root.pr.baseRefName || root.defaultBranch);
         stackSections.push({
           kind: 'stack',
           title: repoTitle,
-          trailing: `Stack ${size}`,
+          trailing: `${size} → ${baseName}`,
+          trailingTone: undefined,
           latest,
           rows,
         });
@@ -382,10 +403,22 @@ function buildStacks(summaries, groupByStack) {
 
     if (standalone.length > 0) {
       standalone.sort((a, b) => new Date(b.entry.pr.updatedAt).getTime() - new Date(a.entry.pr.updatedAt).getTime());
+      let trailing = String(standalone.length);
+      let trailingTone;
+      if (standalone.length === 1) {
+        const only = standalone[0].entry;
+        if (only.pr.isDraft) {
+          trailing = 'Draft';
+          trailingTone = 'secondary';
+        } else {
+          trailing = `→ ${shortBranch(only.pr.baseRefName || only.defaultBranch)}`;
+        }
+      }
       standaloneSections.push({
         kind: 'repo',
         title: repoTitle,
-        trailing: String(standalone.length),
+        trailing,
+        trailingTone,
         latest: Math.max(...standalone.map((r) => new Date(r.entry.pr.updatedAt).getTime() || 0)),
         rows: standalone.map((n) => ({ ...n, stackIndex: 0, stackSize: 1 })),
       });
@@ -408,137 +441,90 @@ function cleanTitle(raw) {
     : value;
 }
 
-function renderPRRow(host, rowInfo) {
-  const { entry, prefix, parentNumber, stackIndex, stackSize } = rowInfo;
+function renderPRRow(host, rowInfo, headerIsDraft) {
+  const { entry, parentNumber } = rowInfo;
   const pr = entry.pr;
   const cleaned = cleanTitle(pr.title);
-  const title = stackSize >= 2 && prefix ? `${prefix}${cleaned}` : cleaned;
+  const slug = branchSlug(pr.headRefName, cleaned);
 
-  let iconName = 'arrow.triangle.branch';
-  let badgeLabel;
-  let tone;
-
-  if (entry.hasConflict) {
-    iconName = 'exclamationmark.triangle.fill';
-    badgeLabel = 'Conflict';
-    tone = 'bad';
-  } else if (entry.hasChanges) {
-    iconName = 'xmark.circle.fill';
-    badgeLabel = 'Changes';
-    tone = 'bad';
-  } else if (entry.ci.state === 'failed') {
-    iconName = 'xmark.circle.fill';
-    badgeLabel = 'CI fail';
-    tone = 'bad';
-  } else if (entry.isReady) {
-    iconName = 'checkmark.circle.fill';
-    badgeLabel = 'Ready';
-    tone = 'good';
-  } else if (entry.isApproved) {
-    iconName = 'checkmark.circle.fill';
-    badgeLabel = 'Approved';
-    tone = 'good';
+  let dotTone;
+  if (entry.hasConflict || entry.hasChanges || entry.ci.state === 'failed') {
+    dotTone = 'bad';
+  } else if (entry.isReady || entry.isApproved) {
+    dotTone = 'good';
   } else if (pr.isDraft) {
-    iconName = 'pencil';
-    badgeLabel = 'Draft';
-    tone = 'secondary';
+    dotTone = 'secondary';
   } else if (entry.ci.state === 'pending') {
-    iconName = 'clock';
-    badgeLabel = 'CI running';
-    tone = 'warn';
+    dotTone = 'warn';
   } else if (entry.requested.length > 0) {
-    iconName = 'arrow.triangle.branch';
-    badgeLabel = 'Review';
-    tone = 'accent';
+    dotTone = 'info';
   }
 
-  const compactParts = [];
-  const parts = [];
-  let valueLabel;
-  if (!badgeLabel && entry.ci.state === 'passed') {
-    valueLabel = 'CI ok';
+  // Fixed 4-slot telemetry bar: [0] CI, [1] Review, [2] Comments, [3] Merge
+  let ciSlot;
+  if (entry.ci.state === 'failed') {
+    ciSlot = { icon: 'xmark', value: String(entry.ci.failed || 1), tone: 'bad' };
+  } else if (entry.ci.state === 'pending') {
+    ciSlot = { icon: 'clock', value: entry.ci.pending > 0 ? String(entry.ci.pending) : '…', tone: 'warn' };
+  } else if (entry.ci.state === 'passed') {
+    ciSlot = { icon: 'checkmark', value: entry.ci.passed > 0 ? String(entry.ci.passed) : 'CI', tone: 'good' };
+  } else {
+    ciSlot = { value: '—' };
   }
 
-  if (pr.isDraft && badgeLabel !== 'Draft') {
-    parts.push('Draft');
-    compactParts.push('Draft');
-  }
-  if (!entry.hasConflict && entry.isBehind) {
-    parts.push('Behind');
-    compactParts.push('Behind');
+  let reviewSlot;
+  if (entry.hasChanges) {
+    reviewSlot = { icon: 'xmark', value: String(entry.changesBy.length || 1), tone: 'bad' };
+  } else if (entry.isApproved) {
+    reviewSlot = { icon: 'checkmark', value: String(entry.approvedBy.length || 1), tone: 'good' };
+  } else if (entry.requested.length > 0) {
+    reviewSlot = { icon: 'person', value: String(entry.requested.length), tone: 'info' };
+  } else {
+    reviewSlot = { icon: 'person', value: '0' };
   }
 
+  const commentSlot = entry.unresolvedThreads > 0
+    ? { icon: 'bubble.left', value: String(entry.unresolvedThreads), tone: 'warn' }
+    : { icon: 'bubble.left', value: String(entry.totalComments) };
+
+  let mergeSlot;
+  if (entry.hasConflict) {
+    mergeSlot = { icon: 'exclamationmark.triangle.fill', value: '', tone: 'bad' };
+  } else if (entry.isBehind) {
+    mergeSlot = { icon: 'arrow.down', value: '', tone: 'warn' };
+  } else if (entry.isReady) {
+    mergeSlot = { icon: 'checkmark', value: '', tone: 'good' };
+  } else {
+    mergeSlot = { icon: 'checkmark', value: '' };
+  }
+
+  const captionParts = [];
   if (entry.changesBy.length > 0) {
-    const label = entry.changesBy.length === 1 ? `Changes (@${entry.changesBy[0]})` : `Changes (${entry.changesBy.length})`;
-    parts.push(label);
-    compactParts.push(entry.changesBy.length === 1 ? `@${entry.changesBy[0]}` : `${entry.changesBy.length} changes`);
+    const names = entry.changesBy.slice(0, 2).map((u) => `@${u}`).join(', ');
+    captionParts.push(`Changes ${names}`);
   } else if (entry.approvedBy.length > 0) {
-    const label = entry.approvedBy.length === 1 ? `Approved (@${entry.approvedBy[0]})` : `Approved (${entry.approvedBy.length})`;
-    parts.push(label);
-    compactParts.push(label);
-  } else if (entry.commentedBy.length > 0) {
-    const label = entry.commentedBy.length === 1 ? `Commented (@${entry.commentedBy[0]})` : `Commented (${entry.commentedBy.length})`;
-    parts.push(label);
-    compactParts.push(label);
+    const names = entry.approvedBy.slice(0, 2).map((u) => `@${u}`).join(', ');
+    captionParts.push(`Approved ${names}`);
   }
-
-  if (entry.requested.length > 0) {
+  if (entry.requested.length > 0 && entry.changesBy.length === 0) {
     const shown = entry.requested.slice(0, 2).join(', ');
     const more = entry.requested.length > 2 ? ` +${entry.requested.length - 2}` : '';
-    const req = badgeLabel === 'Review' ? `${shown}${more}` : `Req ${shown}${more}`;
-    parts.push(req);
-    compactParts.push(req);
+    captionParts.push(`Req ${shown}${more}`);
+  } else if (entry.changesBy.length === 0 && entry.approvedBy.length === 0 && entry.commentedBy.length > 0) {
+    const names = entry.commentedBy.slice(0, 2).map((u) => `@${u}`).join(', ');
+    captionParts.push(`Commented ${names}`);
   }
-
-  if (entry.unresolvedThreads > 0) {
-    const label = `${entry.unresolvedThreads} unresolved`;
-    parts.push(label);
-    compactParts.push(label);
-  }
-
-  if (entry.ci.label) {
-    if (badgeLabel === 'CI fail') {
-      if (entry.ci.failed > 1) {
-        parts.push(`${entry.ci.failed} failed`);
-        compactParts.push(`${entry.ci.failed} failed`);
-      }
-    } else if (badgeLabel === 'CI running') {
-      if (entry.ci.total > 0) {
-        parts.push(`${entry.ci.passed}/${entry.ci.total}`);
-        compactParts.push(`${entry.ci.passed}/${entry.ci.total}`);
-      }
-    } else {
-      parts.push(entry.ci.label);
-      compactParts.push(entry.ci.label);
-    }
-  }
-
-  if (entry.unresolvedThreads === 0 && entry.totalComments > 0 && entry.approvedBy.length === 0 && entry.changesBy.length === 0) {
-    parts.push(`${entry.totalComments} cmt`);
-    compactParts.push(`${entry.totalComments} cmt`);
-  }
-
   if (!parentNumber && pr.baseRefName && pr.baseRefName !== entry.defaultBranch) {
-    compactParts.push(`← ${pr.baseRefName}`);
+    captionParts.push(`← ${pr.baseRefName}`);
   }
 
-  const refPart = parentNumber
-    ? `#${pr.number} ← #${parentNumber}`
-    : (pr.baseRefName && pr.baseRefName !== entry.defaultBranch ? `#${pr.number} ← ${pr.baseRefName}` : `#${pr.number}`);
-  if (stackSize >= 2) parts.push(`${stackIndex}/${stackSize}`);
-  parts.push(refPart);
-
-  const compactTitle = stackSize >= 2 && prefix ? `${prefix}#${pr.number}` : `#${pr.number}`;
-  const compactSubtitle = compactParts.length > 0 ? compactParts.join(' · ') : host.format.ago(pr.updatedAt);
-
-  return item(title, {
-    subtitle: parts.join(' · '),
-    compactTitle,
-    compactSubtitle,
-    icon: iconName,
-    value: valueLabel,
-    badge: badgeLabel,
-    tone,
+  return item(cleaned, {
+    compactTitle: slug,
+    tag: pr.isDraft && !headerIsDraft ? 'Draft' : undefined,
+    value: `#${pr.number}`,
+    tone: dotTone,
+    slots: [ciSlot, reviewSlot, commentSlot, mergeSlot],
+    caption: captionParts.length > 0 ? captionParts.join(' · ') : undefined,
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,
   });
 }
@@ -579,7 +565,7 @@ defineModule({
     order: 26,
     refreshSeconds: 15,
     panelRefreshSeconds: 15,
-    defaultShape: 'wide',
+    defaultShape: 'sidebar',
     permissions: ['api.github.com', 'exec:gh', 'notify'],
   },
   async chip(host) {
@@ -640,27 +626,17 @@ defineModule({
     }
 
     const groups = buildStacks(summaries, cfg.groupByStack);
-    const readyCount = summaries.filter((e) => e.isReady).length;
-    const blockedCount = summaries.filter((e) => e.isBlocked).length;
     const stackCount = groups.filter((g) => g.kind === 'stack').length;
 
-    const headerBadge = blockedCount > 0
-      ? badge(`${blockedCount} blocked`, { tone: 'bad' })
-      : readyCount > 0
-        ? badge(`${readyCount} ready`, { tone: 'good' })
-        : null;
-
-    const blocks = [
-      row([
-        icon('arrow.triangle.branch', { tone: blockedCount > 0 ? 'bad' : readyCount > 0 ? 'good' : undefined }),
-        text(`${summaries.length} open`, { role: 'label', tone: 'primary', weight: 'semibold', mono: true }),
-        spacer(),
-        ...(headerBadge ? [headerBadge] : []),
-      ], { spacing: 'tight' }),
-      ...groups.slice(0, 10).map((group) => section(group.title, [
-        list(group.rows.slice(0, 30).map((r) => renderPRRow(host, r))),
-      ], { trailing: group.trailing })),
-    ];
+    const blocks = groups.slice(0, 10).map((group) => list(
+      group.rows.slice(0, 30).map((r) => renderPRRow(host, r, group.trailing === 'Draft')),
+      {
+        title: group.title,
+        trailing: group.trailing,
+        trailingTone: group.trailingTone,
+        rail: group.kind === 'stack',
+      }
+    ));
 
     if (failure) {
       blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
