@@ -35,11 +35,14 @@ Drag the open bar to move it to the left, centre or right of the screen; hold �
 another, into another row, or onto a row's top or bottom edge (or just below the bar) to start a new row there. Carry it
 well away from the bar until the pointer shows ✕ and let go to remove it; Settings › Bar Items brings it back.
 Hover any module to reveal a curved resize handle on its free bottom corner (bottom-left when right-anchored,
-bottom-right when left-anchored). Drag it outward to morph a chip smoothly into a desktop widget (`small` 1×1, `wide`
-2×1, `medium` 2×2, `large` 3×2, or `tall` 2×3) on the Bento shelf below the chip rows, or shrink it back into a chip.
-Desktop widgets stay visible while idle, dynamically adapt every block to fit without scrolling, and reveal a quiet
-utility pill (Configure, Collapse, Studio, Settings) on hover. Clicking a chip opens a transient peek widget; click its
-pin icon to keep it on the desktop. Right-click any module to jump straight to a size.
+bottom-right when left-anchored), plus invisible side and bottom edge grips. Drag outward or along any edge to morph
+a chip into a freeform desktop widget of any width and height—from a slim top ribbon or narrow vertical sidebar to a
+spacious multi-column dashboard—or shrink it back into a chip. Double-click the resize handle to snap height tightly
+to content; widgets with finite content automatically clamp to their natural height so blank space never appears.
+Desktop widgets stay visible while idle, adapt every block natively without scrolling, and reveal a quiet utility pill
+(drag grip to reorder/stack vertically into columns or place side by side, Configure, Collapse, Studio, Settings) on
+hover; you can also ⌘-drag any widget card to stack or move it. Clicking a chip opens a transient peek widget; click
+its pin icon to keep it on the desktop.
 Holding ⌘ over the open bar also shows a slim divider in each of its rows (except one in the menu bar, which shows all
 its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
 is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.

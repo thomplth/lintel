@@ -18,9 +18,8 @@ struct ModuleFailure: Error, Equatable {
 
 struct ModuleDescription {
     var manifest: ModuleManifest
-    var hasPanel: Bool
+    var hasWidget: Bool
     var hasConfigure: Bool = false
-    var declaredViews: [WidgetSize] = []
     var actions: [String]
     var jobs: [JobManifest] = []
 }
@@ -99,8 +98,8 @@ final class RunnerClient {
 
     func load(key: String, source: String, storage: JSONValue) async throws -> ModuleDescription {
         let reply = try await request(["op": "load", "module": key, "source": source, "storage": storage.any])
-        guard reply["hasRender"].bool == true else {
-            throw ModuleFailure("defineModule needs a render(host) function")
+        guard reply["hasChip"].bool == true else {
+            throw ModuleFailure("defineModule needs a chip(host) function")
         }
         let rawJobs = reply["jobs"].array ?? []
         let jobs: [JobManifest] = try rawJobs.map { entry in
@@ -112,20 +111,19 @@ final class RunnerClient {
         }
         return ModuleDescription(
             manifest: try ModuleManifest(reply["meta"]),
-            hasPanel: reply["hasPanel"].bool ?? false,
+            hasWidget: reply["hasWidget"].bool ?? false,
             hasConfigure: reply["hasConfigure"].bool ?? false,
-            declaredViews: (reply["declaredViews"].array ?? []).compactMap { $0.string.flatMap(WidgetSize.init(rawValue:)) },
             actions: (reply["actions"].array ?? []).compactMap(\.string),
             jobs: jobs
         )
     }
 
     func render(key: String, surface: Surface) async throws -> JSONValue {
-        try await request(["op": "render", "module": key, "surface": surface.rawValue])
+        try await request(["op": "render", "module": key, "surface": surface == .chip ? "chip" : "widget"])
     }
 
-    func render(key: String, size: WidgetSize) async throws -> JSONValue {
-        try await request(["op": "render", "module": key, "surface": size.rawValue])
+    func renderWidget(key: String) async throws -> JSONValue {
+        try await request(["op": "render", "module": key, "surface": "widget"])
     }
 
     func renderConfigure(key: String) async throws -> JSONValue {

@@ -33,8 +33,8 @@ struct BarView: View {
         }
     }
 
-    private var widgets: [(slot: Slot, size: WidgetSize)] {
-        host == .window ? model.visibleWidgets : []
+    private var widgetColumns: [[(slot: Slot, box: WidgetBox)]] {
+        host == .window ? model.visibleWidgetColumns : []
     }
 
     var body: some View {
@@ -46,9 +46,11 @@ struct BarView: View {
         let isInMenuBar = host == .menuBar
         let spacing = max(theme.rowSpacing, hasCapsules ? 3 : 0)
         let hasChips = rows.contains { !$0.isEmpty }
-        let maxBentoCols = max(2, Int(floor((model.maxBarWidth + metrics.widgetGap) / (metrics.widgetUnitWidth + metrics.widgetGap))))
+        let flatWidgets: [(col: Int, stackCount: Int, slot: Slot, box: WidgetBox)] = widgetColumns.enumerated().flatMap { colIndex, col in
+            col.map { (col: colIndex, stackCount: col.count, slot: $0.slot, box: $0.box) }
+        }
 
-        VStack(alignment: model.alignment, spacing: hasChips && !widgets.isEmpty ? metrics.widgetGap : 0) {
+        VStack(alignment: model.alignment, spacing: hasChips && !flatWidgets.isEmpty ? metrics.widgetGap : 0) {
             if hasChips || isInMenuBar {
                 BarRows(flow: BarFlow(
                     spacing: hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing, rowSpacing: spacing,
@@ -69,18 +71,15 @@ struct BarView: View {
                 .opacity(looksActive ? 1 : theme.idleOpacity)
             }
 
-            if !widgets.isEmpty {
-                BentoGridLayout(flow: BentoFlow(
-                    unitWidth: metrics.widgetUnitWidth,
-                    unitHeight: metrics.widgetUnitHeight,
-                    gap: metrics.widgetGap,
-                    maxColumns: maxBentoCols,
-                    anchor: model.settings.anchor
-                )) {
-                    ForEach(widgets, id: \.slot.id) { entry in
+            if !flatWidgets.isEmpty {
+                WidgetShelfLayout(
+                    shelf: WidgetShelf(gap: metrics.widgetGap, anchor: model.settings.anchor),
+                    columnCount: widgetColumns.count
+                ) {
+                    ForEach(flatWidgets, id: \.slot.id) { entry in
                         WidgetCardView(
                             slot: entry.slot,
-                            size: entry.size,
+                            box: entry.box,
                             node: entry.slot.widgetNode,
                             configureNode: entry.slot.configureNode,
                             isConfiguring: entry.slot.isConfiguring,
@@ -91,18 +90,24 @@ struct BarView: View {
                             isPeek: false,
                             isSelected: model.keyboardSelection == entry.slot.id,
                             isResizingThis: model.resizingSlotID == entry.slot.id,
+                            isDraggingThis: model.draggingWidgetID == entry.slot.id,
+                            columnCount: widgetColumns.count,
+                            stackCount: entry.stackCount,
                             model: model
                         )
                         .equatable()
                         .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named(barSpace)) }, action: {
                             model.reportWidget(frame: $0, of: entry.slot.id)
                         })
-                        .layoutValue(key: BentoWidgetIDKey.self, value: entry.slot.id)
-                        .layoutValue(key: BentoWidgetSizeKey.self, value: entry.size)
+                        .layoutValue(key: ShelfWidgetIDKey.self, value: entry.slot.id)
+                        .layoutValue(key: ShelfColumnKey.self, value: entry.col)
                         .transition(WidgetArrival())
                     }
                 }
-                .animation(theme.motion == "full" ? BarModel.reflow : nil, value: widgets.map { "\($0.slot.id):\($0.size.rawValue)" })
+                .onGeometryChange(for: CGPoint.self, of: { $0.frame(in: .named(barSpace)).origin }, action: {
+                    model.shelfOriginInBarSpace = $0
+                })
+                .animation(theme.motion == "full" ? BarModel.reflow : nil, value: widgetColumns.map { $0.map(\.slot.id) })
             }
         }
         .overlayPreferenceValue(SelectionMark.Key.self) { mark in
@@ -132,6 +137,7 @@ struct BarView: View {
         .overlay(alignment: .topLeading) {
             if !isInMenuBar {
                 ResizeOverlayView(drag: model.resizeDrag, model: model)
+                WidgetDragOverlayView(drag: model.widgetDrag, model: model)
             }
         }
         .coordinateSpace(name: barSpace)
@@ -145,8 +151,15 @@ struct BarView: View {
 
     private func dragChanged(_ value: DragGesture.Value) {
         if model.resizingSlotID != nil { return }
+        if model.draggingWidgetID != nil {
+            model.updateDraggingWidget(to: value.location)
+            return
+        }
         if model.rearrangement != nil {
             model.carry(to: value.location)
+        } else if !isMovingBar, isCommandHeld, let widgetID = widgetID(at: value.startLocation) {
+            model.beginDraggingWidget(widgetID, grabbedAt: value.startLocation)
+            model.updateDraggingWidget(to: value.location)
         } else if !isMovingBar, model.isActive, isCommandHeld, let key = model.slotID(at: value.startLocation) {
             model.beginRearranging(key, grabbedAt: value.startLocation)
             model.carry(to: value.location)
@@ -157,13 +170,20 @@ struct BarView: View {
     }
 
     private func dragEnded(_ value: DragGesture.Value) {
-        if model.rearrangement != nil {
+        if model.draggingWidgetID != nil {
+            model.updateDraggingWidget(to: value.location)
+            model.endDraggingWidget()
+        } else if model.rearrangement != nil {
             model.carry(to: value.location)
             model.drop()
         } else {
             isMovingBar = false
             model.onDragEnded(value.translation.width)
         }
+    }
+
+    private func widgetID(at point: CGPoint) -> String? {
+        model.visibleWidgets.first { model.slotFrames[$0.slot.id]?.contains(point) == true }?.slot.id
     }
 
     private var isCommandHeld: Bool {
@@ -294,7 +314,7 @@ struct ChipView: View, Equatable {
                         coordinateSpace: .named(barSpace),
                         onDragStart: {
                             let frame = model.slotFrames[slot.id] ?? CGRect(x: 0, y: 0, width: 72, height: 28)
-                            model.beginResizing(slot.id, startTier: .chip, startRect: frame, isPeek: false)
+                            model.beginResizing(slot.id, fromChip: true, handle: .corner(corner), startRect: frame, isPeek: false)
                         },
                         onDragChanged: { translation in
                             model.updateResizing(translation: translation)
@@ -356,18 +376,8 @@ struct ChipView: View, Equatable {
     @ViewBuilder private var menu: some View {
         if slot.kind != .assistant {
             if slot.supportsResize {
-                Menu("Resize Widget") {
-                    ForEach(slot.supportedSizes, id: \.self) { tier in
-                        Button {
-                            model.onSlotSecondaryAction(slot, "size:\(tier.rawValue)")
-                        } label: {
-                            if tier == .chip {
-                                Label(tier.displayName, systemImage: "checkmark")
-                            } else {
-                                Text("\(tier.displayName) (\(tier.columns)×\(tier.rows))")
-                            }
-                        }
-                    }
+                Button("Expand to Desktop Widget") {
+                    model.onSlotSecondaryAction(slot, "expand")
                 }
                 Divider()
             }

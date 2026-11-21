@@ -39,20 +39,27 @@ public enum DesignLint {
         return problems
     }
 
-    /// Validates one widget size tier (or configure view), checking component rules and structural fit.
+    /// Validates a module's responsive widget view (and runs the 6-viewport stress audit).
     public static func checkWidget(
-        _ node: ViewNode, size: WidgetSize, manifest: ModuleManifest, actions: [String],
+        _ node: ViewNode, manifest: ModuleManifest, actions: [String],
+        metrics: Metrics = Metrics(Theme.preset("glass")!),
         limits: Limits = Limits(), symbolExists: (String) -> Bool
     ) -> [ViewProblem] {
         var problems: [ViewProblem] = []
         checkPanel(node, limits: limits, problems: &problems)
-        checkShared(node, surface: "the \(size.rawValue) widget", manifest: manifest, actions: actions, symbolExists: symbolExists, problems: &problems)
-        if size == .small {
-            let sections = node.descendants.filter { $0.component == .section }.count
-            if sections > 2 {
-                problems.append(.warning("the small widget has \(sections) sections; keep small tiles focused on one hero view"))
-            }
-        }
+        checkShared(node, surface: "the widget", manifest: manifest, actions: actions, symbolExists: symbolExists, problems: &problems)
+        problems += ResponsiveAudit.check(node, metrics: metrics)
+        return problems
+    }
+
+    /// Validates a module's configure backside (controls only; scrollable, no tiny-floor audit).
+    public static func checkConfigure(
+        _ node: ViewNode, manifest: ModuleManifest, actions: [String],
+        limits: Limits = Limits(), symbolExists: (String) -> Bool
+    ) -> [ViewProblem] {
+        var problems: [ViewProblem] = []
+        checkPanel(node, limits: limits, problems: &problems)
+        checkShared(node, surface: "the configure view", manifest: manifest, actions: actions, symbolExists: symbolExists, problems: &problems)
         return problems
     }
 

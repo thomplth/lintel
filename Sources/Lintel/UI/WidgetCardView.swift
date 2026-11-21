@@ -46,7 +46,7 @@ enum ResizeCursors {
     static let bottomRight = cursor(for: .bottomRight)
 }
 
-// MARK: - Apple-Style Curved Corner Resize Handle
+// MARK: - Apple-Style Curved Corner & Edge Resize Handles
 
 struct CornerArcShape: Shape {
     let corner: ResizeCorner
@@ -80,7 +80,7 @@ struct CornerArcShape: Shape {
     }
 }
 
-/// Subtle curved corner handle that fades in on hover and drives live morphing drag-resize.
+/// Subtle curved corner handle that fades in on hover and drives live freeform 2D resizing (double-click fits height).
 struct ResizeArcHandle: View {
     let corner: ResizeCorner
     let cornerRadius: CGFloat
@@ -92,12 +92,13 @@ struct ResizeArcHandle: View {
     let onDragStart: () -> Void
     let onDragChanged: (CGSize) -> Void
     let onDragEnded: () -> Void
+    var onDoubleClick: (() -> Void)? = nil
 
     @State private var isHandleHovered = false
     @State private var isDragging = false
 
     private var handleBox: CGFloat { isCompactChip ? 14 : 20 }
-    private var arcRadius: CGFloat { isCompactChip ? min(cornerRadius, 9) : min(cornerRadius - 3, 15) }
+    private var arcRadius: CGFloat { isCompactChip ? min(cornerRadius, 9) : min(cornerRadius - 3, 14) }
 
     var body: some View {
         CornerArcShape(corner: corner, radius: max(arcRadius, 4))
@@ -121,8 +122,11 @@ struct ResizeArcHandle: View {
                     NSCursor.pop()
                 }
             }
+            .onTapGesture(count: 2) {
+                onDoubleClick?()
+            }
             .highPriorityGesture(
-                DragGesture(minimumDistance: 4, coordinateSpace: coordinateSpace)
+                DragGesture(minimumDistance: 3, coordinateSpace: coordinateSpace)
                     .onChanged { value in
                         if !isDragging {
                             isDragging = true
@@ -136,17 +140,78 @@ struct ResizeArcHandle: View {
                         onDragEnded()
                     }
             )
-            .help("Drag to resize")
+            .help(isCompactChip ? "Drag to expand into a widget" : "Drag to resize · Double-click to fit height")
     }
 }
 
-// MARK: - Unified Widget Card (Desktop Shelf & Click-to-Peek)
+/// Invisible edge hit-strip for single-axis resizing (bottom edge = height, inward side edge = width).
+private struct ResizeEdgeHandle: View {
+    let isHorizontalEdge: Bool
+    let coordinateSpace: CoordinateSpace
+    let onDragStart: () -> Void
+    let onDragChanged: (CGSize) -> Void
+    let onDragEnded: () -> Void
+    var onDoubleClick: (() -> Void)? = nil
 
-/// Draws one resized module card with zero-scroll adaptive blocks, quiet hover utility pill, configure flip,
-/// and anchor-adaptive corner resize handle. Equatable so unrelated widgets never redraw when one module ticks.
+    @State private var isDragging = false
+
+    var body: some View {
+        Color.clear
+            .frame(width: isHorizontalEdge ? nil : 7, height: isHorizontalEdge ? 7 : nil)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                if hovering {
+                    (isHorizontalEdge ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push()
+                } else if !isDragging {
+                    NSCursor.pop()
+                }
+            }
+            .onTapGesture(count: 2) {
+                onDoubleClick?()
+            }
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 3, coordinateSpace: coordinateSpace)
+                    .onChanged { value in
+                        if !isDragging {
+                            isDragging = true
+                            onDragStart()
+                        }
+                        onDragChanged(value.translation)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        NSCursor.arrow.set()
+                        onDragEnded()
+                    }
+            )
+    }
+}
+
+// MARK: - Live Frame Driver (isolates 120Hz drag updates to the single widget being resized)
+
+private struct LiveResizeDriver<Content: View>: View {
+    let baseBox: WidgetBox
+    let isResizingThis: Bool
+    let isPeek: Bool
+    @ObservedObject var drag: ResizeDragState
+    @ViewBuilder let content: (CGSize, Bool) -> Content
+
+    var body: some View {
+        if isResizingThis && !isPeek && !drag.fromChip {
+            content(drag.liveSize.width > 1 ? drag.liveSize : baseBox.cgSize, drag.collapsesToChip)
+        } else {
+            content(baseBox.cgSize, false)
+        }
+    }
+}
+
+// MARK: - Unified Freeform Widget Card (Desktop Shelf & Click-to-Peek)
+
+/// Draws one freeform-resizable module card with zero-void height clamping, container-responsive blocks,
+/// quiet hover utility pill (with drag-to-stack grip), configure flip, and corner + edge resize handles.
 struct WidgetCardView: View, Equatable {
     let slot: Slot
-    let size: WidgetSize
+    let box: WidgetBox
     let node: ViewNode?
     let configureNode: ViewNode?
     let isConfiguring: Bool
@@ -157,16 +222,20 @@ struct WidgetCardView: View, Equatable {
     let isPeek: Bool
     let isSelected: Bool
     let isResizingThis: Bool
+    let isDraggingThis: Bool
+    let columnCount: Int
+    let stackCount: Int
     let model: BarModel
 
     @State private var isHovered = false
+    @State private var isGripDragging = false
     @Environment(\.colorScheme) private var systemScheme
 
     nonisolated static func == (lhs: WidgetCardView, rhs: WidgetCardView) -> Bool {
         MainActor.assumeIsolated {
             lhs.model === rhs.model
                 && lhs.slot == rhs.slot
-                && lhs.size == rhs.size
+                && lhs.box == rhs.box
                 && lhs.node == rhs.node
                 && lhs.configureNode == rhs.configureNode
                 && lhs.isConfiguring == rhs.isConfiguring
@@ -177,6 +246,9 @@ struct WidgetCardView: View, Equatable {
                 && lhs.isPeek == rhs.isPeek
                 && lhs.isSelected == rhs.isSelected
                 && lhs.isResizingThis == rhs.isResizingThis
+                && lhs.isDraggingThis == rhs.isDraggingThis
+                && lhs.columnCount == rhs.columnCount
+                && lhs.stackCount == rhs.stackCount
         }
     }
 
@@ -193,18 +265,21 @@ struct WidgetCardView: View, Equatable {
     }
 
     private var pillAlignment: Alignment {
-        // Place the hover utility pill at the top corner opposite the resize corner so cursor paths never collide.
         corner == .bottomLeft ? .topTrailing : .topLeading
     }
 
-    private func makeContext(forConfig: Bool = false) -> RenderContext {
+    private var sideEdgeAlignment: Alignment {
+        corner == .bottomLeft ? .leading : .trailing
+    }
+
+    private func makeContext(bounds: CGSize?, forConfig: Bool = false) -> RenderContext {
         var context = RenderContext(
             theme: theme,
             surface: .panel,
             material: material,
             moduleID: slot.id,
             manifest: model.manifestFor(slot.id),
-            widgetSize: forConfig ? nil : size
+            widgetBounds: forConfig ? nil : bounds
         )
         let model = model
         context.panelFocus = model.panelFocus
@@ -214,32 +289,43 @@ struct WidgetCardView: View, Equatable {
     }
 
     var body: some View {
-        let context = makeContext()
-        let frameSize = context.metrics.widgetSize(size)
-        let pad = context.metrics.widgetPadding
-        let idleFade: Double = (!isPeek && !isHovered && !isConfiguring && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.88) : 1.0
+        LiveResizeDriver(baseBox: box, isResizingThis: isResizingThis, isPeek: isPeek, drag: model.resizeDrag) { activeSize, collapsing in
+            cardBody(activeSize: activeSize, collapsing: collapsing)
+        }
+    }
 
-        ZStack(alignment: .topLeading) {
+    private func cardBody(activeSize: CGSize, collapsing: Bool) -> some View {
+        let context = makeContext(bounds: activeSize)
+        let pad = CGFloat(context.metrics.widgetPadding)
+        let minH = context.metrics.minWidgetSize.height
+        let hasUnbounded = isConfiguring || (node?.hasUnboundedFlex ?? false) || (node == nil)
+        let idleFade: Double = (!isPeek && !isHovered && !isConfiguring && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.90) : 1.0
+
+        return ZeroVoidCardLayout(
+            requestedWidth: max(activeSize.width, 100),
+            requestedHeight: max(activeSize.height, minH),
+            minHeight: minH,
+            hasUnboundedFlex: hasUnbounded,
+            padding: isConfiguring ? 0 : pad
+        ) {
             if isConfiguring {
-                configureContent(context: makeContext(forConfig: true), pad: pad)
+                configureContent(context: makeContext(bounds: nil, forConfig: true), pad: pad)
                     .transition(.asymmetric(
                         insertion: .opacity.combined(with: .scale(scale: 0.96)),
                         removal: .opacity.combined(with: .scale(scale: 0.96))
                     ))
             } else {
-                liveContent(context: context, pad: pad)
-                    .id(size)
+                liveContent(context: context, innerWidth: max(activeSize.width - pad * 2, 40), pad: pad, hasUnbounded: hasUnbounded)
                     .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
         }
-        .frame(width: frameSize.width, height: frameSize.height, alignment: .topLeading)
         .clipped()
         .modifier(SurfaceBackground(context: context, material: material, shape: context.widgetShape, isInteractive: false))
         .clipShape(context.widgetShape)
         .overlay {
             context.widgetShape.stroke(
-                context.primary.opacity(isHovered ? 0.16 : 0.08),
-                lineWidth: 0.75
+                collapsing ? Color.orange.opacity(0.75) : context.primary.opacity(isHovered || isResizingThis ? 0.18 : 0.08),
+                lineWidth: collapsing ? 1.5 : 0.75
             )
             .allowsHitTesting(false)
         }
@@ -252,6 +338,34 @@ struct WidgetCardView: View, Equatable {
             hoverUtilityPill(context: context)
                 .padding(8)
         }
+        // Bottom edge handle (height-only)
+        .overlay(alignment: .bottom) {
+            if slot.supportsResize {
+                ResizeEdgeHandle(
+                    isHorizontalEdge: true,
+                    coordinateSpace: isPeek ? .global : .named(barSpace),
+                    onDragStart: { beginResize(.bottom, fallbackSize: activeSize) },
+                    onDragChanged: { model.updateResizing(translation: $0) },
+                    onDragEnded: { model.endResizing() },
+                    onDoubleClick: { model.fitWidgetHeightToContent(slot.id, isPeek: isPeek) }
+                )
+                .padding(.horizontal, 24)
+            }
+        }
+        // Inward side edge handle (width-only)
+        .overlay(alignment: sideEdgeAlignment) {
+            if slot.supportsResize {
+                ResizeEdgeHandle(
+                    isHorizontalEdge: false,
+                    coordinateSpace: isPeek ? .global : .named(barSpace),
+                    onDragStart: { beginResize(.side(corner), fallbackSize: activeSize) },
+                    onDragChanged: { model.updateResizing(translation: $0) },
+                    onDragEnded: { model.endResizing() }
+                )
+                .padding(.vertical, 24)
+            }
+        }
+        // Corner 2D resize arc handle
         .overlay(alignment: handleAlignment) {
             if slot.supportsResize {
                 ResizeArcHandle(
@@ -262,16 +376,10 @@ struct WidgetCardView: View, Equatable {
                     isCompactChip: false,
                     isVisible: isHovered || isResizingThis,
                     coordinateSpace: isPeek ? .global : .named(barSpace),
-                    onDragStart: {
-                        let startRect = model.slotFrames[slot.id] ?? CGRect(origin: .zero, size: frameSize)
-                        model.beginResizing(slot.id, startTier: size, startRect: startRect, isPeek: isPeek)
-                    },
-                    onDragChanged: { translation in
-                        model.updateResizing(translation: translation)
-                    },
-                    onDragEnded: {
-                        model.endResizing()
-                    }
+                    onDragStart: { beginResize(.corner(corner), fallbackSize: activeSize) },
+                    onDragChanged: { model.updateResizing(translation: $0) },
+                    onDragEnded: { model.endResizing() },
+                    onDoubleClick: { model.fitWidgetHeightToContent(slot.id, isPeek: isPeek) }
                 )
             }
         }
@@ -283,16 +391,15 @@ struct WidgetCardView: View, Equatable {
                 color: context.accent
             ) : nil
         }
-        .opacity(idleFade)
-        .scaleEffect(isResizingThis ? 0.985 : 1.0)
-        .animation(theme.motion == "full" ? .spring(response: 0.34, dampingFraction: 0.82) : nil, value: size)
-        .animation(theme.motion == "full" ? .spring(response: 0.30, dampingFraction: 0.84) : nil, value: isConfiguring)
-        .animation(theme.motion == "full" ? .easeOut(duration: 0.18) : nil, value: isHovered)
+        .opacity(isDraggingThis ? 0.28 : (collapsing ? 0.62 : idleFade))
+        .scaleEffect(collapsing ? 0.92 : (isDraggingThis ? 0.96 : 1.0))
+        .animation(theme.motion == "full" ? .spring(response: 0.28, dampingFraction: 0.84) : nil, value: isConfiguring)
+        .animation(theme.motion == "full" ? .spring(response: 0.22, dampingFraction: 0.82) : nil, value: collapsing)
+        .animation(theme.motion == "full" ? .easeOut(duration: 0.16) : nil, value: isHovered)
         .environment(\.colorScheme, context.colorScheme ?? systemScheme)
         .onHover { hovering in
             isHovered = hovering
             if !hovering && isConfiguring && !isPeek {
-                // Keep configure open only while hovered/active; gently auto-return to live view once pointer leaves.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                     if !isHovered && isConfiguring {
                         model.onToggleConfigure(slot.id, false, false)
@@ -303,20 +410,46 @@ struct WidgetCardView: View, Equatable {
         .contextMenu { widgetContextMenu }
     }
 
+    private func beginResize(_ handle: ResizeHandle, fallbackSize: CGSize) {
+        let startRect = model.slotFrames[slot.id] ?? CGRect(origin: .zero, size: fallbackSize)
+        model.beginResizing(slot.id, fromChip: false, handle: handle, startRect: startRect, isPeek: isPeek)
+    }
+
     @ViewBuilder
-    private func liveContent(context: RenderContext, pad: Double) -> some View {
-        let gap = size == .small || size == .wide ? context.metrics.unit * 1.75 : context.metrics.unit * 2.5
+    private func liveContent(context: RenderContext, innerWidth: CGFloat, pad: CGFloat, hasUnbounded: Bool) -> some View {
+        let gap = context.isCompactWidget ? context.metrics.unit * 1.75 : context.metrics.unit * 2.25
         Group {
             if let node {
                 let children = (node.component == .column && node.props.isEmpty) ? node.children : [node]
                 AdaptiveStackLayout(spacing: gap, alignment: .leading) {
                     ForEach(Array(children.enumerated()), id: \.offset) { child in
                         NodeView(node: child.element, context: context)
+                            .clipped()
                             .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
                             .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background {
+                    // Measure true finite natural height at the current width so ResizeDrag can rubber-band cleanly at zero-void ceiling.
+                    if !hasUnbounded {
+                        AdaptiveStackLayout(spacing: gap, alignment: .leading) {
+                            ForEach(Array(children.enumerated()), id: \.offset) { child in
+                                NodeView(node: child.element, context: context)
+                                    .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
+                                    .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
+                            }
+                        }
+                        .frame(width: innerWidth)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .hidden()
+                        .allowsHitTesting(false)
+                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
+                            model.reportWidgetMaxContentHeight(ceil(h + pad * 2), of: slot.id)
+                        }
+                    } else {
+                        Color.clear.onAppear { model.reportWidgetMaxContentHeight(nil, of: slot.id) }
+                    }
+                }
             } else if let failure {
                 NodeView(node: ViewNode(.empty, [
                     "icon": "exclamationmark.triangle.fill",
@@ -336,10 +469,9 @@ struct WidgetCardView: View, Equatable {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(pad)
     }
 
-    private func configureContent(context: RenderContext, pad: Double) -> some View {
+    private func configureContent(context: RenderContext, pad: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: context.metrics.unit * 1.5) {
                 Image(systemName: slot.icon)
@@ -389,8 +521,34 @@ struct WidgetCardView: View, Equatable {
 
     @ViewBuilder
     private func hoverUtilityPill(context: RenderContext) -> some View {
-        let showPill = isHovered && !isResizingThis && !isConfiguring
+        let showPill = isHovered && !isResizingThis && !isDraggingThis && !isConfiguring
         HStack(spacing: 3) {
+            if !isPeek {
+                // Dedicated drag grip to reorder or stack widgets vertically/horizontally on the shelf.
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(context.secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Circle())
+                    .onHover { hovering in
+                        if hovering { NSCursor.openHand.push() } else if !isGripDragging { NSCursor.pop() }
+                    }
+                    .highPriorityGesture(
+                        DragGesture(minimumDistance: 3, coordinateSpace: .named(barSpace))
+                            .onChanged { value in
+                                if !isGripDragging {
+                                    isGripDragging = true
+                                    model.beginDraggingWidget(slot.id, grabbedAt: value.startLocation)
+                                }
+                                model.updateDraggingWidget(to: value.location)
+                            }
+                            .onEnded { _ in
+                                isGripDragging = false
+                                model.endDraggingWidget()
+                            }
+                    )
+                    .help("Drag to reorder or stack (or ⌘-drag card)")
+            }
             if slot.hasConfigure {
                 pillButton("slider.horizontal.3", "Configure \(slot.title)", context: context, isActive: isConfiguring) {
                     model.onToggleConfigure(slot.id, !isConfiguring, isPeek)
@@ -440,29 +598,33 @@ struct WidgetCardView: View, Equatable {
 
     @ViewBuilder
     private var widgetContextMenu: some View {
-        if slot.supportsResize {
-            ForEach(slot.supportedSizes, id: \.self) { tier in
-                Button {
-                    if isPeek && tier.isWidget {
-                        model.onResizePreview(slot.id, tier, true)
-                    } else {
-                        model.onSlotSecondaryAction(slot, "size:\(tier.rawValue)")
+        if model.maxContentHeight(of: slot.id) != nil {
+            Button("Fit Height to Content") {
+                model.fitWidgetHeightToContent(slot.id, isPeek: isPeek)
+            }
+        }
+        if !isPeek {
+            if columnCount > 1 || stackCount > 1 {
+                Menu("Placement & Stacking") {
+                    if stackCount > 1 {
+                        Button("Move Up in Stack") { model.onWidgetCommand(slot.id, "stack-up") }
+                        Button("Move Down in Stack") { model.onWidgetCommand(slot.id, "stack-down") }
+                        Button("Move to Own Column") { model.onWidgetCommand(slot.id, "unstack") }
+                        Divider()
                     }
-                } label: {
-                    if tier == size {
-                        Label(tier.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(tier.displayName)
+                    if columnCount > 1 {
+                        Button("Stack with Adjacent Column") { model.onWidgetCommand(slot.id, "stack-next") }
+                        Button("Stack with Previous Column") { model.onWidgetCommand(slot.id, "stack-prev") }
                     }
                 }
             }
-            Divider()
         }
         if slot.hasConfigure {
             Button(isConfiguring ? "Done Configuring" : "Configure Widget") {
                 model.onToggleConfigure(slot.id, !isConfiguring, isPeek)
             }
         }
+        Divider()
         if isPeek {
             Button("Keep Widget on Desktop") { model.onPanelCommand("pin-widget") }
         } else {
@@ -475,26 +637,33 @@ struct WidgetCardView: View, Equatable {
     }
 }
 
-// MARK: - Bento Shelf SwiftUI Layout
+// MARK: - Stackable Column Shelf SwiftUI Layout
 
-struct BentoWidgetSizeKey: LayoutValueKey {
-    static let defaultValue = WidgetSize.small
+struct ShelfColumnKey: LayoutValueKey {
+    static let defaultValue = 0
 }
 
-struct BentoWidgetIDKey: LayoutValueKey {
+struct ShelfWidgetIDKey: LayoutValueKey {
     static let defaultValue = ""
 }
 
-struct BentoGridLayout: Layout {
-    let flow: BentoFlow
+struct WidgetShelfLayout: Layout {
+    let shelf: WidgetShelf
+    let columnCount: Int
 
-    private func placed(_ subviews: Subviews) -> (result: BentoFlow.Placed, keys: [String]) {
-        let keys = subviews.indices.map { index -> String in
-            let id = subviews[index][BentoWidgetIDKey.self]
-            return id.isEmpty ? "slot-\(index)" : id
+    private func placed(_ subviews: Subviews) -> (result: WidgetShelf.Placed, keys: [String]) {
+        let count = max(columnCount, 1)
+        var columns = Array(repeating: [(key: String, size: CGSize)](), count: count)
+        var keys: [String] = []
+        for index in subviews.indices {
+            let id = subviews[index][ShelfWidgetIDKey.self]
+            let key = id.isEmpty ? "w-\(index)" : id
+            keys.append(key)
+            let col = min(max(subviews[index][ShelfColumnKey.self], 0), count - 1)
+            let measured = subviews[index].sizeThatFits(.unspecified)
+            columns[col].append((key: key, size: measured))
         }
-        let entries = subviews.indices.map { (key: keys[$0], size: subviews[$0][BentoWidgetSizeKey.self]) }
-        return (flow.place(entries), keys)
+        return (shelf.place(columns), keys)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -512,7 +681,7 @@ struct BentoGridLayout: Layout {
     }
 }
 
-// MARK: - Live Corner-Drag Resize Ghost & Tier Pill Overlay
+// MARK: - Live Freeform Resize Overlay (chip-to-widget preview + dimension & snap pill)
 
 struct ResizeOverlayView: View {
     @ObservedObject var drag: ResizeDragState
@@ -522,64 +691,176 @@ struct ResizeOverlayView: View {
         if let id = drag.activeSlotID, !drag.isPeek {
             let metrics = Metrics(model.theme)
             let accent = RenderContext.color(hex: model.theme.accentColor)
-            let snapSize: CGSize = drag.targetTier.isWidget
-                ? metrics.widgetSize(drag.targetTier)
-                : CGSize(width: max(drag.startRect.width, 72), height: 30)
-            let liveSize = drag.proposedSize
+            let liveSize = drag.liveSize
             let start = drag.startRect
-
             let anchorX: CGFloat = drag.corner == .bottomLeft ? start.maxX : start.minX
-            let snapOrigin = CGPoint(
-                x: drag.corner == .bottomLeft ? anchorX - snapSize.width : anchorX,
-                y: start.minY
-            )
             let liveOrigin = CGPoint(
                 x: drag.corner == .bottomLeft ? anchorX - liveSize.width : anchorX,
                 y: start.minY
             )
-            let cornerR = drag.targetTier.isWidget ? CGFloat(metrics.widgetCornerRadius) : 14
+            let cornerR = drag.collapsesToChip ? 14 : CGFloat(metrics.widgetCornerRadius)
+            let pillTint: Color = drag.collapsesToChip ? .orange : accent
 
             ZStack(alignment: .topLeading) {
-                // Target snap footprint (magnetic Bento outline)
-                RoundedRectangle(cornerRadius: cornerR, style: .continuous)
-                    .fill(accent.opacity(0.09))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: cornerR, style: .continuous)
-                            .strokeBorder(accent.opacity(0.65), style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
-                    }
-                    .frame(width: snapSize.width, height: snapSize.height)
-                    .offset(x: snapOrigin.x, y: snapOrigin.y)
-                    .animation(.spring(response: 0.26, dampingFraction: 0.78), value: drag.targetTier)
+                if drag.fromChip {
+                    RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                        .fill(pillTint.opacity(0.11))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: cornerR, style: .continuous)
+                                .strokeBorder(pillTint.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: drag.collapsesToChip ? [4, 4] : []))
+                        }
+                        .frame(width: max(liveSize.width, 40), height: max(liveSize.height, 26))
+                        .offset(x: liveOrigin.x, y: liveOrigin.y)
+                }
 
-                // Rubbery live tracking bezel
-                RoundedRectangle(cornerRadius: cornerR, style: .continuous)
-                    .strokeBorder(accent.opacity(0.35), lineWidth: 1)
-                    .frame(width: max(liveSize.width, 28), height: max(liveSize.height, 24))
-                    .offset(x: liveOrigin.x, y: liveOrigin.y)
-
-                // Tier badge pill near the dragged corner
+                // Live readout pill showing exact dimensions, zero-void ceiling, or collapse state
                 HStack(spacing: 5) {
-                    Text(drag.targetTier.displayName)
-                        .font(.system(size: 11, weight: .semibold))
-                    if drag.targetTier.isWidget {
-                        Text("\(drag.targetTier.columns)×\(drag.targetTier.rows)")
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
-                            .opacity(0.75)
+                    if drag.collapsesToChip {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.system(size: 9.5, weight: .bold))
+                        Text("Collapse to chip")
+                            .font(.system(size: 11, weight: .semibold))
+                    } else {
+                        Text("\(Int(drag.committedSize.width)) × \(Int(drag.committedSize.height))")
+                            .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        if drag.hitContentCeiling {
+                            Text("· Fit")
+                                .font(.system(size: 10, weight: .medium))
+                                .opacity(0.85)
+                        } else if drag.didSnapWidth || drag.didSnapHeight {
+                            Image(systemName: "magnet")
+                                .font(.system(size: 9.5, weight: .bold))
+                        }
                     }
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4)
-                .background(accent.gradient, in: Capsule())
-                .shadow(color: accent.opacity(0.35), radius: 8, y: 3)
+                .background(pillTint.gradient, in: Capsule())
+                .shadow(color: pillTint.opacity(0.35), radius: 8, y: 3)
                 .offset(
-                    x: (drag.corner == .bottomLeft ? snapOrigin.x + 8 : snapOrigin.x + snapSize.width - 78),
-                    y: snapOrigin.y + snapSize.height + 6
+                    x: max(4, drag.corner == .bottomLeft ? liveOrigin.x + 6 : liveOrigin.x + liveSize.width - 96),
+                    y: liveOrigin.y + liveSize.height + 6
                 )
-                .animation(.spring(response: 0.24, dampingFraction: 0.78), value: drag.targetTier)
             }
             .allowsHitTesting(false)
             .id(id)
+        }
+    }
+}
+
+// MARK: - Live Widget Shelf Drag & Stack Drop Indicator Overlay
+
+struct WidgetDragOverlayView: View {
+    @ObservedObject var drag: WidgetDragState
+    let model: BarModel
+
+    var body: some View {
+        if let id = drag.activeSlotID {
+            let accent = RenderContext.color(hex: model.theme.accentColor)
+            let metrics = Metrics(model.theme)
+            let ghostOrigin = CGPoint(
+                x: drag.pointer.x - drag.grabOffset.width,
+                y: drag.pointer.y - drag.grabOffset.height
+            )
+
+            ZStack(alignment: .topLeading) {
+                if let drop = drag.drop {
+                    dropIndicator(for: drop, moving: id, accent: accent, metrics: metrics)
+                }
+
+                // Floating translucent drag preview following the pointer
+                RoundedRectangle(cornerRadius: CGFloat(metrics.widgetCornerRadius), style: .continuous)
+                    .fill(accent.opacity(0.14))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: CGFloat(metrics.widgetCornerRadius), style: .continuous)
+                            .strokeBorder(accent.opacity(0.8), lineWidth: 1.5)
+                    }
+                    .overlay {
+                        if let slot = model.slot(id) {
+                            HStack(spacing: 6) {
+                                Image(systemName: slot.icon)
+                                Text(slot.title)
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(accent.opacity(0.9), in: Capsule())
+                        }
+                    }
+                    .frame(width: drag.cardSize.width, height: drag.cardSize.height)
+                    .scaleEffect(0.96)
+                    .shadow(color: .black.opacity(0.28), radius: 16, y: 8)
+                    .offset(x: ghostOrigin.x, y: ghostOrigin.y)
+            }
+            .allowsHitTesting(false)
+            .id(id)
+        }
+    }
+
+    @ViewBuilder
+    private func dropIndicator(for drop: WidgetShelfDrop, moving: String, accent: Color, metrics: Metrics) -> some View {
+        let remainingCols: [[CGRect]] = model.visibleWidgetColumns.compactMap { col in
+            let rects = col.filter { $0.slot.id != moving }.compactMap { model.slotFrames[$0.slot.id] }
+            return rects.isEmpty ? nil : rects
+        }
+        let gap = metrics.widgetGap
+
+        switch drop {
+        case .collapseToChip:
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.to.line")
+                    .font(.system(size: 10, weight: .bold))
+                Text("Drop to collapse to chip")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.orange.gradient, in: Capsule())
+            .shadow(color: .orange.opacity(0.4), radius: 8, y: 2)
+            .offset(x: max(12, drag.pointer.x - 80), y: max(6, model.shelfOriginInBarSpace.y - 26))
+
+        case .stack(let colIndex, let rowIndex):
+            if remainingCols.indices.contains(colIndex) {
+                let col = remainingCols[colIndex]
+                let colBounds = col.reduce(CGRect.null) { $0.union($1) }
+                let barY: CGFloat = if rowIndex <= 0 {
+                    col.first!.minY - 3
+                } else if rowIndex >= col.count {
+                    col.last!.maxY + gap / 2
+                } else {
+                    (col[rowIndex - 1].maxY + col[rowIndex].minY) / 2
+                }
+                Capsule()
+                    .fill(accent)
+                    .shadow(color: accent.opacity(0.6), radius: 6)
+                    .frame(width: max(colBounds.width, 80), height: 4)
+                    .offset(x: colBounds.minX, y: barY - 2)
+            }
+
+        case .newColumn(let colIndex):
+            if !remainingCols.isEmpty {
+                let colBounds = remainingCols.map { $0.reduce(CGRect.null) { $0.union($1) } }
+                let shelfBounds = colBounds.reduce(CGRect.null) { $0.union($1) }
+                let barX: CGFloat = {
+                    if colIndex <= 0 {
+                        return model.settings.anchor == .right ? shelfBounds.maxX + 4 : shelfBounds.minX - 8
+                    } else if colIndex >= colBounds.count {
+                        return model.settings.anchor == .right ? shelfBounds.minX - 8 : shelfBounds.maxX + 4
+                    } else {
+                        let a = colBounds[colIndex - 1]
+                        let b = colBounds[colIndex]
+                        return (min(a.maxX, b.maxX) + max(a.minX, b.minX)) / 2 - 2
+                    }
+                }()
+                Capsule()
+                    .fill(accent)
+                    .shadow(color: accent.opacity(0.6), radius: 6)
+                    .frame(width: 4, height: max(shelfBounds.height, 100))
+                    .offset(x: barX, y: shelfBounds.minY)
+            }
         }
     }
 }

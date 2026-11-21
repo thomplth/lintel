@@ -23,12 +23,25 @@ extension ViewNode {
         }
     }
 
+    /// True if this subtree contains a block that meaningfully stretches to fill arbitrary height (chart, web, mini-app, image).
+    /// Widgets WITHOUT unbounded flex clamp strictly to their natural content height (zero blank void).
+    var hasUnboundedFlex: Bool {
+        switch component {
+        case .chart, .app, .web, .image:
+            return string("height") == nil || string("height") == "fill"
+        case .column, .section, .split:
+            return children.contains(where: \.hasUnboundedFlex)
+        default:
+            return false
+        }
+    }
+
     var containsFlexibleBlock: Bool {
         switch component {
         case .chart, .list, .app, .web, .image, .split, .spacer:
             return true
         case .section, .column:
-            return children.contains(where: \.containsFlexibleBlock)
+            return bool("elastic") || children.contains(where: \.containsFlexibleBlock)
         default:
             return false
         }
@@ -37,19 +50,21 @@ extension ViewNode {
     var layoutFlex: BlockFlex {
         switch component {
         case .chart:
-            return .flexible(minHeight: 46, capsAtIdeal: false)
+            return .flexible(minHeight: 44, capsAtIdeal: false)
         case .app, .web, .image:
             return .flexible(minHeight: 72, capsAtIdeal: false)
         case .list:
-            return .flexible(minHeight: 36, capsAtIdeal: true)
+            return .flexible(minHeight: 34, capsAtIdeal: true)
         case .split:
-            return .flexible(minHeight: 54, capsAtIdeal: false)
+            return .flexible(minHeight: 54, capsAtIdeal: !hasUnboundedFlex)
         case .spacer:
-            return .flexible(minHeight: 0, capsAtIdeal: false)
+            return .flexible(minHeight: 0, capsAtIdeal: true)
         case .section, .column:
+            if bool("elastic") {
+                return .flexible(minHeight: 44, capsAtIdeal: !hasUnboundedFlex)
+            }
             if containsFlexibleBlock {
-                let capsAtIdeal = !descendants.contains { [.chart, .app, .web, .split, .spacer].contains($0.component) }
-                return .flexible(minHeight: 54, capsAtIdeal: capsAtIdeal)
+                return .flexible(minHeight: 52, capsAtIdeal: !hasUnboundedFlex)
             }
             return .fixed
         default:
@@ -58,8 +73,58 @@ extension ViewNode {
     }
 }
 
-/// Zero-scroll vertical stack for widgets: fixed blocks take natural height, flexible blocks (charts, lists, mini-apps,
-/// splits) share the remaining space, and lower-priority sections yield cleanly instead of overflowing.
+// MARK: - Zero-Void Card Wrapper Layout
+
+struct NaturalContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        value = nextValue() ?? value
+    }
+}
+
+/// Enforces the zero-void invariant:
+/// - If `hasUnboundedFlex` is true (chart/web/app/image), fills `requestedHeight`.
+/// - If finite, clamps the card's actual height to `min(requestedHeight, max(naturalHeight, minHeight))` so empty
+///   blank space can never appear beneath finite content.
+struct ZeroVoidCardLayout: Layout {
+    let requestedWidth: CGFloat
+    let requestedHeight: CGFloat
+    let minHeight: CGFloat
+    let hasUnboundedFlex: Bool
+    let padding: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let content = subviews.first else {
+            return CGSize(width: requestedWidth, height: requestedHeight)
+        }
+        let innerW = max(requestedWidth - padding * 2, 40)
+        if hasUnboundedFlex {
+            return CGSize(width: requestedWidth, height: max(requestedHeight, minHeight))
+        }
+        let maxInnerH = max(requestedHeight - padding * 2, 20)
+        // Ask the content for its exact discrete fitted height within `maxInnerH` so even sub-row remainders
+        // between whole list items or elastic sections never leave blank void at the bottom of the card.
+        let fittedInnerH = content.sizeThatFits(ProposedViewSize(width: innerW, height: maxInnerH)).height
+        let fittedCardH = ceil(fittedInnerH + padding * 2)
+        return CGSize(width: requestedWidth, height: max(min(requestedHeight, fittedCardH), 48))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let content = subviews.first else { return }
+        let innerW = max(bounds.width - padding * 2, 40)
+        let innerH = max(bounds.height - padding * 2, 20)
+        content.place(
+            at: CGPoint(x: bounds.minX + padding, y: bounds.minY + padding),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: innerW, height: innerH)
+        )
+    }
+}
+
+// MARK: - Zero-Scroll Adaptive Vertical Stack
+
+/// Zero-scroll vertical stack for freeform widgets: fixed blocks take natural height, elastic collections & lists
+/// compress row-by-row first, flexible charts/apps absorb remaining height, and lower-priority sections yield cleanly.
 struct AdaptiveStackLayout: Layout {
     var spacing: CGFloat
     var alignment: HorizontalAlignment
@@ -75,7 +140,7 @@ struct AdaptiveStackLayout: Layout {
         guard count > 0 else { return Plan(visible: [], heights: [], totalHeight: 0) }
         let width = proposal.width
 
-        // Unbounded vertical proposal: lay out naturally.
+        // Unbounded vertical proposal: measure true natural height (used for zero-void ceiling!).
         guard let maxHeight = proposal.height, maxHeight.isFinite else {
             let heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
             let total = heights.reduce(0, +) + spacing * CGFloat(max(count - 1, 0))
@@ -86,24 +151,25 @@ struct AdaptiveStackLayout: Layout {
         let priorities = subviews.map { $0[BlockPriorityKey.self] }
         let flexes = subviews.map { $0[BlockFlexKey.self] }
 
-        func measureBase(_ index: Int) -> CGFloat {
+        let ideals: [CGFloat] = (0..<count).map { index in
             switch flexes[index] {
             case .fixed:
                 return subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-            case .flexible(let minH, let capsAtIdeal):
-                if capsAtIdeal {
-                    let ideal = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-                    return min(minH, ideal)
-                }
-                return minH
+            case .flexible(_, let caps):
+                return caps ? subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height : .greatestFiniteMagnitude
             }
         }
 
-        let bases = (0..<count).map(measureBase)
-        let ideals = (0..<count).map { index -> CGFloat in
+        let bases: [CGFloat] = (0..<count).map { index in
             switch flexes[index] {
-            case .fixed: return bases[index]
-            case .flexible(_, let caps): return caps ? subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height : .greatestFiniteMagnitude
+            case .fixed:
+                return ideals[index]
+            case .flexible(let minH, let caps):
+                // Measure the subview's true compressed minimum height at this width (e.g. a nested column or section
+                // holding fixed stats + a chart needs the sum of its essential children, not a hardcoded 52pt floor!).
+                let compressed = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: 0)).height
+                let floor = max(minH, compressed)
+                return caps ? min(floor, ideals[index]) : floor
             }
         }
 
@@ -113,10 +179,17 @@ struct AdaptiveStackLayout: Layout {
             return active.reduce(0) { $0 + bases[$1] } + spacing * CGFloat(active.count - 1)
         }
 
-        // Drop detail (2) then supporting (1) blocks if base requirements exceed the widget height.
+        // Drop detail (2), then supporting (1), then trailing overflow essential blocks (keeping at least the first
+        // essential block) so a half-clipped orphan header can never peek at the bottom edge of a tight card.
         for dropLevel in [2, 1] {
             if baseTotal() <= maxHeight + 0.5 { break }
             for index in (0..<count).reversed() where visible[index] && priorities[index] >= dropLevel {
+                visible[index] = false
+                if baseTotal() <= maxHeight + 0.5 { break }
+            }
+        }
+        if maxHeight > 0.5 && baseTotal() > maxHeight + 0.5 {
+            for index in (1..<count).reversed() where visible[index] {
                 visible[index] = false
                 if baseTotal() <= maxHeight + 0.5 { break }
             }
@@ -129,18 +202,14 @@ struct AdaptiveStackLayout: Layout {
         var fixedUsed: CGFloat = spacing * CGFloat(active.count - 1)
         var flexIndices: [Int] = []
         for index in active {
-            switch flexes[index] {
-            case .fixed:
-                heights[index] = bases[index]
-                fixedUsed += bases[index]
-            case .flexible:
-                heights[index] = bases[index]
-                fixedUsed += bases[index]
+            heights[index] = bases[index]
+            fixedUsed += bases[index]
+            if case .flexible = flexes[index] {
                 flexIndices.append(index)
             }
         }
 
-        // Distribute remaining height across flexible blocks; blocks that cap at ideal (like short lists) give surplus to charts/apps.
+        // Distribute remaining height across flexible blocks; blocks that cap at ideal hand surplus to stretchables.
         var surplus = max(0, maxHeight - fixedUsed)
         var remainingFlex = flexIndices
         while surplus > 0.5 && !remainingFlex.isEmpty {
@@ -162,14 +231,46 @@ struct AdaptiveStackLayout: Layout {
             remainingFlex = nextRound
         }
 
+        // Re-measure capped flexible blocks at their granted budget so lists/elastic collections snap to exact whole
+        // entries, then redistribute any reclaimed sub-row surplus to sibling flexible blocks that can still grow.
+        var reclaimed: CGFloat = 0
+        var snapped = Set<Int>()
+        for index in flexIndices {
+            if case .flexible(_, let caps) = flexes[index], caps {
+                let fitted = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: heights[index])).height
+                if fitted < heights[index] - 0.5 {
+                    reclaimed += heights[index] - fitted
+                    heights[index] = fitted
+                    snapped.insert(index)
+                }
+            }
+        }
+        if reclaimed > 1 {
+            let growable = flexIndices.filter { !snapped.contains($0) && ideals[$0] - heights[$0] > 0.5 }
+            if !growable.isEmpty {
+                let extra = reclaimed / CGFloat(growable.count)
+                for index in growable {
+                    let grant = min(extra, ideals[index] - heights[index])
+                    let candidate = heights[index] + grant
+                    if case .flexible(_, let caps) = flexes[index], caps {
+                        heights[index] = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: candidate)).height
+                    } else {
+                        heights[index] = candidate
+                    }
+                }
+            }
+        }
+
+        // Measure true minimum or natural height cleanly; when `proposal.height == 0` we return the minimum
+        // height required for the essential items so parent stacks never allocate too little space and overlap.
         let total = active.reduce(0) { $0 + heights[$1] } + spacing * CGFloat(active.count - 1)
-        return Plan(visible: visible, heights: heights, totalHeight: min(total, maxHeight))
+        return Plan(visible: visible, heights: heights, totalHeight: maxHeight <= 0.5 ? total : min(total, maxHeight))
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
         let computed = plan(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
-        return CGSize(width: width, height: proposal.height ?? computed.totalHeight)
+        return CGSize(width: width, height: computed.totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -196,11 +297,20 @@ struct AdaptiveStackLayout: Layout {
     }
 }
 
-/// Proportional multi-column horizontal layout for wide and large widgets.
+// MARK: - Responsive Auto-Stacking Split Layout
+
+/// Lays 2 to 3 panes side by side when wide, and automatically stacks them vertically when narrowed into a sidebar.
 struct SplitLayout: Layout {
     var weights: [Double]
     var spacing: CGFloat
     var alignment: VerticalAlignment
+    var stackThreshold: CGFloat
+
+    private func shouldStack(width: CGFloat?, count: Int) -> Bool {
+        guard count > 1, let width else { return false }
+        let threshold = count >= 3 ? stackThreshold * 1.35 : stackThreshold
+        return width < threshold
+    }
 
     private func normalizedWeights(count: Int) -> [CGFloat] {
         guard count > 0 else { return [] }
@@ -214,6 +324,9 @@ struct SplitLayout: Layout {
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard !subviews.isEmpty else { return .zero }
+        if shouldStack(width: proposal.width, count: subviews.count) {
+            return AdaptiveStackLayout(spacing: spacing, alignment: .leading).sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
+        }
         let totalGap = spacing * CGFloat(max(subviews.count - 1, 0))
         let width = proposal.width ?? (subviews.map { $0.sizeThatFits(.unspecified).width }.reduce(0, +) + totalGap)
         let fractions = normalizedWeights(count: subviews.count)
@@ -221,11 +334,15 @@ struct SplitLayout: Layout {
         let maxHeight = subviews.indices.map { index in
             subviews[index].sizeThatFits(ProposedViewSize(width: contentWidth * fractions[index], height: proposal.height)).height
         }.max() ?? 0
-        return CGSize(width: width, height: proposal.height ?? maxHeight)
+        return CGSize(width: width, height: maxHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard !subviews.isEmpty else { return }
+        if shouldStack(width: bounds.width, count: subviews.count) {
+            AdaptiveStackLayout(spacing: spacing, alignment: .leading).placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
+            return
+        }
         let totalGap = spacing * CGFloat(max(subviews.count - 1, 0))
         let contentWidth = max(0, bounds.width - totalGap)
         let fractions = normalizedWeights(count: subviews.count)
@@ -245,12 +362,176 @@ struct SplitLayout: Layout {
     }
 }
 
-/// Elastic zero-scroll list: fits as many whole item() rows as the widget height allows and shows "+N more" cleanly.
+// MARK: - Responsive Auto-Reflowing Grid
+
+/// Equal-width grid that automatically reduces its column count when narrowed so stat tiles & buttons never crush.
+struct AdaptiveGridLayout: Layout {
+    var maxColumns: Int
+    var minCellWidth: CGFloat
+    var spacing: CGFloat
+    var centerCells: Bool = false
+
+    private func columnCount(for width: CGFloat) -> Int {
+        let cap = max(maxColumns, 1)
+        guard width.isFinite, width > 0 else { return cap }
+        let fit = Int(floor((width + spacing) / max(minCellWidth + spacing, 1)))
+        return max(1, min(cap, fit))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let width = proposal.width ?? CGFloat(maxColumns) * minCellWidth + spacing * CGFloat(max(maxColumns - 1, 0))
+        let cols = columnCount(for: width)
+        let cellW = max(1, (width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+        var totalHeight: CGFloat = 0
+        var rowStart = 0
+        while rowStart < subviews.count {
+            let rowEnd = min(rowStart + cols, subviews.count)
+            let rowH = (rowStart..<rowEnd).map { subviews[$0].sizeThatFits(ProposedViewSize(width: cellW, height: nil)).height }.max() ?? 0
+            if rowStart > 0 { totalHeight += spacing }
+            totalHeight += rowH
+            rowStart = rowEnd
+        }
+        return CGSize(width: width, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard !subviews.isEmpty else { return }
+        let cols = columnCount(for: bounds.width)
+        let cellW = max(1, (bounds.width - spacing * CGFloat(cols - 1)) / CGFloat(cols))
+        var y = bounds.minY
+        var rowStart = 0
+        while rowStart < subviews.count {
+            let rowEnd = min(rowStart + cols, subviews.count)
+            let rowH = (rowStart..<rowEnd).map { subviews[$0].sizeThatFits(ProposedViewSize(width: cellW, height: nil)).height }.max() ?? 0
+            if rowStart > 0 { y += spacing }
+            for col in 0..<(rowEnd - rowStart) {
+                let x = bounds.minX + CGFloat(col) * (cellW + spacing)
+                let sub = subviews[rowStart + col]
+                if centerCells {
+                    let measured = sub.sizeThatFits(ProposedViewSize(width: cellW, height: rowH))
+                    let cx = x + max(0, (cellW - measured.width) / 2)
+                    let cy = y + max(0, (rowH - measured.height) / 2)
+                    sub.place(at: CGPoint(x: cx, y: cy), anchor: .topLeading, proposal: ProposedViewSize(width: cellW, height: rowH))
+                } else {
+                    sub.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(width: cellW, height: rowH))
+                }
+            }
+            y += rowH
+            rowStart = rowEnd
+        }
+    }
+}
+
+// MARK: - Elastic General Collection (for `section(..., { elastic: true })` and `column(..., { elastic: true })`)
+
+/// Renders as many complete child blocks (meters, keyValues, account sections, etc.) as fit in the allocated height
+/// and cleanly appends a `+N more` caption row instead of dropping the whole section or leaving blank voids.
+struct AdaptiveCollectionView: View {
+    let nodes: [ViewNode]
+    let spacing: CGFloat
+    let context: RenderContext
+    @State private var hiddenCount = 0
+
+    private var footerHeight: CGFloat {
+        CGFloat(context.metrics.fontSize(role: "caption") + context.metrics.unit * 1.5)
+    }
+
+    var body: some View {
+        ElasticItemsLayout(itemCount: nodes.count, spacing: spacing, footerHeight: footerHeight, onHiddenCount: { count in
+            if count != hiddenCount {
+                DispatchQueue.main.async { hiddenCount = count }
+            }
+        }) {
+            ForEach(Array(nodes.enumerated()), id: \.offset) { entry in
+                NodeView(node: entry.element, context: context)
+            }
+            HStack(spacing: context.metrics.unit) {
+                Text(hiddenCount > 0 ? "+\(hiddenCount) more" : "")
+                    .font(context.font(role: "caption", weight: "medium", mono: true))
+                    .foregroundStyle(context.tertiary)
+                Spacer(minLength: 0)
+            }
+            .frame(height: footerHeight)
+        }
+    }
+}
+
+private struct ElasticItemsLayout: Layout {
+    let itemCount: Int
+    let spacing: CGFloat
+    let footerHeight: CGFloat
+    let onHiddenCount: (Int) -> Void
+
+    private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], fitted: Int, totalHeight: CGFloat) {
+        let count = min(itemCount, max(0, subviews.count - 1))
+        guard count > 0 else { return ([], 0, 0) }
+        let width = proposal.width
+        let heights = (0..<count).map { subviews[$0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        let sumAll = heights.reduce(0, +) + spacing * CGFloat(max(count - 1, 0))
+
+        guard let maxH = proposal.height, maxH.isFinite, sumAll > maxH + 0.5 else {
+            return (heights, count, sumAll)
+        }
+
+        let budget = max(0, maxH - footerHeight - spacing)
+        var used: CGFloat = 0
+        var fitted = 0
+        for height in heights {
+            let next = used + (fitted > 0 ? spacing : 0) + height
+            if next <= budget + 0.5 || fitted == 0 {
+                used = next
+                fitted += 1
+            } else {
+                break
+            }
+        }
+        let showMore = fitted < count
+        let total = used + (showMore ? spacing + footerHeight : 0)
+        return (heights, fitted, maxH <= 0.5 ? total : min(total, maxH))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? subviews.prefix(itemCount).map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let result = fit(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
+        return CGSize(width: width, height: result.totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let count = min(itemCount, max(0, subviews.count - 1))
+        let result = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+        let hidden = max(0, count - result.fitted)
+        onHiddenCount(hidden)
+        var y = bounds.minY
+        for index in 0..<count {
+            if index < result.fitted {
+                if index > 0 { y += spacing }
+                let h = result.heights[index]
+                subviews[index].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: h))
+                y += h
+            } else {
+                subviews[index].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+            }
+        }
+        if subviews.count > count {
+            if hidden > 0 {
+                if result.fitted > 0 { y += spacing }
+                subviews[count].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
+            } else {
+                subviews[count].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+            }
+        }
+    }
+}
+
+// MARK: - Elastic Zero-Scroll List
+
+/// Elastic zero-scroll list: fits as many whole item() rows as the widget height allows, auto-compacts subtitles when
+/// tight, and shows "+N more" cleanly instead of scrolling or clipping.
 struct AdaptiveListView: View {
     let node: ViewNode
     let context: RenderContext
-    @State private var containerHeight: CGFloat = 0
-    @State private var measuredRowHeight: CGFloat = 0
+    @State private var hiddenCount = 0
 
     private var showsSummary: Bool {
         node.string("overflow") != "none"
@@ -264,19 +545,13 @@ struct AdaptiveListView: View {
         CGFloat(context.metrics.fontSize(role: "caption") + context.metrics.unit * 2.5)
     }
 
-    private var hiddenCount: Int {
-        let total = node.children.count
-        guard total > 0, measuredRowHeight > 1, containerHeight > 1 else { return 0 }
-        let fitted = Self.fitCount(
-            total: total, availableHeight: containerHeight,
-            rowHeight: measuredRowHeight, showsFooter: showsSummary, footerHeight: footerHeight
-        )
-        return max(0, total - fitted)
-    }
-
     var body: some View {
         let items = node.children
-        AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary, footerHeight: footerHeight) {
+        AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary, footerHeight: footerHeight, onHiddenCount: { count in
+            if count != hiddenCount {
+                DispatchQueue.main.async { hiddenCount = count }
+            }
+        }) {
             ForEach(Array(items.enumerated()), id: \.offset) { entry in
                 VStack(spacing: 0) {
                     if entry.offset > 0 {
@@ -284,14 +559,9 @@ struct AdaptiveListView: View {
                     }
                     AdaptiveItemRow(node: entry.element, context: context, compact: isCompact)
                 }
-                .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
-                    if entry.offset == 0 && h > 1 && abs(h - measuredRowHeight) > 0.5 {
-                        measuredRowHeight = h
-                    }
-                }
             }
             HStack(spacing: context.metrics.unit) {
-                Text(hiddenCount > 0 ? "+\(hiddenCount) more" : "More")
+                Text(hiddenCount > 0 ? "+\(hiddenCount) more" : "")
                     .font(context.font(role: "caption", weight: "medium", mono: true))
                     .foregroundStyle(context.tertiary)
                 Spacer(minLength: 0)
@@ -302,20 +572,8 @@ struct AdaptiveListView: View {
                 Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
             }
         }
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
-            if abs(h - containerHeight) > 0.5 { containerHeight = h }
-        }
         .background(context.fill, in: context.tileShape)
         .clipShape(context.tileShape)
-    }
-
-    static func fitCount(total: Int, availableHeight: CGFloat, rowHeight: CGFloat, showsFooter: Bool, footerHeight: CGFloat) -> Int {
-        guard total > 0, rowHeight > 1, availableHeight > 1 else { return total }
-        let allFit = Int(floor((availableHeight + 1) / rowHeight))
-        if allFit >= total { return total }
-        guard showsFooter else { return max(1, allFit) }
-        let withFooter = Int(floor((availableHeight - footerHeight + 1) / rowHeight))
-        return max(1, min(total - 1, withFooter))
     }
 }
 
@@ -339,6 +597,7 @@ private struct AdaptiveListLayout: Layout {
     let itemCount: Int
     let showsFooter: Bool
     let footerHeight: CGFloat
+    let onHiddenCount: (Int) -> Void
 
     private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], fitted: Int, totalHeight: CGFloat) {
         let rowCount = min(itemCount, max(0, subviews.count - 1))
@@ -364,7 +623,7 @@ private struct AdaptiveListLayout: Layout {
         }
         let showMore = showsFooter && fitted < rowCount
         let total = used + (showMore ? footerHeight : 0)
-        return (rowHeights, fitted, min(total, maxH))
+        return (rowHeights, fitted, maxH <= 0.5 ? total : min(total, maxH))
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -376,6 +635,8 @@ private struct AdaptiveListLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let rowCount = min(itemCount, max(0, subviews.count - 1))
         let result = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+        let hidden = max(0, rowCount - result.fitted)
+        onHiddenCount(hidden)
         var y = bounds.minY
         for index in 0..<rowCount {
             if index < result.fitted {
@@ -387,7 +648,7 @@ private struct AdaptiveListLayout: Layout {
             }
         }
         if subviews.count > rowCount {
-            let showMore = showsFooter && result.fitted < rowCount
+            let showMore = showsFooter && hidden > 0
             if showMore {
                 subviews[rowCount].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
             } else {

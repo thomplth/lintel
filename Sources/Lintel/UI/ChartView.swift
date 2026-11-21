@@ -4,6 +4,7 @@ import SwiftUI
 struct ChartView: View {
     let node: ViewNode
     let context: RenderContext
+    @State private var measuredHeight: CGFloat = 120
 
     private var palette: [Color] {
         [context.accent, .orange, .green, .purple]
@@ -20,10 +21,12 @@ struct ChartView: View {
         let heightToken = node.string("height")
         let fillsWidget = context.isInWidget && (heightToken == nil || heightToken == "fill")
         let fixedHeight = CGFloat(context.metrics.blockHeight(heightToken))
-        let minH: CGFloat = fillsWidget ? 40 : fixedHeight
+        let minH: CGFloat = fillsWidget ? 38 : fixedHeight
         let maxH: CGFloat = fillsWidget ? .infinity : fixedHeight
+        let showLegend = series.contains(where: { !$0.label.isEmpty }) && measuredHeight >= 56
+        let showLabels = !labels.isEmpty && !context.isShortWidget && measuredHeight >= 76
         VStack(alignment: .leading, spacing: context.metrics.unit) {
-            if series.contains(where: { !$0.label.isEmpty }) {
+            if showLegend {
                 HStack(spacing: context.metrics.unit * 2.5) {
                     ForEach(Array(series.enumerated()), id: \.offset) { entry in
                         HStack(spacing: context.metrics.unit) {
@@ -42,7 +45,7 @@ struct ChartView: View {
                 Canvas { canvas, size in draw(series, kind: kind, in: &canvas, size: size) }
                     .frame(maxWidth: .infinity, minHeight: minH, maxHeight: maxH)
             }
-            if !labels.isEmpty && !context.isCompactWidget {
+            if showLabels {
                 HStack {
                     Text(labels.first ?? "")
                     Spacer()
@@ -55,6 +58,9 @@ struct ChartView: View {
                 .font(context.font(role: "caption"))
                 .foregroundStyle(context.tertiary)
             }
+        }
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
+            if abs(h - measuredHeight) > 1 { measuredHeight = h }
         }
     }
 

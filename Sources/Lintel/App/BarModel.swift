@@ -21,13 +21,10 @@ struct Slot: Identifiable, Equatable {
     var image: NSImage?
     var failure: String?
     var needsApproval = false
-    var hasPanel = false
+    var hasWidget = false
     var hasConfigure = false
-    var panelWidth = "medium"
-    var supportedSizes: [WidgetSize] = [.chip]
-    var defaultWidgetSize: WidgetSize?
+    var defaultShape: WidgetShape = .card
     var widgetNode: ViewNode?
-    var widgetSize: WidgetSize = .chip
     var configureNode: ViewNode?
     var isConfiguring = false
     var permissions: [String] = []
@@ -35,12 +32,12 @@ struct Slot: Identifiable, Equatable {
     var isRaised = false
 
     var supportsResize: Bool {
-        kind == .module && supportedSizes.contains(where: \.isWidget) && !needsApproval && failure == nil
+        kind == .module && hasWidget && !needsApproval && failure == nil
     }
 
     var isClickable: Bool {
         switch kind {
-        case .module: hasPanel || failure != nil || needsApproval
+        case .module: hasWidget || failure != nil || needsApproval
         case .menuBarItem, .assistant: true
         case .pinDivider: false
         }
@@ -63,7 +60,7 @@ struct PanelState: Equatable {
 
     var slotID: String
     var content: Content
-    var widgetSize: WidgetSize = .medium
+    var widgetBox: WidgetBox = WidgetBox(width: 312, height: 268)
     var node: ViewNode?
     var configureNode: ViewNode?
     var isConfiguring = false
@@ -72,15 +69,20 @@ struct PanelState: Equatable {
     var isPinnedOpen = false
 }
 
-/// Live corner-drag resize state kept outside BarModel so 120Hz drag ticks never redraw unrelated chips or widgets.
+/// Live freeform resize state kept outside BarModel so 120Hz drag ticks never redraw unrelated chips or widgets.
 @MainActor
 final class ResizeDragState: ObservableObject {
     @Published var activeSlotID: String?
     @Published var isPeek = false
-    @Published var startTier: WidgetSize = .chip
-    @Published var targetTier: WidgetSize = .chip
+    @Published var fromChip = false
+    @Published var handle: ResizeHandle = .corner(.bottomLeft)
     @Published var startRect: CGRect = .zero
-    @Published var proposedSize: CGSize = .zero
+    @Published var liveSize: CGSize = .zero
+    @Published var committedSize: CGSize = .zero
+    @Published var collapsesToChip = false
+    @Published var hitContentCeiling = false
+    @Published var didSnapWidth = false
+    @Published var didSnapHeight = false
     @Published var corner: ResizeCorner = .bottomLeft
 
     var isActive: Bool { activeSlotID != nil }
@@ -88,10 +90,34 @@ final class ResizeDragState: ObservableObject {
     func reset() {
         activeSlotID = nil
         isPeek = false
-        startTier = .chip
-        targetTier = .chip
+        fromChip = false
         startRect = .zero
-        proposedSize = .zero
+        liveSize = .zero
+        committedSize = .zero
+        collapsesToChip = false
+        hitContentCeiling = false
+        didSnapWidth = false
+        didSnapHeight = false
+    }
+}
+
+/// Live widget shelf drag-to-reorder & stacking state kept outside BarModel for 120Hz responsiveness.
+@MainActor
+final class WidgetDragState: ObservableObject {
+    @Published var activeSlotID: String?
+    @Published var grabOffset: CGSize = .zero
+    @Published var cardSize: CGSize = .zero
+    @Published var pointer: CGPoint = .zero
+    @Published var drop: WidgetShelfDrop?
+
+    var isActive: Bool { activeSlotID != nil }
+
+    func reset() {
+        activeSlotID = nil
+        grabOffset = .zero
+        cardSize = .zero
+        pointer = .zero
+        drop = nil
     }
 }
 
@@ -165,10 +191,15 @@ final class BarModel: ObservableObject {
     /// Kept outside the model's own changes: the pointer moves every frame of a drag, and every view observing the
     /// model would otherwise be rebuilt each time.
     let carried = CarriedPointer()
-    /// Live corner-drag resize state, likewise kept outside BarModel to avoid redrawing unrelated modules mid-drag.
+    /// Live freeform resize state, likewise kept outside BarModel to avoid redrawing unrelated modules mid-drag.
     let resizeDrag = ResizeDragState()
     @Published var resizingSlotID: String? {
         didSet { if (oldValue == nil) != (resizingSlotID == nil) { onResizingChanged() } }
+    }
+    /// Live widget shelf drag-to-reorder & stacking state kept outside BarModel.
+    let widgetDrag = WidgetDragState()
+    @Published var draggingWidgetID: String? {
+        didSet { if (oldValue == nil) != (draggingWidgetID == nil) { onResizingChanged() } }
     }
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
     @Published var showsPinDividers = false
@@ -205,17 +236,23 @@ final class BarModel: ObservableObject {
 
     private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
     private var reportedWidgetFrames: [String: CGRect] = [:]
+    /// Per-widget finite natural max height (nil or non-finite when the widget contains an unbounded flexible view like chart/app/web).
+    private var reportedMaxContentHeights: [String: CGFloat] = [:]
+    /// The top Y of the widget shelf in `barSpace`, used to convert drag points and detect collapse-to-chip drops.
+    var shelfOriginInBarSpace: CGPoint = .zero
+    /// Screen size for capping freeform widget growth.
+    var maxWidgetScreenSize = CGSize(width: 1440, height: 900)
     /// Where the menu bar row's top-left corner lies in the bar window's top-left coordinates.
     var menuBarRowOffset = CGSize.zero
     /// The menu bar row's strip in the bar window's top-left coordinates, which takes drops even while empty.
     var menuBarRowBand = CGRect.null
 
-    /// Chip frames in the bar window's top-left coordinates, including chips drawn in the menu bar row.
+    /// Chip and widget frames in the bar window's top-left coordinates, including chips drawn in the menu bar row.
     var slotFrames: [String: CGRect] {
         var frames = reportedFrames.mapValues { reported in
             reported.isInMenuBar ? reported.frame.offsetBy(dx: menuBarRowOffset.width, dy: menuBarRowOffset.height) : reported.frame
         }
-        for (id, rect) in reportedWidgetFrames where layout.size(of: id).isWidget {
+        for (id, rect) in reportedWidgetFrames where layout.isWidget(id) {
             frames[id] = rect
         }
         return frames
@@ -227,6 +264,18 @@ final class BarModel: ObservableObject {
 
     func reportWidget(frame: CGRect, of id: String) {
         reportedWidgetFrames[id] = frame
+    }
+
+    func reportWidgetMaxContentHeight(_ height: CGFloat?, of id: String) {
+        if let height, height.isFinite, height > 0 {
+            reportedMaxContentHeights[id] = height
+        } else {
+            reportedMaxContentHeights[id] = nil
+        }
+    }
+
+    func maxContentHeight(of id: String) -> CGFloat? {
+        reportedMaxContentHeights[id]
     }
 
     /// Visible chip and widget frames in the bar window's top-left coordinates, used for precise click-through hit testing.
@@ -289,8 +338,10 @@ final class BarModel: ObservableObject {
     var onDragChanged: (CGSize) -> Void = { _ in }
     var onRearrange: (_ rows: [[String]], _ pins: [String: Bool], _ hiding: String?) -> Void = { _, _, _ in }
     var onRearrangingChanged: () -> Void = {}
-    var onResizeSlot: (_ id: String, _ size: WidgetSize) -> Void = { _, _ in }
-    var onResizePreview: (_ id: String, _ size: WidgetSize, _ isPeek: Bool) -> Void = { _, _, _ in }
+    var onResizeWidget: (_ id: String, _ box: WidgetBox?) -> Void = { _, _ in }
+    var onResizePeek: (_ id: String, _ box: WidgetBox) -> Void = { _, _ in }
+    var onEnsureWidgetRendered: (_ id: String) -> Void = { _ in }
+    var onMoveWidget: (_ id: String, _ drop: WidgetShelfDrop) -> Void = { _, _ in }
     var onResizingChanged: () -> Void = {}
     var onToggleConfigure: (_ id: String, _ isConfiguring: Bool, _ isPeek: Bool) -> Void = { _, _, _ in }
     var onWidgetCommand: (_ id: String, _ command: String) -> Void = { _, _ in }
@@ -435,15 +486,20 @@ final class BarModel: ObservableObject {
         return shown.rows.map { row in row.compactMap { byID[$0] ?? (PinDividers.isDivider($0) ? .pinDivider($0) : nil) } }
     }
 
-    /// Persistent desktop widgets shown on the Bento shelf below the chip rows (visible while idle too).
-    var visibleWidgets: [(slot: Slot, size: WidgetSize)] {
+    /// Persistent desktop widgets grouped into their vertical stack columns below the chip rows (visible while idle too).
+    var visibleWidgetColumns: [[(slot: Slot, box: WidgetBox)]] {
         let byID = Dictionary(slots.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return layout.arrangedWidgets(layoutItems).compactMap { entry in
-            guard let slot = byID[entry.key], slot.kind == .module, !slot.needsApproval, slot.failure == nil else { return nil }
-            let supported = slot.supportedSizes
-            let effective = supported.contains(entry.size) ? entry.size : (slot.defaultWidgetSize ?? .medium)
-            return (slot, effective)
+        return layout.arrangedWidgetColumns(layoutItems).compactMap { col in
+            let entries: [(slot: Slot, box: WidgetBox)] = col.compactMap { entry in
+                guard let slot = byID[entry.key], slot.kind == .module, !slot.needsApproval, slot.failure == nil else { return nil }
+                return (slot, entry.box)
+            }
+            return entries.isEmpty ? nil : entries
         }
+    }
+
+    var visibleWidgets: [(slot: Slot, box: WidgetBox)] {
+        visibleWidgetColumns.flatMap { $0 }
     }
 
     /// The bar's modules as the keyboard steps through them; includes both chips and desktop widgets.
@@ -456,59 +512,150 @@ final class BarModel: ObservableObject {
         })
     }
 
-    // MARK: Live Corner Resize
+    // MARK: Live Freeform Resize
 
-    func beginResizing(_ id: String, startTier: WidgetSize, startRect: CGRect, isPeek: Bool = false) {
+    func beginResizing(_ id: String, fromChip: Bool, handle: ResizeHandle, startRect: CGRect, isPeek: Bool = false) {
         let corner = WidgetResize.corner(for: settings.anchor)
         resizeDrag.activeSlotID = id
         resizeDrag.isPeek = isPeek
-        resizeDrag.startTier = startTier
-        resizeDrag.targetTier = startTier
+        resizeDrag.fromChip = fromChip
+        resizeDrag.handle = handle
         resizeDrag.startRect = startRect
-        resizeDrag.proposedSize = startRect.size
+        resizeDrag.liveSize = startRect.size
+        resizeDrag.committedSize = startRect.size
+        resizeDrag.collapsesToChip = fromChip
+        resizeDrag.hitContentCeiling = false
+        resizeDrag.didSnapWidth = false
+        resizeDrag.didSnapHeight = false
         resizeDrag.corner = corner
         resizingSlotID = id
+        if fromChip {
+            onEnsureWidgetRendered(id)
+        }
     }
 
     func updateResizing(translation: CGSize) {
-        guard let id = resizeDrag.activeSlotID, let slot = slot(id) else { return }
+        guard let id = resizeDrag.activeSlotID else { return }
         let metrics = Metrics(theme)
-        let allowed = resizeDrag.isPeek ? slot.supportedSizes.filter(\.isWidget) : slot.supportedSizes
-        guard !allowed.isEmpty else { return }
-        let raw = WidgetResize.proposedSize(from: resizeDrag.startRect.size, translation: translation, corner: resizeDrag.corner)
-        let minTier = allowed.sorted { $0.rank < $1.rank }.first ?? .chip
-        let maxTier = allowed.sorted { $0.rank < $1.rank }.last ?? .medium
-        let minDim = minTier.isWidget ? metrics.widgetSize(minTier) : CGSize(width: min(resizeDrag.startRect.width, 84), height: 28)
-        let maxDim = metrics.widgetSize(maxTier)
-        resizeDrag.proposedSize = WidgetResize.rubberySize(proposed: raw, min: minDim, max: maxDim)
+        let maxSize = metrics.maxWidgetSize(in: maxWidgetScreenSize)
+        let peers = visibleWidgets.filter { $0.slot.id != id }
+        let snapWidths = peers.map { CGFloat($0.box.width) }
+        let snapHeights = peers.map { CGFloat($0.box.height) }
+        let maxContentH = resizeDrag.fromChip ? nil : reportedMaxContentHeights[id]
 
-        let target = WidgetResize.targetSize(
-            from: resizeDrag.startTier,
+        let resolved = WidgetResize.resolve(
+            fromChip: resizeDrag.fromChip,
             startSize: resizeDrag.startRect.size,
             translation: translation,
-            corner: resizeDrag.corner,
-            allowed: allowed,
-            metrics: metrics
+            handle: resizeDrag.handle,
+            metrics: metrics,
+            maxSize: maxSize,
+            maxContentHeight: maxContentH,
+            snapWidths: resizeDrag.isPeek ? [] : snapWidths,
+            snapHeights: resizeDrag.isPeek ? [] : snapHeights
         )
-        if target != resizeDrag.targetTier {
-            resizeDrag.targetTier = target
+
+        let wasCollapsed = resizeDrag.collapsesToChip
+        let wasSnapW = resizeDrag.didSnapWidth
+        let wasSnapH = resizeDrag.didSnapHeight
+        let wasCeiling = resizeDrag.hitContentCeiling
+
+        resizeDrag.collapsesToChip = resizeDrag.isPeek ? false : resolved.collapsesToChip
+        resizeDrag.liveSize = resolved.liveSize
+        resizeDrag.committedSize = resolved.committedSize
+        resizeDrag.didSnapWidth = resolved.didSnapWidth
+        resizeDrag.didSnapHeight = resolved.didSnapHeight
+        resizeDrag.hitContentCeiling = resolved.hitContentCeiling
+
+        if resizeDrag.collapsesToChip != wasCollapsed
+            || (resolved.didSnapWidth && !wasSnapW)
+            || (resolved.didSnapHeight && !wasSnapH)
+            || (resolved.hitContentCeiling && !wasCeiling) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-            onResizePreview(id, target, resizeDrag.isPeek)
+        }
+
+        if resizeDrag.isPeek && !resizeDrag.collapsesToChip {
+            onResizePeek(id, WidgetBox(resolved.liveSize))
         }
     }
 
     func endResizing() {
         guard let id = resizeDrag.activeSlotID else { return }
-        let target = resizeDrag.targetTier
+        let collapses = resizeDrag.collapsesToChip
+        let committed = resizeDrag.committedSize
         let isPeek = resizeDrag.isPeek
         resizeDrag.reset()
         resizingSlotID = nil
+
         if isPeek {
-            if target.isWidget, panel?.slotID == id {
-                onResizePreview(id, target, true)
+            if committed.width > 1 && committed.height > 1 {
+                onResizePeek(id, WidgetBox(committed))
             }
+        } else if collapses {
+            onResizeWidget(id, nil)
         } else {
-            onResizeSlot(id, target)
+            onResizeWidget(id, WidgetBox(committed))
+        }
+    }
+
+    func fitWidgetHeightToContent(_ id: String, isPeek: Bool = false) {
+        let metrics = Metrics(theme)
+        guard let contentH = reportedMaxContentHeights[id] else { return }
+        let clampedH = max(contentH.rounded(), metrics.minWidgetSize.height)
+        if isPeek, let current = panel?.widgetBox {
+            onResizePeek(id, WidgetBox(width: current.width, height: Double(clampedH)))
+        } else if let current = layout.widgetBox(of: id) {
+            onResizeWidget(id, WidgetBox(width: current.width, height: Double(clampedH)))
+        }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+    }
+
+    // MARK: Live Widget Shelf Drag-to-Reorder & Stacking
+
+    func beginDraggingWidget(_ id: String, grabbedAt barPoint: CGPoint) {
+        guard let frame = reportedWidgetFrames[id] else { return }
+        widgetDrag.activeSlotID = id
+        widgetDrag.grabOffset = CGSize(width: barPoint.x - frame.minX, height: barPoint.y - frame.minY)
+        widgetDrag.cardSize = frame.size
+        widgetDrag.pointer = barPoint
+        widgetDrag.drop = nil
+        draggingWidgetID = id
+        NSCursor.closedHand.set()
+    }
+
+    func updateDraggingWidget(to barPoint: CGPoint) {
+        guard let id = widgetDrag.activeSlotID else { return }
+        widgetDrag.pointer = barPoint
+        let cols: [[WidgetShelfDrop.Entry]] = visibleWidgetColumns.map { col in
+            col.compactMap { entry in
+                guard let rect = reportedWidgetFrames[entry.slot.id] else { return nil }
+                return WidgetShelfDrop.Entry(key: entry.slot.id, frame: rect)
+            }
+        }
+        let collapseY = max(shelfOriginInBarSpace.y - 12, 0)
+        let resolved = WidgetShelfDrop.resolve(
+            at: barPoint,
+            columns: cols,
+            moving: id,
+            anchor: settings.anchor,
+            collapseAboveY: collapseY
+        )
+        if resolved != widgetDrag.drop {
+            widgetDrag.drop = resolved
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
+    }
+
+    func endDraggingWidget() {
+        guard let id = widgetDrag.activeSlotID else { return }
+        let drop = widgetDrag.drop
+        widgetDrag.reset()
+        draggingWidgetID = nil
+        NSCursor.arrow.set()
+        if let drop {
+            withAnimation(Self.reflow) {
+                onMoveWidget(id, drop)
+            }
         }
     }
 }

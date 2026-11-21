@@ -23,7 +23,7 @@ struct PanelView: View {
                 if usesUnifiedWidget, let slot {
                     WidgetCardView(
                         slot: slot,
-                        size: panel.widgetSize,
+                        box: panel.widgetBox,
                         node: panel.node,
                         configureNode: panel.configureNode,
                         isConfiguring: panel.isConfiguring,
@@ -34,13 +34,16 @@ struct PanelView: View {
                         isPeek: true,
                         isSelected: false,
                         isResizingThis: model.resizingSlotID == slot.id,
+                        isDraggingThis: false,
+                        columnCount: 1,
+                        stackCount: 1,
                         model: model
                     )
                     .equatable()
                     .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onSize)
                     .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .top)))
                 } else {
-                    let width = context.metrics.panelWidth(panel.content == .assistant ? "medium" : slot?.panelWidth)
+                    let width = context.metrics.panelWidth("medium")
                     let headerHeight = context.metrics.fontSize(role: "title") + context.metrics.panelPadding * 2
                     VStack(alignment: .leading, spacing: 0) {
                         header(panel, slot: slot, context: context)

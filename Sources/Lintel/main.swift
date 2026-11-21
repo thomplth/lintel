@@ -187,17 +187,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let state = parts.last ?? "idle"
             app.model.theme = parts.count == 2 ? (Theme.preset(parts[0]) ?? baseTheme) : baseTheme
             app.host.closePanel()
-            for id in Array(app.model.layout.sizes.keys) {
-                app.host.setWidgetSize(id, to: .chip)
+            for id in Array(app.model.layout.widgets.keys) {
+                app.host.setWidget(id, to: nil)
             }
-            if state.hasPrefix("widget:") {
-                let spec = String(state.dropFirst(7))
-                for entry in spec.split(separator: "+").map(String.init) {
-                    let parts = entry.split(separator: ":").map(String.init)
-                    if let id = parts.first, let size = parts.dropFirst().first.flatMap(WidgetSize.init(rawValue:)) {
-                        app.host.setWidgetSize(id, to: size)
-                    }
+            if state.hasPrefix("matrix:") {
+                let id = String(state.dropFirst(7))
+                app.host.renderWidget(id)
+                try? await Task.sleep(for: .seconds(1.2))
+                let matrixStage = Stage(model: app.model, size: CGSize(width: max(size.width, 1020), height: max(size.height, 920)), backdrop: backdrop, matrixSlotID: id)
+                try? await Task.sleep(for: .seconds(Double(option("settle") ?? "1.2") ?? 1.2))
+                let file = directory.appending(path: shot.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-") + ".png")
+                do {
+                    try await matrixStage.capture(to: file)
+                    emit(file.path)
+                } catch {
+                    emit("failed \(shot): \(ModuleFailure.describe(error))")
                 }
+                matrixStage.close()
+                continue
+            } else if state.hasPrefix("widget:") {
+                // Format: widget:col0Top:240x180/col0Bottom:240x140+col1:320x260
+                let spec = String(state.dropFirst(7))
+                var layout = app.model.layout
+                layout.widgets = [:]
+                layout.widgetColumns = []
+                for colSpec in spec.split(separator: "+").map(String.init) {
+                    var colIDs: [String] = []
+                    for itemSpec in colSpec.split(separator: "/").map(String.init) {
+                        let parts = itemSpec.split(separator: ":").map(String.init)
+                        guard let id = parts.first else { continue }
+                        let dims = (parts.dropFirst().first ?? "300x240").split(separator: "x").compactMap { Double($0) }
+                        let box = WidgetBox(width: dims.first ?? 300, height: dims.last ?? 240)
+                        layout.widgets[id] = box
+                        colIDs.append(id)
+                        app.host.ensureWidgetRendered(id)
+                    }
+                    if !colIDs.isEmpty { layout.widgetColumns.append(colIDs) }
+                }
+                app.host.update(layout)
+                for id in layout.widgets.keys { app.host.renderWidget(id) }
                 app.model.isActive = false
             } else {
                 app.model.isActive = state != "idle"

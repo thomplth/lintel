@@ -14,115 +14,51 @@ async function load(host) {
   }
 }
 
-function coreComponents() {
-  return summary.components.filter((component) => !component.group && component.name.indexOf('Visit') < 0);
-}
-
-function serviceList(components, compact) {
-  return list(components.slice(0, 12).map((component) => item(component.name, {
-    icon: component.status === 'operational' ? 'checkmark.circle.fill' : 'exclamationmark.circle.fill',
-    tone: componentTones[component.status] || 'warn',
-    value: component.status === 'operational' ? undefined : component.status.replace(/_/g, ' '),
-  })), { compact });
-}
-
-function unavailable() {
-  return [empty('wifi.slash', 'Cannot reach status', { message: failure || 'Still loading.', action: 'retry' })];
-}
-
 defineModule({
   meta: {
     id: 'service-status',
     title: 'GitHub Status',
     icon: 'checkmark.seal',
-    summary: 'Whether GitHub is up: dot in the bar, service grid and live page across widget sizes.',
+    summary: 'Whether GitHub is up: dot in the bar, service list and active incidents in a responsive widget.',
     pinned: false,
     order: 26,
     refreshSeconds: 120,
-    sizes: ['chip', 'small', 'wide', 'medium', 'large'],
-    defaultSize: 'medium',
+    defaultShape: 'card',
     permissions: ['www.githubstatus.com', 'notify'],
   },
-  views: {
-    async chip(host) {
-      const before = summary ? summary.status.indicator : null;
-      await load(host);
-      if (!summary) return row([dot('tertiary'), text('GitHub', { tone: 'secondary' })]);
-      const indicator = summary.status.indicator;
-      host.attention(indicator !== 'none');
-      if (before === 'none' && indicator !== 'none') host.notify('GitHub status changed', summary.status.description);
-      return row([dot(tones[indicator] || 'warn'), text('GitHub')]);
-    },
-    async small(host) {
-      await load(host);
-      if (!summary) return unavailable();
-      const tone = tones[summary.status.indicator] || 'warn';
-      const incidents = summary.incidents || [];
-      return [
-        column([
-          row([dot(tone), text('GitHub', { role: 'label', weight: 'semibold' }), spacer(), badge(incidents.length === 0 ? 'OK' : String(incidents.length), { tone })]),
-          text(summary.status.description, { role: 'title', lines: 3 }),
-          spacer(),
-          text(`Updated ${host.format.ago(loadedAt)}`, { role: 'caption', tone: 'tertiary' }),
-        ], { spacing: 'tight' }),
-      ];
-    },
-    async wide(host) {
-      await load(host);
-      if (!summary) return unavailable();
-      const tone = tones[summary.status.indicator] || 'warn';
-      const components = coreComponents();
-      return [
-        split([
-          column([
-            row([dot(tone), text('GitHub', { role: 'label', weight: 'semibold' })]),
-            text(summary.status.description, { role: 'title', lines: 3 }),
-            spacer(),
-            text(`Updated ${host.format.ago(loadedAt)}`, { role: 'caption', tone: 'tertiary' }),
-          ], { spacing: 'tight' }),
-          section('Services', [serviceList(components, true)]),
-        ], { weights: [0.95, 1.25] }),
-      ];
-    },
-    async medium(host) {
-      await load(host);
-      if (!summary) return unavailable();
-      const components = coreComponents();
-      const incidents = summary.incidents || [];
-      return [
-        row([dot(tones[summary.status.indicator] || 'warn'), text(summary.status.description, { role: 'title' })]),
-        incidents.length > 0 ? section('Incidents', [
-          list(incidents.slice(0, 4).map((incident) => item(host.format.truncate(incident.name, 44), {
-            subtitle: `${incident.status} · ${host.format.ago(incident.updated_at)}`, icon: 'exclamationmark.triangle.fill',
-            tone: tones[incident.impact] || 'warn', url: incident.shortlink,
-          })), { compact: true }),
-        ]) : null,
-        section('Services', [serviceList(components, true)]),
-      ].filter(Boolean);
-    },
-    async large(host) {
-      await load(host);
-      if (!summary) return unavailable();
-      const components = coreComponents();
-      const incidents = summary.incidents || [];
-      return [
-        split([
-          column([
-            row([dot(tones[summary.status.indicator] || 'warn'), text(summary.status.description, { role: 'title' })]),
-            incidents.length > 0 ? section('Incidents', [
-              list(incidents.slice(0, 4).map((incident) => item(host.format.truncate(incident.name, 44), {
-                subtitle: `${incident.status} · ${host.format.ago(incident.updated_at)}`, icon: 'exclamationmark.triangle.fill',
-                tone: tones[incident.impact] || 'warn', url: incident.shortlink,
-              }))),
-            ]) : null,
-            section('Services', [serviceList(components, true)]),
-          ].filter(Boolean), { spacing: 'normal' }),
-          section('Live status page', [
-            web('https://www.githubstatus.com', { height: 'fill', selector: '.components-section', zoom: 0.7 }),
-          ]),
-        ], { weights: [1, 1.15] }),
-      ];
-    },
+  async chip(host) {
+    const before = summary ? summary.status.indicator : null;
+    await load(host);
+    if (!summary) return row([dot('tertiary'), text('GitHub', { tone: 'secondary' })]);
+    const indicator = summary.status.indicator;
+    host.attention(indicator !== 'none');
+    if (before === 'none' && indicator !== 'none') host.notify('GitHub status changed', summary.status.description);
+    return row([dot(tones[indicator] || 'warn'), text('GitHub')]);
+  },
+  async widget(host) {
+    await load(host);
+    if (!summary) return [empty('wifi.slash', 'Cannot reach status', { message: failure || 'Still loading.', action: 'retry' })];
+    const components = summary.components.filter((component) => !component.group && component.name.indexOf('Visit') < 0);
+    const incidents = summary.incidents || [];
+    const tone = tones[summary.status.indicator] || 'warn';
+    return [
+      row([dot(tone), text(summary.status.description, { role: 'title' })]),
+      incidents.length > 0 ? section('Incidents', [
+        list(incidents.map((incident) => item(host.format.truncate(incident.name, 44), {
+          subtitle: `${incident.status} · ${host.format.ago(incident.updated_at)}`,
+          icon: 'exclamationmark.triangle.fill',
+          tone: tones[incident.impact] || 'warn',
+          url: incident.shortlink,
+        }))),
+      ]) : null,
+      section('Services', [
+        list(components.map((component) => item(component.name, {
+          icon: component.status === 'operational' ? 'checkmark.circle.fill' : 'exclamationmark.circle.fill',
+          tone: componentTones[component.status] || 'warn',
+          value: component.status === 'operational' ? undefined : component.status.replace(/_/g, ' '),
+        }))),
+      ], { trailing: host.format.ago(loadedAt), priority: 'supporting' }),
+    ].filter(Boolean);
   },
   actions: {
     retry() {

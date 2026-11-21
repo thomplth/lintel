@@ -15,7 +15,7 @@ private func barText(storage: String, at moment: String = "new Date(2026, 2, 4, 
     context.evaluateScript(clockSource)
     context.evaluateScript("var __fixed = \(moment); Date = class extends Date { constructor(...a) { a.length ? super(...a) : super(__fixed) } };")
     context.evaluateScript("var __saved = \(storage); for (var k in __saved) host.storage.set(k, __saved[k]);")
-    return context.evaluateScript("__module.render(host).value").toString()
+    return context.evaluateScript("__module.chip(host).value").toString()
 }
 
 private func clockContext(storage: String = "{}", localOffsetMinutes: Int = 0) -> JSContext {
@@ -31,13 +31,24 @@ private func clockContext(storage: String = "{}", localOffsetMinutes: Int = 0) -
     return context
 }
 
+private func findSection(_ sourceExpr: String, _ title: String) -> String {
+    """
+    (function find(node) {
+      if (!node) return null;
+      if (Array.isArray(node)) { for (const n of node) { const r = find(n); if (r) return r; } return null; }
+      if (node.title === '\(title)') return node;
+      return find(node.children);
+    })(\(sourceExpr))
+    """
+}
+
 private func panelSection(_ context: JSContext, _ title: String) -> String {
-    "__module.panel(host).find((view) => view.title === '\(title)')"
+    findSection("__module.configure(host)", title)
 }
 
 private func worldRows(_ context: JSContext) -> [String] {
     let script = """
-    (\(panelSection(context, "World")).children.find((view) => view.type === 'list') || { children: [] }).children
+    (\(findSection("__module.widget(host)", "World")).children.find((view) => view.type === 'list') || { children: [] }).children
       .map((row) => [row.title, row.value, row.subtitle].join(' | '))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
@@ -45,7 +56,7 @@ private func worldRows(_ context: JSContext) -> [String] {
 
 private func worldRowAccessories(_ context: JSContext) -> [String] {
     let script = """
-    (\(panelSection(context, "World")).children.find((view) => view.type === 'list') || { children: [] }).children
+    (\(findSection("__module.widget(host)", "World")).children.find((view) => view.type === 'list') || { children: [] }).children
       .map((row) => [row.accessoryIcon, row.accessoryAction, row.accessoryLabel, row.payload, row.action || 'no action'].join(' | '))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
@@ -53,7 +64,7 @@ private func worldRowAccessories(_ context: JSContext) -> [String] {
 
 private func worldControls(_ context: JSContext) -> [String] {
     let script = """
-    \(panelSection(context, "World")).children.filter((view) => view.type !== 'list')
+    \(findSection("__module.widget(host)", "World")).children.filter((view) => view.type !== 'list')
       .map((view) => [view.type, view.label || view.value || view.placeholder, view.action, view.suggest].filter(Boolean).join(' | '))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
@@ -73,7 +84,7 @@ private func perform(_ context: JSContext, _ action: String, _ payload: String) 
 }
 
 private func sectionTitles(_ context: JSContext) -> [String] {
-    context.evaluateScript("__module.panel(host).map((view) => view.title || view.type)").toArray() as? [String] ?? []
+    context.evaluateScript("__module.configure(host).map((view) => view.title || view.type)").toArray() as? [String] ?? []
 }
 
 private func controls(_ context: JSContext, in title: String) -> [String] {
@@ -87,7 +98,7 @@ private func controls(_ context: JSContext, in title: String) -> [String] {
 
 private func calendarCells(_ context: JSContext) -> [String] {
     let script = """
-    __module.panel(host)[1].children[0].children.map((cell) => cell.type + ':' + cell.value + (cell.tone ? ':' + cell.tone : ''))
+    (\(findSection("__module.widget(host)", "March 2026"))).children[0].children.map((cell) => cell.type + ':' + cell.value + (cell.tone ? ':' + cell.tone : ''))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
 }
@@ -208,13 +219,14 @@ private func calendarCells(_ context: JSContext) -> [String] {
 
     @Test func theCalendarHeaderNamesTheMonthAndWeek() {
         let context = clockContext()
-        #expect(context.evaluateScript("__module.panel(host)[1].title").toString() == "March 2026")
-        #expect(context.evaluateScript("__module.panel(host)[1].trailing").toString() == "Week 10")
+        let cal = findSection("__module.widget(host)", "March 2026")
+        #expect(context.evaluateScript("(\(cal)).title").toString() == "March 2026")
+        #expect(context.evaluateScript("(\(cal)).trailing").toString() == "Week 10")
     }
 
     @Test func barSettingsAreGroupedIntoTimeAndDate() {
         let context = clockContext()
-        #expect(sectionTitles(context).suffix(2) == ["Time in the bar", "Date in the bar"])
+        #expect(sectionTitles(context).prefix(2) == ["Time in the bar", "Date in the bar"])
         #expect(controls(context, in: "Time in the bar") == ["toggle Show time on", "toggle Seconds on", "segmented 24-hour / 12-hour = 24-hour"])
         #expect(controls(context, in: "Date in the bar") == [
             "toggle Show date on", "toggle Weekday on", "toggle Year off", "segmented 4 Mar / Mar 4 / 04/03 / 03/04 / 03-04 = 4 Mar",

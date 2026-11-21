@@ -3,11 +3,11 @@ const page = `
   html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
   .wrap { display: flex; flex-direction: column; height: 100%; gap: calc(var(--lt-unit) * 1.5); }
   .tools { display: flex; gap: calc(var(--lt-unit) * 1.5); align-items: center; flex-shrink: 0; }
-  .tools.hidden { display: none; }
   .swatch { width: 16px; height: 16px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
   .swatch.on { border-color: var(--lt-text); }
   canvas { width: 100%; flex: 1; min-height: 0; border-radius: var(--lt-radius); background: var(--lt-fill); touch-action: none; cursor: crosshair; display: block; }
   .grow { flex: 1; }
+  @media (max-width: 190px), (max-height: 130px) { .tools { display: none; } }
 </style>
 <div class="wrap">
   <div class="tools" id="tools">
@@ -23,8 +23,8 @@ const page = `
   <canvas id="pad"></canvas>
 </div>
 <script>
-  const pad = document.getElementById('pad'), ink = pad.getContext('2d'), tools = document.getElementById('tools');
-  let strokes = [], current = null, color = 'text', readOnly = false;
+  const pad = document.getElementById('pad'), ink = pad.getContext('2d');
+  let strokes = [], current = null, color = 'text';
   const resolve = (name) => getComputedStyle(document.documentElement).getPropertyValue('--lt-' + name).trim();
   document.querySelector('.swatch').style.background = 'var(--lt-text)';
   function size() {
@@ -35,7 +35,7 @@ const page = `
   }
   function draw() {
     ink.clearRect(0, 0, pad.clientWidth, pad.clientHeight);
-    ink.lineWidth = readOnly ? 1.8 : 2.5; ink.lineCap = 'round'; ink.lineJoin = 'round';
+    ink.lineWidth = 2.4; ink.lineCap = 'round'; ink.lineJoin = 'round';
     for (const stroke of strokes.concat(current ? [current] : [])) {
       ink.strokeStyle = resolve(stroke.color);
       ink.beginPath();
@@ -45,7 +45,7 @@ const page = `
     }
   }
   const at = (event) => { const box = pad.getBoundingClientRect(); return [Math.round(event.clientX - box.left), Math.round(event.clientY - box.top)]; };
-  pad.addEventListener('pointerdown', (event) => { if (readOnly) return; pad.setPointerCapture(event.pointerId); current = { color, points: [at(event)] }; draw(); });
+  pad.addEventListener('pointerdown', (event) => { pad.setPointerCapture(event.pointerId); current = { color, points: [at(event)] }; draw(); });
   pad.addEventListener('pointermove', (event) => { if (current) { current.points.push(at(event)); draw(); } });
   pad.addEventListener('pointerup', () => { if (!current) return; strokes.push(current); current = null; lintel.send('save', strokes); });
   document.getElementById('clear').onclick = () => { strokes = []; draw(); lintel.send('save', strokes); };
@@ -56,9 +56,6 @@ const page = `
   });
   let isRestored = false;
   lintel.onState((state) => {
-    readOnly = !!(state && state.readOnly);
-    tools.classList.toggle('hidden', readOnly);
-    pad.style.cursor = readOnly ? 'default' : 'crosshair';
     if (!isRestored) { isRestored = true; strokes = (state && state.strokes) || []; }
     size();
   });
@@ -72,28 +69,19 @@ defineModule({
     id: 'sketchpad',
     title: 'Sketchpad',
     icon: 'scribble.variable',
-    summary: 'A resizable drawing pad that fills its widget and keeps your sketch between openings.',
+    summary: 'A freeform-resizable drawing pad that fills its widget and keeps your sketch between openings.',
     pinned: false,
     order: 48,
     refreshSeconds: 3600,
     panelRefreshSeconds: 3600,
-    sizes: ['chip', 'small', 'medium', 'large'],
-    defaultSize: 'medium',
+    defaultShape: 'canvas',
   },
-  views: {
-    chip(host) {
-      const count = host.storage.get('strokes', []).length;
-      return count === 0 ? icon('scribble.variable') : row([icon('scribble.variable'), text(count, { mono: true, tone: 'secondary' })]);
-    },
-    small(host) {
-      return [app(page, { height: 'fill', state: { strokes: host.storage.get('strokes', []), readOnly: true } })];
-    },
-    medium(host) {
-      return [app(page, { height: 'fill', state: { strokes: host.storage.get('strokes', []), readOnly: false } })];
-    },
-    large(host) {
-      return [app(page, { height: 'fill', state: { strokes: host.storage.get('strokes', []), readOnly: false } })];
-    },
+  chip(host) {
+    const count = host.storage.get('strokes', []).length;
+    return count === 0 ? icon('scribble.variable') : row([icon('scribble.variable'), text(count, { mono: true, tone: 'secondary' })]);
+  },
+  widget(host) {
+    return [app(page, { height: 'fill', state: { strokes: host.storage.get('strokes', []) } })];
   },
   actions: {
     save(host, strokes) {

@@ -50,8 +50,10 @@ final class AppController {
         model.onSlotClick = { [weak self] slot in self?.clicked(slot) }
         model.onSlotSecondaryAction = { [weak self] slot, command in self?.edit(slot, command) }
         model.onRearrange = { [weak self] rows, pins, hiding in self?.rearrange(rows: rows, pins: pins, hiding: hiding) }
-        model.onResizeSlot = { [weak self] id, size in self?.host.setWidgetSize(id, to: size) }
-        model.onResizePreview = { [weak self] id, size, isPeek in self?.host.previewResize(id, size: size, isPeek: isPeek) }
+        model.onResizeWidget = { [weak self] id, box in self?.host.setWidget(id, to: box) }
+        model.onResizePeek = { [weak self] id, box in self?.host.setPeekBox(id, to: box) }
+        model.onEnsureWidgetRendered = { [weak self] id in self?.host.ensureWidgetRendered(id) }
+        model.onMoveWidget = { [weak self] id, drop in self?.host.moveWidget(id, to: drop) }
         model.onToggleConfigure = { [weak self] id, isConfiguring, isPeek in
             self?.host.setConfiguring(id, isConfiguring: isConfiguring, isPeek: isPeek)
         }
@@ -353,9 +355,10 @@ final class AppController {
             closePanel()
             showSettings(tab: tab)
         case "pin-widget":
-            let size = model.panel?.widgetSize ?? .medium
+            let shape = model.slot(id)?.defaultShape ?? .card
+            let box = model.panel?.widgetBox ?? Metrics(model.theme).defaultWidgetBox(for: shape)
             closePanel()
-            host.setWidgetSize(id, to: size)
+            host.setWidget(id, to: box)
         default:
             break
         }
@@ -364,7 +367,27 @@ final class AppController {
     private func widgetCommand(_ id: String, _ command: String) {
         switch command {
         case "collapse":
-            host.setWidgetSize(id, to: .chip)
+            host.setWidget(id, to: nil)
+        case "stack-up":
+            var layout = model.layout
+            layout.moveWidgetInStack(id, offset: -1)
+            host.update(layout)
+        case "stack-down":
+            var layout = model.layout
+            layout.moveWidgetInStack(id, offset: 1)
+            host.update(layout)
+        case "stack-next":
+            var layout = model.layout
+            layout.stackWidgetWithColumn(id, offset: 1)
+            host.update(layout)
+        case "stack-prev":
+            var layout = model.layout
+            layout.stackWidgetWithColumn(id, offset: -1)
+            host.update(layout)
+        case "unstack":
+            var layout = model.layout
+            layout.unstackWidget(id)
+            host.update(layout)
         case "change":
             closePanel()
             showStudio(module: id, focusChat: true)
@@ -377,15 +400,22 @@ final class AppController {
     }
 
     private func edit(_ slot: Slot, _ command: String) {
-        if command.hasPrefix("size:"), let size = WidgetSize(rawValue: String(command.dropFirst(5))) {
-            host.setWidgetSize(slot.id, to: size)
+        if command == "expand" {
+            guard slot.supportsResize else { return }
+            let box = Metrics(model.theme).defaultWidgetBox(for: slot.defaultShape)
+            host.setWidget(slot.id, to: box)
             return
         }
         if command == "grow" || command == "shrink" {
             guard slot.supportsResize else { return }
-            let current = model.layout.size(of: slot.id)
-            let target = current.step(by: command == "grow" ? 1 : -1, within: slot.supportedSizes)
-            if target != current { host.setWidgetSize(slot.id, to: target) }
+            let current = model.layout.widgetBox(of: slot.id)
+            let target = WidgetResize.step(
+                from: current,
+                delta: command == "grow" ? 1 : -1,
+                defaultShape: slot.defaultShape,
+                metrics: Metrics(model.theme)
+            )
+            if target != current { host.setWidget(slot.id, to: target) }
             return
         }
         var layout = model.layout

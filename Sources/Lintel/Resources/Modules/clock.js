@@ -150,7 +150,7 @@ function calendar(now) {
     else cells.push(text(day, { role: 'label', mono: true, tone: column >= 5 ? 'secondary' : undefined }));
   }
   for (let day = 1; (leading + days + day - 1) % 7 !== 0; day += 1) cells.push(outside(day));
-  return section(`${longMonths[month]} ${year}`, [grid(7, cells, { spacing: 'tight' })], { trailing: `Week ${isoWeek(now)}` });
+  return section(`${longMonths[month]} ${year}`, [grid(7, cells, { spacing: 'tight' })], { trailing: `Week ${isoWeek(now)}`, priority: 'supporting' });
 }
 
 function header(host, now, c) {
@@ -174,7 +174,7 @@ function worldSection(now, zones, c, options) {
   const o = options || {};
   return section('World', [
     zones.length
-      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour)), { compact: o.compact })
+      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour)))
       : note('Add a city to compare its time with yours.'),
     ...(o.withField !== false ? [field('Add a city', 'addZone', { icon: 'plus', suggest: 'suggestZones' })] : []),
     ...(unmatchedZone && o.withField !== false ? [note(`No city or time zone matches “${unmatchedZone}”.`, { tone: 'warn' })] : []),
@@ -202,88 +202,36 @@ function barSections(host, now, c) {
   ];
 }
 
-function renderChip(host) {
-  const c = choices(host);
-  const now = new Date();
-  const parts = [];
-  if (c.showDate) parts.push(host.format.date(now, { order: c.order, year: c.year, weekday: c.weekday }));
-  else if (c.weekday) parts.push(host.format.date(now, { weekday: true }).split(' ')[0]);
-  if (c.showTime || parts.length === 0) parts.push(host.format.time(now, { seconds: c.seconds, twelveHour: c.twelveHour }));
-  return text(parts.join('  '), { mono: true });
-}
-
 defineModule({
   meta: {
     id: 'clock',
     title: 'Clock',
     icon: 'clock',
-    summary: 'Date and time in the bar; calendar and world clocks across every widget size.',
+    summary: 'Date and time in the bar; calendar and world clocks in a responsive desktop widget.',
     pinned: true,
     order: 90,
     refreshSeconds: 1,
     panelRefreshSeconds: 1,
-    sizes: ['chip', 'small', 'wide', 'medium', 'large'],
-    defaultSize: 'medium',
+    defaultShape: 'card',
   },
-  render(host) {
-    return renderChip(host);
+  chip(host) {
+    const c = choices(host);
+    const now = new Date();
+    const parts = [];
+    if (c.showDate) parts.push(host.format.date(now, { order: c.order, year: c.year, weekday: c.weekday }));
+    else if (c.weekday) parts.push(host.format.date(now, { weekday: true }).split(' ')[0]);
+    if (c.showTime || parts.length === 0) parts.push(host.format.time(now, { seconds: c.seconds, twelveHour: c.twelveHour }));
+    return text(parts.join('  '), { mono: true });
   },
-  panel(host) {
+  widget(host) {
     const now = new Date();
     const c = choices(host);
-    return [header(host, now, c), calendar(now), worldSection(now, savedZones(host), c), ...barSections(host, now, c)];
-  },
-  views: {
-    chip(host) {
-      return renderChip(host);
-    },
-    small(host) {
-      const now = new Date();
-      const c = choices(host);
-      const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      return [
-        column([
-          text(longWeekdays[now.getDay()], { role: 'caption', tone: 'accent', weight: 'semibold' }),
-          text(host.format.time(now, { seconds: false, twelveHour: c.twelveHour }), { role: 'display', mono: true }),
-          text(`${now.getDate()} ${longMonths[now.getMonth()]} ${now.getFullYear()}`, { role: 'label' }),
-          spacer(),
-          text(`${cityOf(localZone)} · Week ${isoWeek(now)}`, { role: 'caption', tone: 'tertiary' }),
-        ], { spacing: 'tight' }),
-      ];
-    },
-    wide(host) {
-      const now = new Date();
-      const c = choices(host);
-      return [
-        split([
-          header(host, now, c),
-          worldSection(now, savedZones(host), c, { compact: true, withField: false }),
-        ], { weights: [1, 1.25] }),
-      ];
-    },
-    medium(host) {
-      const now = new Date();
-      const c = choices(host);
-      return [
-        row([
-          text(host.format.time(now, { seconds: true, twelveHour: c.twelveHour }), { role: 'title', mono: true }),
-          spacer(),
-          text(`${longWeekdays[now.getDay()].slice(0, 3)}, ${now.getDate()} ${longMonths[now.getMonth()].slice(0, 3)}`, { role: 'caption', tone: 'secondary' }),
-        ]),
-        calendar(now),
-        worldSection(now, savedZones(host), c, { compact: true, withField: false, priority: 'supporting' }),
-      ];
-    },
-    large(host) {
-      const now = new Date();
-      const c = choices(host);
-      return [
-        split([
-          column([header(host, now, c), calendar(now)], { spacing: 'normal' }),
-          worldSection(now, savedZones(host), c),
-        ], { weights: [1.05, 1] }),
-      ];
-    },
+    return [
+      split([
+        column([header(host, now, c), calendar(now)], { spacing: 'normal' }),
+        worldSection(now, savedZones(host), c, { priority: 'supporting' }),
+      ], { weights: [1.05, 1] }),
+    ];
   },
   configure(host) {
     const now = new Date();

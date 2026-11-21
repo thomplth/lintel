@@ -41,109 +41,54 @@ async function find(host, name) {
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function forecastList(daily, compact) {
-  return list(daily.time.slice(0, 5).map((day, index) => item(index === 0 ? 'Today' : weekdays[new Date(day).getDay()], {
-    icon: describe(daily.weather_code[index]).symbol,
-    subtitle: describe(daily.weather_code[index]).label,
-    value: `${Math.round(daily.temperature_2m_min[index])}° / ${Math.round(daily.temperature_2m_max[index])}°`,
-  })), { compact });
-}
-
-function unavailable() {
-  return [empty('wifi.slash', 'Weather is unavailable', { message: failure || 'Still loading.', action: 'retry' })];
-}
-
 defineModule({
   meta: {
     id: 'weather',
     title: 'Weather',
     icon: 'cloud.sun.fill',
-    summary: 'Current temperature in the bar; hourly trend and 5-day forecast across widget sizes.',
+    summary: 'Current temperature in the bar; hourly trend and 5-day forecast in a responsive widget.',
     pinned: false,
     order: 35,
     refreshSeconds: 600,
-    sizes: ['chip', 'small', 'wide', 'medium', 'large'],
-    defaultSize: 'medium',
+    defaultShape: 'card',
     permissions: ['api.open-meteo.com', 'geocoding-api.open-meteo.com'],
   },
-  views: {
-    async chip(host) {
-      await load(host);
-      if (!latest) return row([icon('cloud.fill', { tone: 'secondary' }), text('—', { tone: 'secondary' })]);
-      const current = latest.forecast.current;
-      return row([icon(describe(current.weather_code).symbol), text(`${Math.round(current.temperature_2m)}°`, { mono: true })]);
-    },
-    async small(host) {
-      await load(host);
-      if (!latest) return unavailable();
-      const { current, daily } = latest.forecast;
-      const now = describe(current.weather_code);
-      return [
+  async chip(host) {
+    await load(host);
+    if (!latest) return row([icon('cloud.fill', { tone: 'secondary' }), text('—', { tone: 'secondary' })]);
+    const current = latest.forecast.current;
+    return row([icon(describe(current.weather_code).symbol), text(`${Math.round(current.temperature_2m)}°`, { mono: true })]);
+  },
+  async widget(host) {
+    await load(host);
+    if (!latest) return [empty('wifi.slash', 'Weather is unavailable', { message: failure || 'Still loading.', action: 'retry' })];
+    const { current, hourly, daily } = latest.forecast;
+    const now = describe(current.weather_code);
+    const forecastList = list(daily.time.slice(0, 5).map((day, index) => item(index === 0 ? 'Today' : weekdays[new Date(day).getDay()], {
+      icon: describe(daily.weather_code[index]).symbol,
+      subtitle: describe(daily.weather_code[index]).label,
+      value: `${Math.round(daily.temperature_2m_min[index])}° / ${Math.round(daily.temperature_2m_max[index])}°`,
+    })));
+    return [
+      split([
         column([
-          row([text(latest.place.name, { role: 'label', weight: 'medium' }), spacer(), icon(now.symbol, { tone: 'accent' })]),
-          text(`${Math.round(current.temperature_2m)}°`, { role: 'display', mono: true }),
-          text(now.label, { role: 'label' }),
-          spacer(),
-          text(`L ${Math.round(daily.temperature_2m_min[0])}° · H ${Math.round(daily.temperature_2m_max[0])}°`, { role: 'caption', mono: true, tone: 'tertiary' }),
-        ], { spacing: 'tight' }),
-      ];
-    },
-    async wide(host) {
-      await load(host);
-      if (!latest) return unavailable();
-      const forecast = latest.forecast, current = forecast.current;
-      const now = describe(current.weather_code);
-      return [
-        split([
-          stat(latest.place.name, Math.round(current.temperature_2m), {
-            unit: '°C', icon: now.symbol, caption: `${now.label} · Feels ${Math.round(current.apparent_temperature)}°`,
-          }),
-          section('Next 24 hours', [
-            chart(forecast.hourly.temperature_2m.slice(0, 24), { kind: 'line' }),
+          grid(2, [
+            stat(latest.place.name, Math.round(current.temperature_2m), { unit: '°C', icon: now.symbol, caption: now.label }),
+            stat('Feels like', Math.round(current.apparent_temperature), { unit: '°C', caption: `Humidity ${current.relative_humidity_2m}%` }),
           ]),
-        ], { weights: [1, 1.3] }),
-      ];
-    },
-    async medium(host) {
-      await load(host);
-      if (!latest) return unavailable();
-      const forecast = latest.forecast, current = forecast.current, daily = forecast.daily;
-      const now = describe(current.weather_code);
-      return [
-        grid(2, [
-          stat(latest.place.name, Math.round(current.temperature_2m), { unit: '°C', icon: now.symbol, caption: now.label }),
-          stat('Feels like', Math.round(current.apparent_temperature), { unit: '°C', caption: `Humidity ${current.relative_humidity_2m}%` }),
-        ]),
-        section('Next 24 hours', [
-          chart(forecast.hourly.temperature_2m.slice(0, 24), { kind: 'line', labels: ['now', '+12 h', '+24 h'] }),
-        ]),
-        section('Days ahead', [forecastList(daily, true)], { priority: 'supporting' }),
-      ];
-    },
-    async large(host) {
-      await load(host);
-      if (!latest) return unavailable();
-      const forecast = latest.forecast, current = forecast.current, daily = forecast.daily;
-      const now = describe(current.weather_code);
-      return [
-        split([
-          column([
-            grid(2, [
-              stat(latest.place.name, Math.round(current.temperature_2m), { unit: '°C', icon: now.symbol, caption: now.label }),
-              stat('Feels like', Math.round(current.apparent_temperature), { unit: '°C', caption: `Humidity ${current.relative_humidity_2m}%` }),
-            ]),
-            section('Next 24 hours', [
-              chart(forecast.hourly.temperature_2m.slice(0, 24), { kind: 'line', labels: ['now', '+12 h', '+24 h'] }),
-            ]),
-            keyValue('Wind', `${Math.round(current.wind_speed_10m)} km/h`, { mono: true }),
-          ], { spacing: 'normal' }),
-          column([
-            section('5-day forecast', [forecastList(daily, false)]),
-            failure ? note(`Showing last reading. ${failure}`, { tone: 'warn' }) : note(`Updated ${host.format.ago(loadedAt)} · Open-Meteo`),
-          ], { spacing: 'normal' }),
-        ], { weights: [1.15, 1] }),
-      ];
-    },
+          section('Next 24 hours', [
+            chart(hourly.temperature_2m.slice(0, 24), { kind: 'line', labels: ['now', '+12 h', '+24 h'] }),
+          ]),
+          keyValue('Wind', `${Math.round(current.wind_speed_10m)} km/h`, { mono: true }),
+        ], { spacing: 'normal' }),
+        column([
+          section('5-day forecast', [forecastList]),
+          failure
+            ? note(`Showing last reading. ${failure}`, { tone: 'warn', priority: 'detail' })
+            : note(`Updated ${host.format.ago(loadedAt)} · Open-Meteo`, { priority: 'detail' }),
+        ], { spacing: 'normal', priority: 'supporting' }),
+      ], { weights: [1.15, 1] }),
+    ];
   },
   configure(host) {
     const place = host.storage.get('place', null);

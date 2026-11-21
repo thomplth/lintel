@@ -118,13 +118,15 @@ struct NodeView: View {
 
     private func badgeView(_ value: String, tone: Tone?) -> some View {
         let color = context.fillColor(tone, fallback: context.accent)
+        let padH = value.count <= 2 ? max(context.metrics.unit * 0.9, 3) : context.metrics.unit * 1.5
         return Text(value)
             .font(context.font(role: "caption", weight: "semibold", mono: true))
             .foregroundStyle(context.textColor(on: tone))
             .lineLimit(1)
-            .padding(.horizontal, context.metrics.unit * 1.5)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, padH)
             .padding(.vertical, 1)
-            .frame(minWidth: context.metrics.fontSize(role: "caption") * 1.5)
+            .frame(minWidth: context.metrics.fontSize(role: "caption") * 1.35)
             .background(color, in: Capsule())
     }
 
@@ -161,11 +163,14 @@ struct NodeView: View {
 
     @ViewBuilder private var columnView: some View {
         let gap = spacing(default: context.metrics.spacing(nil))
-        if context.isInWidget {
+        if context.isInWidget && node.bool("elastic") {
+            AdaptiveCollectionView(nodes: node.children, spacing: gap, context: context)
+                .frame(maxWidth: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .top))
+        } else if context.isInWidget {
             AdaptiveStackLayout(spacing: gap, alignment: columnAlignment) {
                 adaptiveChildren(node.children)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .top))
+            .frame(maxWidth: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .top))
         } else {
             VStack(alignment: columnAlignment, spacing: gap) { children }
                 .frame(maxWidth: .infinity, alignment: Alignment(horizontal: columnAlignment, vertical: .center))
@@ -180,18 +185,27 @@ struct NodeView: View {
         case "bottom": .bottom
         default: .top
         }
-        return SplitLayout(weights: weights, spacing: gap, alignment: vAlign) {
+        return SplitLayout(
+            weights: weights,
+            spacing: gap,
+            alignment: vAlign,
+            stackThreshold: context.metrics.splitStackThreshold
+        ) {
             ForEach(Array(node.children.enumerated()), id: \.offset) { child in
                 NodeView(node: child.element, context: context)
-                    .frame(maxWidth: .infinity, maxHeight: context.isInWidget ? .infinity : nil, alignment: .topLeading)
+                    .clipped()
+                    .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
+                    .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: context.isInWidget ? .infinity : nil, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder private func adaptiveChildren(_ nodes: [ViewNode]) -> some View {
         ForEach(Array(nodes.enumerated()), id: \.offset) { child in
             NodeView(node: child.element, context: context)
+                .clipped()
                 .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
                 .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
         }
@@ -215,11 +229,13 @@ struct NodeView: View {
                     }
                 }
             }
-            if context.isInWidget && node.containsFlexibleBlock {
+            if context.isInWidget && node.bool("elastic") {
+                AdaptiveCollectionView(nodes: node.children, spacing: childGap, context: context)
+            } else if context.isInWidget && node.containsFlexibleBlock {
                 AdaptiveStackLayout(spacing: childGap, alignment: .leading) {
                     adaptiveChildren(node.children)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             } else {
                 VStack(alignment: .leading, spacing: childGap) { children }
             }
@@ -228,53 +244,74 @@ struct NodeView: View {
     }
 
     private var gridView: some View {
-        let columns = Int(min(max(node.number("columns") ?? 2, 1), 7))
+        let maxCols = Int(min(max(node.number("columns") ?? 2, 1), 7))
         let gap = spacing(default: context.metrics.spacing(nil))
-        let rows = stride(from: 0, to: node.children.count, by: columns).map { start in
-            Array(node.children[start..<min(start + columns, node.children.count)])
+        let allSmallAtoms = node.children.allSatisfy { [.text, .badge, .dot, .icon].contains($0.component) }
+        let minCellW: CGFloat = if allSmallAtoms {
+            CGFloat((22 * context.metrics.widgetScale).rounded())
+        } else if node.children.contains(where: { $0.component == .stat }) {
+            CGFloat((100 * context.metrics.widgetScale).rounded())
+        } else if node.children.contains(where: { $0.component == .button }) {
+            CGFloat((80 * context.metrics.widgetScale).rounded())
+        } else {
+            CGFloat((96 * context.metrics.widgetScale).rounded())
         }
-        return VStack(spacing: gap) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { row in
-                HStack(alignment: .top, spacing: gap) {
-                    ForEach(0..<columns, id: \.self) { index in
-                        if index < row.element.count {
-                            NodeView(node: row.element[index], context: context)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: [.text, .badge].contains(row.element[index].component) ? .center : .topLeading)
-                        } else {
-                            Color.clear.frame(maxWidth: .infinity, maxHeight: 1)
-                        }
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
+        return AdaptiveGridLayout(maxColumns: maxCols, minCellWidth: minCellW, spacing: gap, centerCells: allSmallAtoms) {
+            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                NodeView(node: child.element, context: context)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: allSmallAtoms ? .center : .topLeading)
             }
         }
     }
 
     private var statView: some View {
-        let pad = context.isCompactWidget ? context.metrics.unit * 2 : context.metrics.tilePadding
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: context.metrics.unit) {
-                if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "caption") }
-                Text(node.string("label") ?? "").font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
-            }
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(node.string("value") ?? "")
-                    .font(context.font(role: context.isCompactWidget ? "title" : "display", mono: true))
-                    .foregroundStyle(context.color(node.tone()))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .contentTransition(context.animates ? .numericText() : .identity)
-                if let unit = node.string("unit") {
-                    Text(unit).font(context.font(role: "label")).foregroundStyle(context.secondary).lineLimit(1)
+        let compact = context.isCompactWidget
+        let pad = compact ? context.metrics.unit * 1.75 : context.metrics.tilePadding
+        return Group {
+            if context.isShortWidget {
+                // Sleek single-row tile when the widget is shaped into a slim horizontal ribbon.
+                HStack(spacing: context.metrics.unit * 1.5) {
+                    if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "caption") }
+                    Text(node.string("label") ?? "").font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
+                    Spacer(minLength: 4)
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(node.string("value") ?? "")
+                            .font(context.font(role: "title", mono: true))
+                            .foregroundStyle(context.color(node.tone()))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .contentTransition(context.animates ? .numericText() : .identity)
+                        if let unit = node.string("unit") {
+                            Text(unit).font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
+                        }
+                    }
                 }
-                if let trend = node.string("trend") {
-                    Image(systemName: trend == "up" ? "arrow.up.right" : trend == "down" ? "arrow.down.right" : "arrow.right")
-                        .font(.system(size: context.metrics.fontSize(role: "caption"), weight: .semibold))
-                        .foregroundStyle(context.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: context.metrics.unit) {
+                        if let name = node.string("icon") { iconView(name, tone: ToneChoice(.secondary), role: "caption") }
+                        Text(node.string("label") ?? "").font(context.font(role: "caption")).foregroundStyle(context.secondary).lineLimit(1)
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 3) {
+                        Text(node.string("value") ?? "")
+                            .font(context.font(role: compact ? "title" : "display", mono: true))
+                            .foregroundStyle(context.color(node.tone()))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .contentTransition(context.animates ? .numericText() : .identity)
+                        if let unit = node.string("unit") {
+                            Text(unit).font(context.font(role: "label")).foregroundStyle(context.secondary).lineLimit(1)
+                        }
+                        if let trend = node.string("trend") {
+                            Image(systemName: trend == "up" ? "arrow.up.right" : trend == "down" ? "arrow.down.right" : "arrow.right")
+                                .font(.system(size: context.metrics.fontSize(role: "caption"), weight: .semibold))
+                                .foregroundStyle(context.secondary)
+                        }
+                    }
+                    if let caption = node.string("caption") {
+                        Text(caption).font(context.font(role: "caption")).foregroundStyle(context.tertiary).lineLimit(1)
+                    }
                 }
-            }
-            if let caption = node.string("caption") {
-                Text(caption).font(context.font(role: "caption")).foregroundStyle(context.tertiary).lineLimit(1)
             }
         }
         .padding(pad)

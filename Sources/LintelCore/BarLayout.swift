@@ -19,23 +19,32 @@ public struct BarLayout: Equatable, Codable, Sendable {
     public var hidden: [String] = []
     public var pinned: [String: Bool] = [:]
     public var symbols: [String: String] = [:]
-    public var sizes: [String: WidgetSize] = [:]
+    /// Freeform desktop widget boxes keyed by module id. Absence means the module lives as a bar chip.
+    public var widgets: [String: WidgetBox] = [:]
+    /// Explicit vertical widget stacks (columns) on the shelf below the chip strip.
+    /// Column 0 hugs the bar's anchored edge; entries within a column stack top to bottom.
+    public var widgetColumns: [[String]] = []
 
     public init() {}
 
     public init(
-        rows: [[String]], hidden: [String] = [], pinned: [String: Bool] = [:],
-        symbols: [String: String] = [:], sizes: [String: WidgetSize] = [:]
+        rows: [[String]],
+        hidden: [String] = [],
+        pinned: [String: Bool] = [:],
+        symbols: [String: String] = [:],
+        widgets: [String: WidgetBox] = [:],
+        widgetColumns: [[String]] = []
     ) {
         self.rows = rows
         self.hidden = hidden
         self.pinned = pinned
         self.symbols = symbols
-        self.sizes = sizes.filter { $0.value.isWidget }
+        self.widgets = widgets
+        self.widgetColumns = widgetColumns
     }
 
     private enum Key: String, CodingKey {
-        case rows, hidden, pinned, symbols, sizes
+        case rows, hidden, pinned, symbols, widgets, widgetColumns
     }
 
     public init(from decoder: Decoder) throws {
@@ -44,40 +53,117 @@ public struct BarLayout: Equatable, Codable, Sendable {
         hidden = try container.decodeIfPresent([String].self, forKey: .hidden) ?? []
         pinned = try container.decodeIfPresent([String: Bool].self, forKey: .pinned) ?? [:]
         symbols = try container.decodeIfPresent([String: String].self, forKey: .symbols) ?? [:]
-        let decodedSizes = try container.decodeIfPresent([String: WidgetSize].self, forKey: .sizes) ?? [:]
-        sizes = decodedSizes.filter { $0.value.isWidget }
+        widgets = try container.decodeIfPresent([String: WidgetBox].self, forKey: .widgets) ?? [:]
+        widgetColumns = try container.decodeIfPresent([[String]].self, forKey: .widgetColumns) ?? []
     }
 
-    public func size(of key: String) -> WidgetSize {
-        sizes[key] ?? .chip
+    public func widgetBox(of key: String) -> WidgetBox? {
+        widgets[key]
     }
 
-    public mutating func setSize(_ size: WidgetSize, for key: String) {
-        if size.isWidget {
-            sizes[key] = size
+    public func isWidget(_ key: String) -> Bool {
+        widgets[key] != nil
+    }
+
+    public mutating func setWidget(_ box: WidgetBox?, for key: String) {
+        if let box {
+            widgets[key] = box
+            if !widgetColumns.contains(where: { $0.contains(key) }) {
+                widgetColumns.append([key])
+            }
         } else {
-            sizes[key] = nil
+            widgets[key] = nil
+            widgetColumns = widgetColumns.map { $0.filter { $0 != key } }.filter { !$0.isEmpty }
         }
     }
 
-    /// Resized widgets live on the Bento shelf below the chip rows and stay visible while idle too.
-    public func arrangedWidgets(_ items: [Item]) -> [(key: String, size: WidgetSize)] {
-        let shown = items.filter { !hidden.contains($0.key) && size(of: $0.key).isWidget }
+    /// Reorders, stacks, unstacks, or collapses a widget on the shelf.
+    public mutating func moveWidget(_ key: String, to drop: WidgetShelfDrop) {
+        if drop == .collapseToChip {
+            setWidget(nil, for: key)
+            return
+        }
+        guard widgets[key] != nil else { return }
+        var columns = widgetColumns.map { $0.filter { $0 != key } }.filter { !$0.isEmpty }
+        switch drop {
+        case .stack(let col, let index):
+            if columns.indices.contains(col) {
+                let pos = min(max(index, 0), columns[col].count)
+                columns[col].insert(key, at: pos)
+            } else {
+                columns.append([key])
+            }
+        case .newColumn(let col):
+            let pos = min(max(col, 0), columns.count)
+            columns.insert([key], at: pos)
+        case .collapseToChip:
+            break
+        }
+        widgetColumns = columns
+    }
+
+    /// Moves a widget up or down within its stack, or splits it into a new stack if needed.
+    public mutating func moveWidgetInStack(_ key: String, offset: Int) {
+        guard let colIndex = widgetColumns.firstIndex(where: { $0.contains(key) }),
+              let rowIndex = widgetColumns[colIndex].firstIndex(of: key)
+        else { return }
+        let target = rowIndex + offset
+        guard widgetColumns[colIndex].indices.contains(target) else { return }
+        widgetColumns[colIndex].swapAt(rowIndex, target)
+    }
+
+    /// Moves a widget to an adjacent column (stacking at the bottom of that column) or out to its own column.
+    public mutating func stackWidgetWithColumn(_ key: String, offset: Int) {
+        guard let colIndex = widgetColumns.firstIndex(where: { $0.contains(key) }) else { return }
+        let target = colIndex + offset
+        guard widgetColumns.indices.contains(target) else { return }
+        widgetColumns[colIndex].removeAll { $0 == key }
+        widgetColumns[target].append(key)
+        widgetColumns = widgetColumns.filter { !$0.isEmpty }
+    }
+
+    /// Pulls a stacked widget out into its own column right beside its current stack.
+    public mutating func unstackWidget(_ key: String) {
+        guard let colIndex = widgetColumns.firstIndex(where: { $0.contains(key) }),
+              widgetColumns[colIndex].count > 1
+        else { return }
+        widgetColumns[colIndex].removeAll { $0 == key }
+        widgetColumns.insert([key], at: colIndex + 1)
+    }
+
+    /// Resized desktop widgets grouped into their explicit vertical stacks (columns), staying visible while idle too.
+    public func arrangedWidgetColumns(_ items: [Item]) -> [[(key: String, box: WidgetBox)]] {
+        let shown = items.filter { !hidden.contains($0.key) && widgets[$0.key] != nil }
         guard !shown.isEmpty else { return [] }
         let byKey = Dictionary(shown.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var seen = Set<String>()
-        var ordered: [String] = []
+        var result: [[(key: String, box: WidgetBox)]] = []
+
+        for col in widgetColumns {
+            let entries: [(key: String, box: WidgetBox)] = col.compactMap { key in
+                guard byKey[key] != nil, let box = widgets[key], seen.insert(key).inserted else { return nil }
+                return (key, box)
+            }
+            if !entries.isEmpty { result.append(entries) }
+        }
+
+        // Any active widget not yet present in widgetColumns gets its own column in chip-row / order sequence.
+        var unlistedKeys: [String] = []
         for row in rows {
             for key in row where byKey[key] != nil && seen.insert(key).inserted {
-                ordered.append(key)
+                unlistedKeys.append(key)
             }
         }
-        let unlisted = shown
+        let remaining = shown
             .filter { !seen.contains($0.key) }
             .sorted { ($0.order, $0.key) < ($1.order, $1.key) }
             .map(\.key)
-        ordered += unlisted
-        return ordered.map { ($0, size(of: $0)) }
+        for key in unlistedKeys + remaining {
+            if let box = widgets[key] {
+                result.append([(key, box)])
+            }
+        }
+        return result
     }
 
     /// `raised` holds items asking for attention; they show while idle whatever their pin says.
@@ -85,7 +171,7 @@ public struct BarLayout: Equatable, Codable, Sendable {
     /// its place even when empty, so the rows below never rise into the menu bar.
     /// Items currently sized as desktop widgets leave the chip rows while keeping their remembered row slots.
     public func arranged(_ items: [Item], isActive: Bool, raised: Set<String> = [], keepsFirstRow: Bool = false) -> [[String]] {
-        let shown = items.filter { !hidden.contains($0.key) && !size(of: $0.key).isWidget }
+        let shown = items.filter { !hidden.contains($0.key) && widgets[$0.key] == nil }
         let byKey = Dictionary(shown.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var placed = Set<String>()
         var result = rows.map { row in row.filter { byKey[$0] != nil && placed.insert($0).inserted } }
@@ -164,6 +250,7 @@ public struct BarLayout: Equatable, Codable, Sendable {
         if isHidden {
             hidden.append(key)
             remove(key)
+            setWidget(nil, for: key)
         }
     }
 }

@@ -321,13 +321,14 @@ final class ChatController {
             \(DesignGuide.lookNote(for: app.model.theme) ?? "")
 
             ## Layout
-            {"rows": [[item, ...], ...], "hidden": [item], "pinned": {item: bool}, "symbols": {item: sfSymbolName}, "sizes": {item: "small"|"wide"|"medium"|"large"|"tall"}}
-            The bar is one column of chip rows on top, followed by a Bento grid shelf of resized desktop widgets below. \
-            Each chip row holds items left to right. Items are module ids or menu bar item keys. A module not named in \
-            any row joins the last row; a menu bar item appears only if a row names it. "sizes" sets a module's resting \
-            desktop widget size (omitting it keeps the module as a bar chip); desktop widgets stay visible while idle too. \
-            "pinned" overrides whether a chip shows while the bar is idle (pinned) or only while it is active. "symbols" \
-            replaces a menu bar item's picture with an SF Symbol. Always return the complete layout, not a fragment.
+            {"rows": [[item, ...], ...], "hidden": [item], "pinned": {item: bool}, "symbols": {item: sfSymbolName}, "widgets": {item: {"width": 300, "height": 240}}, "widgetColumns": [[item, ...], ...]}
+            The bar is a column of chip rows on top, followed by a freeform stackable widget shelf below. Each chip row
+            holds items left to right. Items are module ids or menu bar item keys. A module not named in any row joins
+            the last row; a menu bar item appears only if a row names it. "widgets" maps a module id to its freeform
+            desktop widget box in points (omitting it keeps the module as a bar chip); "widgetColumns" arranges active
+            widgets into vertical stacks (columns) hugging the anchored edge. Desktop widgets stay visible while idle
+            and automatically clamp to their content height with zero blank void. "pinned" overrides whether a chip shows
+            while idle. "symbols" replaces a menu bar item's picture with an SF Symbol. Always return the complete layout.
             Current layout: \(JSONValue(any: try? JSONSerialization.jsonObject(with: JSONEncoder().encode(app.model.layout))).text)
             Modules in the bar: \(installed)
             Available to switch on:

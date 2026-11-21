@@ -47,9 +47,7 @@ public struct ModuleManifest: Equatable, Sendable {
     public var order: Int
     public var refreshSeconds: Double
     public var panelRefreshSeconds: Double
-    public var panelWidth: String
-    public var sizes: [WidgetSize]?
-    public var defaultSize: WidgetSize?
+    public var defaultShape: WidgetShape
     public var permissions: [String]
 
     public struct Invalid: Error, Equatable {
@@ -69,40 +67,11 @@ public struct ModuleManifest: Equatable, Sendable {
         order = Int(meta["order"].number ?? 50)
         refreshSeconds = min(max(meta["refreshSeconds"].number ?? 60, 1), 86_400)
         panelRefreshSeconds = min(max(meta["panelRefreshSeconds"].number ?? min(refreshSeconds, 5), 1), refreshSeconds)
-        panelWidth = meta["panelWidth"].string.flatMap { ["small", "medium", "large"].contains($0) ? $0 : nil } ?? "medium"
-        if let rawSizes = meta["sizes"].array {
-            let parsed = rawSizes.compactMap { $0.string.flatMap(WidgetSize.init(rawValue:)) }
-            let deduped = Array(Set(parsed)).sorted { $0.rank < $1.rank }
-            sizes = deduped.isEmpty ? nil : (deduped.contains(.chip) ? deduped : [.chip] + deduped)
-        } else {
-            sizes = nil
-        }
-        defaultSize = meta["defaultSize"].string.flatMap(WidgetSize.init(rawValue:)).flatMap { $0.isWidget ? $0 : nil }
+        defaultShape = meta["defaultShape"].string.flatMap(WidgetShape.init(rawValue:)) ?? .card
         permissions = (meta["permissions"].array ?? []).compactMap(\.string).map { $0.lowercased() == $0 || $0.contains(":") ? $0 : $0.lowercased() }
         for permission in permissions where Capability(permission) == nil && !Self.isHostPattern(permission) {
             throw Invalid(message: "meta.permissions entry '\(permission)' is neither a host (api.example.com, *.example.com, localhost:8080) nor a capability (notify, audio, clipboard, jobs, exec:<tool>, secret:<name>)")
         }
-    }
-
-    public func resolvedSizes(hasPanel: Bool, declaredViews: [WidgetSize] = []) -> [WidgetSize] {
-        if let sizes { return sizes }
-        let viewWidgets = declaredViews.filter(\.isWidget)
-        if !viewWidgets.isEmpty {
-            return ([.chip] + Array(Set(viewWidgets))).sorted { $0.rank < $1.rank }
-        }
-        guard hasPanel else { return [.chip] }
-        switch panelWidth {
-        case "large": return [.chip, .large]
-        default: return [.chip, .medium]
-        }
-    }
-
-    public func resolvedDefaultSize(hasPanel: Bool, declaredViews: [WidgetSize] = []) -> WidgetSize? {
-        let supported = resolvedSizes(hasPanel: hasPanel, declaredViews: declaredViews).filter(\.isWidget)
-        guard !supported.isEmpty else { return nil }
-        if let defaultSize, supported.contains(defaultSize) { return defaultSize }
-        if supported.contains(.medium) { return .medium }
-        return supported.first
     }
 
     public var hosts: [String] {

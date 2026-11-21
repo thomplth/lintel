@@ -56,10 +56,9 @@ public enum DesignGuide {
             summary: 'One sentence saying what it shows.',
             pinned: false,                     // true = always visible; false = visible only while the bar is active
             order: 50,                         // lower sorts further left
-            refreshSeconds: 60,                // how often render runs (minimum 1); be gentle with remote services
-            panelRefreshSeconds: 5,            // optional faster refresh while a widget is visible or peeked
-            sizes: ['chip', 'small', 'wide', 'medium', 'large'], // supported sizes: 'chip' | 'small' (1x1) | 'wide' (2x1) | 'medium' (2x2) | 'large' (3x2) | 'tall' (2x3)
-            defaultSize: 'medium',             // widget size shown on click-to-peek
+            refreshSeconds: 60,                // how often chip runs (minimum 1); be gentle with remote services
+            panelRefreshSeconds: 5,            // optional faster refresh while the widget is visible or peeked
+            defaultShape: 'card',              // initial freeform shape: 'compact' | 'card' (default) | 'wide' | 'sidebar' | 'canvas'
             permissions: ['api.example.com'],  // every host contacted, plus capabilities: 'notify', 'audio',
                                                // 'clipboard', 'jobs', 'exec:<tool>', 'secret:<name>'
           },
@@ -73,41 +72,39 @@ public enum DesignGuide {
               async run(host) { return { summary: 'ok' }; }
             },
           },
-          views: {                                          // preferred: one view per supported size (or use render(host, ctx))
-            chip(host) { return <bar item view>; },
-            small(host) { return [<hero view>]; },          // 1x1 square tile: one hero answer, zero scrolling
-            wide(host) { return [split([<left>, <right>])]; }, // 2x1 horizontal tile: hero + companion
-            medium(host) { return [<view>, ...]; },         // 2x2 balanced card: hero + detail/controls
-            large(host) { return [split([<left>, <right>])]; }, // 3x2 landscape dashboard
-          },
+          chip(host) { return <bar item view>; },           // one-line bar chip
+          widget(host) { return [<responsive blocks>]; },   // one responsive widget tree — adapts to any freeform size
           configure(host) { return [<settings controls>]; }, // optional: hover-revealed backside for formatting/config
           actions: {                                        // optional; run by buttons, toggles, fields, list rows
             name(host, payload) { ... },                    // may be async; views re-render afterwards
           },
         });
 
-        Legacy render(host) + panel(host) modules still work automatically (chip + medium), or render(host, ctx) may
-        inspect ctx.size ('chip' | 'small' | 'wide' | 'medium' | 'large' | 'tall').
-
         Variables declared at the top of the file live as long as the module is loaded, so keep in-memory state there.
         Use host.storage for anything that must survive a restart.
 
-        ## The unified size continuum
+        ## The unified freeform continuum
 
-        1. Chip ('chip'): one glance, one line in the top bar: an icon plus one or two short values. At most 8 elements
-           and about 30 characters. No sentences.
-        2. Widgets ('small' 1x1, 'wide' 2x1, 'medium' 2x2, 'large' 3x2, 'tall' 2x3): dragging a chip's corner handle
-           morphs it directly into a desktop widget; clicking a chip peeks its defaultSize. Widgets NEVER scroll—every
-           block adapts dynamically to the allocated frame:
-           - Use split([left, right]) for crisp 2-column layouts in 'wide' and 'large' widgets.
-           - Pass full candidate arrays to list(items, { compact: true }) — the layout engine automatically renders as
-             many complete rows as fit and appends '+N more' instead of clipping or scrolling.
-           - Leave chart() height unset (or 'fill') inside widgets so charts expand smoothly to fill available height.
-           - Put secondary settings (date formats, bar style toggles, city picker) in configure(host), shown on hover.
-           - Mark optional sections with { priority: 'detail' } or { priority: 'supporting' } so they yield cleanly
-             under large font sizes.
-        3. Stage (web or app inside a widget): fills the allocated widget frame automatically. Prefer native components
-           whenever they can do the job; reserve web() embeds for 'large' tiers.
+        1. Chip (`chip(host)`): one glance, one line in the top bar: an icon plus one or two short values. At most 8
+           elements and about 30 characters. No sentences.
+        2. Freeform Widget (`widget(host)`): dragging any corner or edge of a chip or widget morphs it smoothly to any
+           width and height (narrow vertical sidebar, slim top ribbon, compact tile, or wide dashboard) with zero blank
+           voids and zero scrolling. Write ONE priority-ordered responsive tree—never duplicate layouts per size:
+           - Use `split([left, right])` for two-pane content: it lays side-by-side when wide and automatically stacks
+             vertically when dragged narrow into a sidebar.
+           - Use `grid(columns, tiles)` for stat tiles or buttons: `columns` is a maximum; the grid steps down
+             automatically (`3 → 2 → 1`) as the widget narrows so values never crush.
+           - Pass ALL candidate rows to `list(items)` and set `elastic: true` on repeatable `section()` / `column()`
+             groups (meters, accounts, volumes): the layout engine shows as many complete entries as fit the current
+             height and appends `+N more` smoothly as you drag taller—never hard-cap arrays with `.slice(0, 3)`.
+           - Leave `chart()` / `app()` / `web()` height unset (or `'fill'`) so they expand fluidly with available height.
+           - Keep at least one `essential` (default priority) hero block at the top; mark secondary groups with
+             `{ priority: 'supporting' }` or `{ priority: 'detail' }` so they yield cleanly at tiny sizes.
+           - Put settings (formats, toggles, pickers) in `configure(host)`, revealed via the hover utility pill.
+           - Finite widgets automatically clamp their height to their natural content height so dragging taller never
+             creates empty blank space.
+        3. Widgets can be stacked vertically in columns or placed side-by-side on the shelf by dragging their grip handle
+           (or ⌘-dragging). Double-clicking the resize handle snaps height tightly to content.
 
         ## Components
 

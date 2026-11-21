@@ -34,14 +34,15 @@ struct RenderContext {
     var material: SurfaceMaterial
     var moduleID: String
     var manifest: ModuleManifest?
-    var widgetSize: WidgetSize?
+    /// Current widget outer dimensions when rendering inside a freeform desktop/peek widget; nil for bar chips or configure views.
+    var widgetBounds: CGSize?
     var panelFocus: PanelFocusMemory?
     var perform: (String, JSONValue) -> Void = { _, _ in }
     var performForResult: (String, JSONValue) async -> JSONValue = { _, _ in .null }
 
     init(
         theme: Theme, surface: Surface, material: SurfaceMaterial, moduleID: String = "",
-        manifest: ModuleManifest? = nil, widgetSize: WidgetSize? = nil
+        manifest: ModuleManifest? = nil, widgetBounds: CGSize? = nil
     ) {
         self.theme = theme
         metrics = Metrics(theme)
@@ -49,11 +50,19 @@ struct RenderContext {
         self.material = material
         self.moduleID = moduleID
         self.manifest = manifest
-        self.widgetSize = widgetSize
+        self.widgetBounds = widgetBounds
     }
 
-    var isInWidget: Bool { widgetSize != nil }
-    var isCompactWidget: Bool { widgetSize == .small || widgetSize == .wide }
+    var isInWidget: Bool { widgetBounds != nil }
+    var isNarrowWidget: Bool {
+        guard let b = widgetBounds else { return false }
+        return b.width < CGFloat(250 * metrics.widgetScale)
+    }
+    var isShortWidget: Bool {
+        guard let b = widgetBounds else { return false }
+        return b.height < CGFloat(155 * metrics.widgetScale)
+    }
+    var isCompactWidget: Bool { isNarrowWidget || isShortWidget }
 
     static func color(hex: String) -> Color {
         HexColor(hex).map { Color(red: $0.red, green: $0.green, blue: $0.blue) } ?? .white

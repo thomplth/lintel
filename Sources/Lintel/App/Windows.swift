@@ -345,7 +345,7 @@ final class BarWindowController {
         // Other apps' items come and go beside the menu bar row and push it along.
         if let menuBarRow, menuBarRow.screenFrame != menuBarRowFrame { place() }
         if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
-        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil, model.resizingSlotID == nil else { return }
+        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil, model.resizingSlotID == nil, model.draggingWidgetID == nil else { return }
         let pointer = NSEvent.mouseLocation
         let inBarCoords = barPoint(pointer)
         let isOverWidget = model.isPointInWidget(inBarCoords)
@@ -398,6 +398,7 @@ final class BarWindowController {
             || dragOrigin != nil
             || model.rearrangement != nil
             || model.resizingSlotID != nil
+            || model.draggingWidgetID != nil
         )
         if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
         updatePinDividers(isOverBar: isOverBarChip)
@@ -412,16 +413,15 @@ final class BarWindowController {
         withAnimation(BarModel.reflow) { model.showsPinDividers = shows }
     }
 
-    /// Wide enough for the widest row and Bento widget shelf, and tall enough for large/tall widgets, so the window
+    /// Wide enough for the widest row and freeform widget shelf, and tall enough for stacked sidebars, so the window
     /// rarely needs to resize mid-animation.
     private func canvas(around content: CGRect) -> CGRect {
-        let metrics = Metrics(model.theme)
-        let shelfWidth = metrics.widgetSize(.large).width + Placement.barSidePadding * 2 + 24
+        let screenWidth = screen?.visibleFrame.width ?? 1280
         let screenHeight = screen?.visibleFrame.height ?? 800
         return Placement.canvas(
             around: content,
-            width: max(model.maxBarWidth + Placement.barSidePadding * 2, shelfWidth, content.width + 24),
-            height: max(480, screenHeight * 0.72, content.height + 40),
+            width: max(model.maxBarWidth + Placement.barSidePadding * 2, min(screenWidth * 0.72, 920), content.width + 32),
+            height: max(520, screenHeight * 0.82, content.height + 40),
             anchor: model.settings.anchor
         )
     }
@@ -437,6 +437,9 @@ final class BarWindowController {
 
     func place() {
         guard let geometry, dragOrigin == nil else { return }
+        if model.maxWidgetScreenSize != geometry.visibleFrame.size {
+            model.maxWidgetScreenSize = geometry.visibleFrame.size
+        }
         let widest = Placement.widestRow(
             on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset,
             otherwise: max(geometry.frame.width * 0.62 - 16, 320)

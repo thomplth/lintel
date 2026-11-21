@@ -78,6 +78,7 @@ public enum Catalog {
     public static let textRoles = ["value", "label", "caption", "title", "display"]
     public static let weights = ["light", "regular", "medium", "semibold", "bold"]
     public static let heights = ["small", "medium", "large"]
+    public static let priorityTokens = ["essential", "supporting", "detail"]
 
     public static func spec(_ component: Component) -> ComponentSpec {
         byComponent[component]!
@@ -145,9 +146,9 @@ public enum Catalog {
         ),
         ComponentSpec(
             component: .row, surfaces: both,
-            props: [PropSpec("spacing", .token(spacingTokens)), PropSpec("align", .token(["top", "center", "bottom", "baseline"]))],
+            props: [PropSpec("spacing", .token(spacingTokens)), PropSpec("align", .token(["top", "center", "bottom", "baseline"])), PropSpec("priority", .token(priorityTokens))],
             hasChildren: true,
-            signature: "row(children, { spacing?, align? })",
+            signature: "row(children, { spacing?, align?, priority? })",
             doc: "Lays children out left to right. spacing: 'none' | 'tight' | 'normal' (default) | 'loose'."
         ),
         ComponentSpec(
@@ -157,10 +158,15 @@ public enum Catalog {
         ),
         ComponentSpec(
             component: .column, surfaces: panel,
-            props: [PropSpec("spacing", .token(spacingTokens)), PropSpec("align", .token(alignTokens))],
+            props: [
+                PropSpec("spacing", .token(spacingTokens)),
+                PropSpec("align", .token(alignTokens)),
+                PropSpec("priority", .token(priorityTokens)),
+                PropSpec("elastic", .bool),
+            ],
             hasChildren: true,
-            signature: "column(children, { spacing?, align? })",
-            doc: "Stacks children top to bottom. A panel's root is already a column, so this is only for nesting."
+            signature: "column(children, { spacing?, align?, priority?, elastic? })",
+            doc: "Stacks children top to bottom. elastic: true fits as many complete children as height allows and appends '+N more' instead of clipping or leaving blank space."
         ),
         ComponentSpec(
             component: .split, surfaces: panel,
@@ -168,27 +174,34 @@ public enum Catalog {
                 PropSpec("weights", .numbers),
                 PropSpec("spacing", .token(spacingTokens)),
                 PropSpec("align", .token(["top", "center", "bottom"])),
+                PropSpec("priority", .token(priorityTokens)),
             ],
             hasChildren: true,
-            signature: "split(children, { weights?, spacing?, align? })",
-            doc: "Lays 2 to 3 columns side by side inside wide or large widgets. weights sets relative widths (e.g. [1, 2]); defaults to equal widths."
+            signature: "split(children, { weights?, spacing?, align?, priority? })",
+            doc: "Responsive 2 to 3 column layout: lays children side by side when the widget is wide and automatically stacks them vertically when dragged narrow."
         ),
         ComponentSpec(
             component: .section, surfaces: panel,
             props: [
                 PropSpec("title", .string),
                 PropSpec("trailing", .string),
-                PropSpec("priority", .token(["essential", "supporting", "detail"])),
+                PropSpec("priority", .token(priorityTokens)),
+                PropSpec("elastic", .bool),
             ],
             hasChildren: true,
-            signature: "section(title, children, { trailing?, priority? })",
-            doc: "A titled group. Use sections to structure any panel or widget with more than one kind of content. trailing: short right-aligned note in the header. priority: 'essential' (default) | 'supporting' | 'detail' — lower-priority sections yield cleanly when a widget is tight."
+            signature: "section(title, children, { trailing?, priority?, elastic? })",
+            doc: "A titled group. trailing: short right-aligned note in the header. priority: 'essential' (default) | 'supporting' | 'detail' — lower-priority sections yield cleanly when short. elastic: true fits as many complete children (meters, keyValues, cards) as height allows with '+N more'."
         ),
         ComponentSpec(
             component: .grid, surfaces: panel,
-            props: [PropSpec("columns", .number, required: true), PropSpec("spacing", .token(spacingTokens))], hasChildren: true,
-            signature: "grid(columns, children, { spacing? })",
-            doc: "Equal-width columns (1 to 7), filled row by row. Use for stat tiles and button pads."
+            props: [
+                PropSpec("columns", .number, required: true),
+                PropSpec("spacing", .token(spacingTokens)),
+                PropSpec("priority", .token(priorityTokens)),
+            ],
+            hasChildren: true,
+            signature: "grid(columns, children, { spacing?, priority? })",
+            doc: "Responsive equal-width grid (up to columns, 1 to 7): automatically steps down columns as the widget narrows so tiles never crush."
         ),
         ComponentSpec(
             component: .stat, surfaces: panel,
@@ -313,9 +326,9 @@ public enum Catalog {
         ),
         ComponentSpec(
             component: .note, surfaces: panel,
-            props: [PropSpec("value", .string, required: true), PropSpec("tone", .tone), PropSpec("icon", .symbol)],
+            props: [PropSpec("value", .string, required: true), PropSpec("tone", .tone), PropSpec("icon", .symbol), PropSpec("priority", .token(priorityTokens))],
             hasChildren: false,
-            signature: "note(text, { tone?, icon? })",
+            signature: "note(text, { tone?, icon?, priority? })",
             doc: "A wrapped secondary paragraph for explanations, timestamps ('Updated 2 min ago') and errors (tone: 'bad')."
         ),
         ComponentSpec(
