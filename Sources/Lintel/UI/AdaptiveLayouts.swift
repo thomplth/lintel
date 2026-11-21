@@ -123,11 +123,42 @@ struct ZeroVoidCardLayout: Layout {
 
 // MARK: - Zero-Scroll Adaptive Vertical Stack
 
+struct AdaptiveStackCache {
+    var width: CGFloat?
+    var count = 0
+    var priorities: [Int] = []
+    var flexes: [BlockFlex] = []
+    var ideals: [CGFloat] = []
+    var bases: [CGFloat] = []
+    var hasMeasurement = false
+
+    mutating func invalidate() {
+        hasMeasurement = false
+    }
+
+    func matches(width: CGFloat?, count: Int) -> Bool {
+        guard hasMeasurement, self.count == count else { return false }
+        switch (self.width, width) {
+        case (nil, nil): return true
+        case (let a?, let b?): return abs(a - b) < 0.01
+        default: return false
+        }
+    }
+}
+
 /// Zero-scroll vertical stack for freeform widgets: fixed blocks take natural height, elastic collections & lists
 /// compress row-by-row first, flexible charts/apps absorb remaining height, and lower-priority sections yield cleanly.
 struct AdaptiveStackLayout: Layout {
     var spacing: CGFloat
     var alignment: HorizontalAlignment
+
+    func makeCache(subviews: Subviews) -> AdaptiveStackCache {
+        AdaptiveStackCache()
+    }
+
+    func updateCache(_ cache: inout AdaptiveStackCache, subviews: Subviews) {
+        cache.invalidate()
+    }
 
     private struct Plan {
         var visible: [Bool]
@@ -135,7 +166,7 @@ struct AdaptiveStackLayout: Layout {
         var totalHeight: CGFloat
     }
 
-    private func plan(proposal: ProposedViewSize, subviews: Subviews) -> Plan {
+    private func plan(proposal: ProposedViewSize, subviews: Subviews, cache: inout AdaptiveStackCache) -> Plan {
         let count = subviews.count
         guard count > 0 else { return Plan(visible: [], heights: [], totalHeight: 0) }
         let width = proposal.width
@@ -148,29 +179,46 @@ struct AdaptiveStackLayout: Layout {
         }
 
         var visible = Array(repeating: true, count: count)
-        let priorities = subviews.map { $0[BlockPriorityKey.self] }
-        let flexes = subviews.map { $0[BlockFlexKey.self] }
+        let priorities: [Int]
+        let flexes: [BlockFlex]
+        let ideals: [CGFloat]
+        let bases: [CGFloat]
 
-        let ideals: [CGFloat] = (0..<count).map { index in
-            switch flexes[index] {
-            case .fixed:
-                return subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-            case .flexible(_, let caps):
-                return caps ? subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height : .greatestFiniteMagnitude
+        if cache.matches(width: width, count: count) {
+            priorities = cache.priorities
+            flexes = cache.flexes
+            ideals = cache.ideals
+            bases = cache.bases
+        } else {
+            priorities = subviews.map { $0[BlockPriorityKey.self] }
+            flexes = subviews.map { $0[BlockFlexKey.self] }
+            ideals = (0..<count).map { index in
+                switch flexes[index] {
+                case .fixed:
+                    return subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+                case .flexible(_, let caps):
+                    return caps ? subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil)).height : .greatestFiniteMagnitude
+                }
             }
-        }
-
-        let bases: [CGFloat] = (0..<count).map { index in
-            switch flexes[index] {
-            case .fixed:
-                return ideals[index]
-            case .flexible(let minH, let caps):
-                // Measure the subview's true compressed minimum height at this width (e.g. a nested column or section
-                // holding fixed stats + a chart needs the sum of its essential children, not a hardcoded 52pt floor!).
-                let compressed = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: 0)).height
-                let floor = max(minH, compressed)
-                return caps ? min(floor, ideals[index]) : floor
+            bases = (0..<count).map { index in
+                switch flexes[index] {
+                case .fixed:
+                    return ideals[index]
+                case .flexible(let minH, let caps):
+                    // Measure the subview's true compressed minimum height at this width (e.g. a nested column or section
+                    // holding fixed stats + a chart needs the sum of its essential children, not a hardcoded 52pt floor!).
+                    let compressed = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: 0)).height
+                    let floor = max(minH, compressed)
+                    return caps ? min(floor, ideals[index]) : floor
+                }
             }
+            cache.width = width
+            cache.count = count
+            cache.priorities = priorities
+            cache.flexes = flexes
+            cache.ideals = ideals
+            cache.bases = bases
+            cache.hasMeasurement = true
         }
 
         func baseTotal() -> CGFloat {
@@ -267,14 +315,14 @@ struct AdaptiveStackLayout: Layout {
         return Plan(visible: visible, heights: heights, totalHeight: maxHeight <= 0.5 ? total : min(total, maxHeight))
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout AdaptiveStackCache) -> CGSize {
         let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let computed = plan(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
+        let computed = plan(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews, cache: &cache)
         return CGSize(width: width, height: computed.totalHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let computed = plan(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout AdaptiveStackCache) {
+        let computed = plan(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews, cache: &cache)
         var y = bounds.minY
         var placedAny = false
         for index in subviews.indices {
@@ -285,11 +333,14 @@ struct AdaptiveStackLayout: Layout {
             if placedAny { y += spacing }
             placedAny = true
             let h = computed.heights[index]
-            let size = subviews[index].sizeThatFits(ProposedViewSize(width: bounds.width, height: h))
-            let x: CGFloat = switch alignment {
-            case .center: bounds.minX + max(0, (bounds.width - size.width) / 2)
-            case .trailing: bounds.maxX - min(bounds.width, size.width)
-            default: bounds.minX
+            let x: CGFloat
+            if alignment == .leading {
+                x = bounds.minX
+            } else {
+                let size = subviews[index].sizeThatFits(ProposedViewSize(width: bounds.width, height: h))
+                x = alignment == .center
+                    ? bounds.minX + max(0, (bounds.width - size.width) / 2)
+                    : bounds.maxX - min(bounds.width, size.width)
             }
             subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: bounds.width, height: h))
             y += h
@@ -305,6 +356,14 @@ struct SplitLayout: Layout {
     var spacing: CGFloat
     var alignment: VerticalAlignment
     var stackThreshold: CGFloat
+
+    func makeCache(subviews: Subviews) -> AdaptiveStackCache {
+        AdaptiveStackCache()
+    }
+
+    func updateCache(_ cache: inout AdaptiveStackCache, subviews: Subviews) {
+        cache.invalidate()
+    }
 
     private func shouldStack(width: CGFloat?, count: Int) -> Bool {
         guard count > 1, let width else { return false }
@@ -322,7 +381,7 @@ struct SplitLayout: Layout {
         return sum > 0 ? raw.map { $0 / sum } : Array(repeating: 1 / CGFloat(count), count: count)
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout AdaptiveStackCache) -> CGSize {
         guard !subviews.isEmpty else { return .zero }
         if shouldStack(width: proposal.width, count: subviews.count) {
             return AdaptiveStackLayout(spacing: spacing, alignment: .leading).sizeThatFits(proposal: proposal, subviews: subviews, cache: &cache)
@@ -337,7 +396,7 @@ struct SplitLayout: Layout {
         return CGSize(width: width, height: maxHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout AdaptiveStackCache) {
         guard !subviews.isEmpty else { return }
         if shouldStack(width: bounds.width, count: subviews.count) {
             AdaptiveStackLayout(spacing: spacing, alignment: .leading).placeSubviews(in: bounds, proposal: proposal, subviews: subviews, cache: &cache)
@@ -426,34 +485,34 @@ struct AdaptiveGridLayout: Layout {
 // MARK: - Elastic General Collection (for `section(..., { elastic: true })` and `column(..., { elastic: true })`)
 
 /// Renders as many complete child blocks (meters, keyValues, account sections, etc.) as fit in the allocated height
-/// and cleanly appends a `+N more` caption row instead of dropping the whole section or leaving blank voids.
+/// and cleanly appends a `+N more` caption row purely in the `Layout` pass with zero `@State` mutation.
 struct AdaptiveCollectionView: View {
     let nodes: [ViewNode]
     let spacing: CGFloat
     let context: RenderContext
-    @State private var hiddenCount = 0
 
     private var footerHeight: CGFloat {
         CGFloat(context.metrics.fontSize(role: "caption") + context.metrics.unit * 1.5)
     }
 
     var body: some View {
-        ElasticItemsLayout(itemCount: nodes.count, spacing: spacing, footerHeight: footerHeight, onHiddenCount: { count in
-            if count != hiddenCount {
-                DispatchQueue.main.async { hiddenCount = count }
-            }
-        }) {
+        let footerLabels = AdaptiveOverflowFit.footerLabels(itemCount: nodes.count)
+        ElasticItemsLayout(itemCount: nodes.count, spacing: spacing, footerHeight: footerHeight) {
             ForEach(Array(nodes.enumerated()), id: \.offset) { entry in
                 NodeView(node: entry.element, context: context)
             }
-            HStack(spacing: context.metrics.unit) {
-                Text(hiddenCount > 0 ? "+\(hiddenCount) more" : "")
-                    .font(context.font(role: "caption", weight: "medium", mono: true))
-                    .foregroundStyle(context.tertiary)
-                Spacer(minLength: 0)
+            ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in
+                HStack(spacing: context.metrics.unit) {
+                    Text(entry.element)
+                        .font(context.font(role: "caption", weight: "medium", mono: true))
+                        .foregroundStyle(context.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .frame(height: footerHeight)
+                .allowsHitTesting(false)
             }
-            .frame(height: footerHeight)
         }
+        .clipped()
     }
 }
 
@@ -461,64 +520,54 @@ private struct ElasticItemsLayout: Layout {
     let itemCount: Int
     let spacing: CGFloat
     let footerHeight: CGFloat
-    let onHiddenCount: (Int) -> Void
 
-    private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], fitted: Int, totalHeight: CGFloat) {
-        let count = min(itemCount, max(0, subviews.count - 1))
-        guard count > 0 else { return ([], 0, 0) }
+    private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], result: AdaptiveOverflowFit.Result) {
+        let count = min(itemCount, subviews.count)
+        guard count > 0 else {
+            return ([], AdaptiveOverflowFit.Result(fittedCount: 0, hiddenCount: 0, activeFooterSlot: nil, totalHeight: 0))
+        }
         let width = proposal.width
         let heights = (0..<count).map { subviews[$0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
-        let sumAll = heights.reduce(0, +) + spacing * CGFloat(max(count - 1, 0))
-
-        guard let maxH = proposal.height, maxH.isFinite, sumAll > maxH + 0.5 else {
-            return (heights, count, sumAll)
-        }
-
-        let budget = max(0, maxH - footerHeight - spacing)
-        var used: CGFloat = 0
-        var fitted = 0
-        for height in heights {
-            let next = used + (fitted > 0 ? spacing : 0) + height
-            if next <= budget + 0.5 || fitted == 0 {
-                used = next
-                fitted += 1
-            } else {
-                break
-            }
-        }
-        let showMore = fitted < count
-        let total = used + (showMore ? spacing + footerHeight : 0)
-        return (heights, fitted, maxH <= 0.5 ? total : min(total, maxH))
+        let footerCount = max(0, subviews.count - count)
+        let result = AdaptiveOverflowFit.fit(
+            itemHeights: heights,
+            spacing: spacing,
+            maxHeight: proposal.height,
+            showsFooter: footerCount > 0,
+            footerHeight: footerHeight
+        )
+        return (heights, result)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? subviews.prefix(itemCount).map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let result = fit(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
+        let count = min(itemCount, subviews.count)
+        let width = proposal.width ?? subviews.prefix(count).map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let (_, result) = fit(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
         return CGSize(width: width, height: result.totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let count = min(itemCount, max(0, subviews.count - 1))
-        let result = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
-        let hidden = max(0, count - result.fitted)
-        onHiddenCount(hidden)
+        let count = min(itemCount, subviews.count)
+        let footerCount = max(0, subviews.count - count)
+        let (heights, result) = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+        let parked = CGPoint(x: bounds.minX, y: bounds.maxY + 200)
         var y = bounds.minY
         for index in 0..<count {
-            if index < result.fitted {
+            if index < result.fittedCount {
                 if index > 0 { y += spacing }
-                let h = result.heights[index]
+                let h = heights[index]
                 subviews[index].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: h))
                 y += h
             } else {
-                subviews[index].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+                subviews[index].place(at: parked, proposal: ProposedViewSize(width: 0, height: 0))
             }
         }
-        if subviews.count > count {
-            if hidden > 0 {
-                if result.fitted > 0 { y += spacing }
-                subviews[count].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
+        let footerY = result.fittedCount > 0 ? y + spacing : y
+        for slot in 0..<footerCount {
+            if result.activeFooterSlot == slot {
+                subviews[count + slot].place(at: CGPoint(x: bounds.minX, y: footerY), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
             } else {
-                subviews[count].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+                subviews[count + slot].place(at: parked, proposal: ProposedViewSize(width: 0, height: 0))
             }
         }
     }
@@ -527,11 +576,10 @@ private struct ElasticItemsLayout: Layout {
 // MARK: - Elastic Zero-Scroll List
 
 /// Elastic zero-scroll list: fits as many whole item() rows as the widget height allows, auto-compacts subtitles when
-/// tight, and shows "+N more" cleanly instead of scrolling or clipping.
+/// tight, and shows "+N more" cleanly in a single pure `Layout` pass with zero `@State` mutation.
 struct AdaptiveListView: View {
     let node: ViewNode
     let context: RenderContext
-    @State private var hiddenCount = 0
 
     private var showsSummary: Bool {
         node.string("overflow") != "none"
@@ -547,11 +595,8 @@ struct AdaptiveListView: View {
 
     var body: some View {
         let items = node.children
-        AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary, footerHeight: footerHeight, onHiddenCount: { count in
-            if count != hiddenCount {
-                DispatchQueue.main.async { hiddenCount = count }
-            }
-        }) {
+        let footerLabels = showsSummary ? AdaptiveOverflowFit.footerLabels(itemCount: items.count) : []
+        AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary && !footerLabels.isEmpty, footerHeight: footerHeight) {
             ForEach(Array(items.enumerated()), id: \.offset) { entry in
                 VStack(spacing: 0) {
                     if entry.offset > 0 {
@@ -560,16 +605,19 @@ struct AdaptiveListView: View {
                     AdaptiveItemRow(node: entry.element, context: context, compact: isCompact)
                 }
             }
-            HStack(spacing: context.metrics.unit) {
-                Text(hiddenCount > 0 ? "+\(hiddenCount) more" : "")
-                    .font(context.font(role: "caption", weight: "medium", mono: true))
-                    .foregroundStyle(context.tertiary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, isCompact ? context.metrics.unit * 2 : context.metrics.tilePadding)
-            .frame(height: footerHeight)
-            .overlay(alignment: .top) {
-                Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+            ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in
+                HStack(spacing: context.metrics.unit) {
+                    Text(entry.element)
+                        .font(context.font(role: "caption", weight: "medium", mono: true))
+                        .foregroundStyle(context.tertiary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, isCompact ? context.metrics.unit * 2 : context.metrics.tilePadding)
+                .frame(height: footerHeight)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(context.separator).frame(height: 1).padding(.leading, context.metrics.tilePadding)
+                }
+                .allowsHitTesting(false)
             }
         }
         .background(context.fill, in: context.tileShape)
@@ -597,62 +645,52 @@ private struct AdaptiveListLayout: Layout {
     let itemCount: Int
     let showsFooter: Bool
     let footerHeight: CGFloat
-    let onHiddenCount: (Int) -> Void
 
-    private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], fitted: Int, totalHeight: CGFloat) {
-        let rowCount = min(itemCount, max(0, subviews.count - 1))
-        guard rowCount > 0 else { return ([], 0, 0) }
+    private func fit(proposal: ProposedViewSize, subviews: Subviews) -> (heights: [CGFloat], result: AdaptiveOverflowFit.Result) {
+        let rowCount = min(itemCount, subviews.count)
+        guard rowCount > 0 else {
+            return ([], AdaptiveOverflowFit.Result(fittedCount: 0, hiddenCount: 0, activeFooterSlot: nil, totalHeight: 0))
+        }
         let width = proposal.width
         let rowHeights = (0..<rowCount).map { subviews[$0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
-        let sumAll = rowHeights.reduce(0, +)
-
-        guard let maxH = proposal.height, maxH.isFinite, sumAll > maxH + 0.5 else {
-            return (rowHeights, rowCount, sumAll)
-        }
-
-        let budget = showsFooter ? max(0, maxH - footerHeight) : maxH
-        var used: CGFloat = 0
-        var fitted = 0
-        for height in rowHeights {
-            if used + height <= budget + 0.5 || fitted == 0 {
-                used += height
-                fitted += 1
-            } else {
-                break
-            }
-        }
-        let showMore = showsFooter && fitted < rowCount
-        let total = used + (showMore ? footerHeight : 0)
-        return (rowHeights, fitted, maxH <= 0.5 ? total : min(total, maxH))
+        let footerCount = max(0, subviews.count - rowCount)
+        let result = AdaptiveOverflowFit.fit(
+            itemHeights: rowHeights,
+            spacing: 0,
+            maxHeight: proposal.height,
+            showsFooter: showsFooter && footerCount > 0,
+            footerHeight: footerHeight
+        )
+        return (rowHeights, result)
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? subviews.prefix(itemCount).map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
-        let result = fit(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
+        let rowCount = min(itemCount, subviews.count)
+        let width = proposal.width ?? subviews.prefix(rowCount).map { $0.sizeThatFits(.unspecified).width }.max() ?? 0
+        let (_, result) = fit(proposal: ProposedViewSize(width: width, height: proposal.height), subviews: subviews)
         return CGSize(width: width, height: result.totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rowCount = min(itemCount, max(0, subviews.count - 1))
-        let result = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
-        let hidden = max(0, rowCount - result.fitted)
-        onHiddenCount(hidden)
+        let rowCount = min(itemCount, subviews.count)
+        let footerCount = max(0, subviews.count - rowCount)
+        let (rowHeights, result) = fit(proposal: ProposedViewSize(width: bounds.width, height: bounds.height), subviews: subviews)
+        let parked = CGPoint(x: bounds.minX, y: bounds.maxY + 200)
         var y = bounds.minY
         for index in 0..<rowCount {
-            if index < result.fitted {
-                let h = result.heights[index]
+            if index < result.fittedCount {
+                let h = rowHeights[index]
                 subviews[index].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: h))
                 y += h
             } else {
-                subviews[index].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+                subviews[index].place(at: parked, proposal: ProposedViewSize(width: 0, height: 0))
             }
         }
-        if subviews.count > rowCount {
-            let showMore = showsFooter && hidden > 0
-            if showMore {
-                subviews[rowCount].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
+        for slot in 0..<footerCount {
+            if result.activeFooterSlot == slot {
+                subviews[rowCount + slot].place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: footerHeight))
             } else {
-                subviews[rowCount].place(at: CGPoint(x: bounds.minX, y: bounds.maxY + 200), proposal: ProposedViewSize(width: 0, height: 0))
+                subviews[rowCount + slot].place(at: parked, proposal: ProposedViewSize(width: 0, height: 0))
             }
         }
     }

@@ -308,3 +308,80 @@ extension Metrics {
         )
     }
 }
+
+/// Pure, stateless fitting math shared by `AdaptiveListLayout` and `ElasticItemsLayout`.
+/// Computing the visible prefix and overflow footer slot directly from bounds avoids mutating SwiftUI `@State`
+/// during `placeSubviews`, which otherwise oscillates across measurement and placement passes.
+public enum AdaptiveOverflowFit {
+    /// Upper bound on pre-built `"+N more"` footer subviews so pathological large lists stay O(1) in footer count.
+    public static let maxFooterSlots = 64
+
+    public struct Result: Equatable, Sendable {
+        public var fittedCount: Int
+        public var hiddenCount: Int
+        /// Zero-based index into `footerLabels(itemCount:)`, or `nil` when no overflow footer is shown.
+        public var activeFooterSlot: Int?
+        public var totalHeight: CGFloat
+
+        public init(fittedCount: Int, hiddenCount: Int, activeFooterSlot: Int?, totalHeight: CGFloat) {
+            self.fittedCount = fittedCount
+            self.hiddenCount = hiddenCount
+            self.activeFooterSlot = activeFooterSlot
+            self.totalHeight = totalHeight
+        }
+    }
+
+    public static func footerLabels(itemCount: Int) -> [String] {
+        guard itemCount > 1 else { return [] }
+        let maxHidden = itemCount - 1
+        let slotCount = min(maxHidden, maxFooterSlots)
+        return (1...slotCount).map { hidden in
+            if hidden == maxFooterSlots && maxHidden > maxFooterSlots {
+                "+\(maxFooterSlots)+ more"
+            } else {
+                "+\(hidden) more"
+            }
+        }
+    }
+
+    public static func fit(
+        itemHeights: [CGFloat],
+        spacing: CGFloat,
+        maxHeight: CGFloat?,
+        showsFooter: Bool,
+        footerHeight: CGFloat
+    ) -> Result {
+        let count = itemHeights.count
+        guard count > 0 else {
+            return Result(fittedCount: 0, hiddenCount: 0, activeFooterSlot: nil, totalHeight: 0)
+        }
+        let sumAll = itemHeights.reduce(0, +) + spacing * CGFloat(max(count - 1, 0))
+        guard let maxH = maxHeight, maxH.isFinite, sumAll > maxH + 0.5 else {
+            return Result(fittedCount: count, hiddenCount: 0, activeFooterSlot: nil, totalHeight: sumAll)
+        }
+
+        let budget = showsFooter ? max(0, maxH - footerHeight - spacing) : maxH
+        var used: CGFloat = 0
+        var fitted = 0
+        for height in itemHeights {
+            let next = used + (fitted > 0 ? spacing : 0) + height
+            if next <= budget + 0.5 || fitted == 0 {
+                used = next
+                fitted += 1
+            } else {
+                break
+            }
+        }
+        let hidden = max(0, count - fitted)
+        let showMore = showsFooter && hidden > 0
+        let slotCount = min(max(count - 1, 0), maxFooterSlots)
+        let activeFooterSlot: Int? = (showMore && slotCount > 0) ? min(hidden, slotCount) - 1 : nil
+        let total = used + (showMore ? (fitted > 0 ? spacing : 0) + footerHeight : 0)
+        return Result(
+            fittedCount: fitted,
+            hiddenCount: hidden,
+            activeFooterSlot: activeFooterSlot,
+            totalHeight: maxH <= 0.5 ? total : min(total, maxH)
+        )
+    }
+}

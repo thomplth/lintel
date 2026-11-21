@@ -296,6 +296,73 @@ private func evaluate(_ script: String) -> JSValue {
         let healthyProblems = DesignLint.checkWidget(healthy, manifest: manifest, actions: [], metrics: metrics, symbolExists: { _ in true })
         #expect(healthyProblems.filter { $0.severity == .error }.isEmpty)
     }
+    @Test("AdaptiveOverflowFit selects exact footer slot without state and stays idempotent")
+    func adaptiveOverflowFitStateless() {
+        let rows: [CGFloat] = [32, 32, 32]
+
+        // Unbounded natural pass fits every item and hides the footer.
+        let unbounded = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: nil, showsFooter: true, footerHeight: 22)
+        #expect(unbounded.fittedCount == 3)
+        #expect(unbounded.hiddenCount == 0)
+        #expect(unbounded.activeFooterSlot == nil)
+        #expect(unbounded.totalHeight == 96)
+
+        // Zero-height compressed floor keeps the first item plus the "+2 more" footer.
+        let floor = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: 0, showsFooter: true, footerHeight: 22)
+        #expect(floor.fittedCount == 1)
+        #expect(floor.hiddenCount == 2)
+        #expect(floor.activeFooterSlot == 1)
+        #expect(floor.totalHeight == 54)
+
+        // Constrained pass with leftover space snaps to 1 row + "+2 more" and stays idempotent on re-measure.
+        let constrained = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: 78, showsFooter: true, footerHeight: 22)
+        #expect(constrained.fittedCount == 1)
+        #expect(constrained.hiddenCount == 2)
+        #expect(constrained.activeFooterSlot == 1)
+        #expect(constrained.totalHeight == 54)
+
+        let remeasured = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: constrained.totalHeight, showsFooter: true, footerHeight: 22)
+        #expect(remeasured == constrained)
+
+        // Exactly enough height for 2 rows + "+1 more" selects slot 0.
+        let twoRows = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: 86, showsFooter: true, footerHeight: 22)
+        #expect(twoRows.fittedCount == 2)
+        #expect(twoRows.hiddenCount == 1)
+        #expect(twoRows.activeFooterSlot == 0)
+        #expect(twoRows.totalHeight == 86)
+
+        // With showsFooter disabled, no footer slot is ever active.
+        let noFooter = AdaptiveOverflowFit.fit(itemHeights: rows, spacing: 0, maxHeight: 70, showsFooter: false, footerHeight: 22)
+        #expect(noFooter.fittedCount == 2)
+        #expect(noFooter.hiddenCount == 1)
+        #expect(noFooter.activeFooterSlot == nil)
+        #expect(noFooter.totalHeight == 64)
+    }
+
+    @Test("AdaptiveOverflowFit handles elastic spacing and capped footer labels")
+    func adaptiveOverflowFitSpacingAndCaps() {
+        let labels = AdaptiveOverflowFit.footerLabels(itemCount: 3)
+        #expect(labels == ["+1 more", "+2 more"])
+        #expect(AdaptiveOverflowFit.footerLabels(itemCount: 1).isEmpty)
+
+        let hugeCount = AdaptiveOverflowFit.maxFooterSlots + 25
+        let hugeLabels = AdaptiveOverflowFit.footerLabels(itemCount: hugeCount)
+        #expect(hugeLabels.count == AdaptiveOverflowFit.maxFooterSlots)
+        #expect(hugeLabels.first == "+1 more")
+        #expect(hugeLabels.last == "+\(AdaptiveOverflowFit.maxFooterSlots)+ more")
+
+        let hugeFit = AdaptiveOverflowFit.fit(
+            itemHeights: Array(repeating: 30, count: hugeCount),
+            spacing: 6,
+            maxHeight: 60,
+            showsFooter: true,
+            footerHeight: 20
+        )
+        #expect(hugeFit.fittedCount == 1)
+        #expect(hugeFit.hiddenCount == hugeCount - 1)
+        #expect(hugeFit.activeFooterSlot == AdaptiveOverflowFit.maxFooterSlots - 1)
+        #expect(hugeFit.totalHeight == 56)
+    }
 }
 
 private extension JSONValue {
