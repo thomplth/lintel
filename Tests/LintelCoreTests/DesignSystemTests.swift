@@ -54,6 +54,15 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(parsed.problems.count == 1)
     }
 
+    @Test func aGaugeAcceptsASecondaryStackedFractionAndTone() {
+        let parsed = ViewNode.parse(["type": "gauge", "value": 0.8, "tone": "warn", "secondary": 0.35, "secondaryTone": "info"])
+        #expect(parsed.problems.isEmpty)
+        #expect(parsed.node?.number("value") == 0.8)
+        #expect(parsed.node?.tone() == ToneChoice(.warn))
+        #expect(parsed.node?.number("secondary") == 0.35)
+        #expect(parsed.node?.tone("secondaryTone") == ToneChoice(.info))
+    }
+
     @Test func anUnknownOptionIsDroppedWithAWarning() {
         let parsed = ViewNode.parse(["type": "text", "value": "x", "fontSize": 40])
         #expect(parsed.node?.props["fontSize"] == nil)
@@ -650,6 +659,20 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(node?.string("accessoryIcon") == "minus.circle")
         #expect(node?.string("accessoryAction") == "remove")
         #expect(node?.string("accessoryLabel") == "Remove Tokyo")
+    }
+
+    @Test func aGaugeCarriesSecondaryBarOptionsFromThePrelude() {
+        let built = evaluate("JSON.stringify(gauge(0.75, { tone: 'warn', secondary: 0.4, secondaryTone: 'good' }))").toString()!
+        let parsed = ViewNode.parse(json: built)
+        #expect(parsed.problems.isEmpty, "\(parsed.problems)")
+        #expect(parsed.node?.number("value") == 0.75)
+        #expect(parsed.node?.tone() == ToneChoice(.warn))
+        #expect(parsed.node?.number("secondary") == 0.4)
+        #expect(parsed.node?.tone("secondaryTone") == ToneChoice(.good))
+
+        let single = ViewNode.parse(json: evaluate("JSON.stringify(gauge(0.5))").toString()!).node
+        #expect(single?.number("secondary") == nil)
+        #expect(single?.tone("secondaryTone") == nil)
     }
 
     @Test func aFieldNamesTheActionThatSuggestsCompletions() {

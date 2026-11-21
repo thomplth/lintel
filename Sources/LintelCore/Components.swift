@@ -121,9 +121,14 @@ public enum Catalog {
         ),
         ComponentSpec(
             component: .gauge, surfaces: both,
-            props: [PropSpec("value", .fraction, required: true), PropSpec("tone", .tone)], hasChildren: false,
-            signature: "gauge(fraction0to1, { tone? })",
-            doc: "A tiny horizontal level bar."
+            props: [
+                PropSpec("value", .fraction, required: true),
+                PropSpec("tone", .tone),
+                PropSpec("secondary", .fraction),
+                PropSpec("secondaryTone", .tone),
+            ], hasChildren: false,
+            signature: "gauge(fraction0to1, { tone?, secondary?, secondaryTone? })",
+            doc: "A tiny horizontal level bar; pass secondary (0..1, optional secondaryTone) to stack a second bar underneath."
         ),
         ComponentSpec(
             component: .ring, surfaces: both,

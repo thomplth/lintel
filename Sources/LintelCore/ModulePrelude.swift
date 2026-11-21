@@ -21,7 +21,15 @@ public enum ModulePrelude {
     function icon(name, options) { var o = __options(options); return __node('icon', { name: __string(name), tone: o.tone || o.color, size: o.size }); }
     function dot(tone) { return __node('dot', { tone: typeof tone === 'object' ? __options(tone).tone : tone }); }
     function badge(value, options) { var o = __options(options); return __node('badge', { value: __string(value), tone: o.tone || o.color }); }
-    function gauge(value, options) { var o = __options(options); return __node('gauge', { value: Number(value), tone: o.tone || o.color }); }
+    function gauge(value, options) {
+      var o = __options(options);
+      return __node('gauge', {
+        value: Number(value),
+        tone: o.tone || o.color,
+        secondary: o.secondary !== undefined && o.secondary !== null ? Number(o.secondary) : undefined,
+        secondaryTone: o.secondaryTone || o.secondaryColor,
+      });
+    }
     function ring(value, options) { var o = __options(options); return __node('ring', { value: Number(value), tone: o.tone || o.color }); }
     function sparkline(values, options) { var o = __options(options); return __node('sparkline', { values: values, tone: o.tone || o.color, kind: o.kind }); }
     function row(children, options) { var o = __options(options); return __node('row', { spacing: o.spacing, align: o.align }, children); }

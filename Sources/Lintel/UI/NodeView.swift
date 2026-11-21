@@ -16,8 +16,7 @@ struct NodeView: View {
             Circle().fill(context.color(node.tone(), fallback: context.secondary))
                 .frame(width: context.metrics.fontSize(role: nil) * 0.5, height: context.metrics.fontSize(role: nil) * 0.5)
         case .badge: badgeView(node.string("value") ?? "", tone: node.tone()?.resolved(for: context.look)?.tone)
-        case .gauge: LevelBar(fraction: node.number("value") ?? 0, color: context.color(node.tone()), track: context.strongFill)
-            .frame(width: context.theme.fontSize * 2.2, height: max(4, context.theme.fontSize * 0.36))
+        case .gauge: gaugeView
         case .ring: ringView
         case .sparkline:
             SparklineShape(values: node.numbers("values"), isBars: node.string("kind") == "bar", color: context.color(node.tone()))
@@ -128,6 +127,22 @@ struct NodeView: View {
             .padding(.vertical, 1)
             .frame(minWidth: context.metrics.fontSize(role: "caption") * 1.5)
             .background(color, in: Capsule())
+    }
+
+    @ViewBuilder private var gaugeView: some View {
+        let width = context.theme.fontSize * 2.2
+        if let secondary = node.number("secondary") {
+            let barHeight = max(3, context.theme.fontSize * 0.24)
+            VStack(spacing: 2) {
+                LevelBar(fraction: node.number("value") ?? 0, color: context.color(node.tone()), track: context.strongFill)
+                    .frame(width: width, height: barHeight)
+                LevelBar(fraction: secondary, color: context.color(node.tone("secondaryTone") ?? node.tone()), track: context.strongFill)
+                    .frame(width: width, height: barHeight)
+            }
+        } else {
+            LevelBar(fraction: node.number("value") ?? 0, color: context.color(node.tone()), track: context.strongFill)
+                .frame(width: width, height: max(4, context.theme.fontSize * 0.36))
+        }
     }
 
     private var ringView: some View {
