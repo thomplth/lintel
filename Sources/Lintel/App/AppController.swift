@@ -449,10 +449,10 @@ final class AppController {
         var layout = model.layout
         layout.materialise(model.layoutItems.filter { item in
             !item.isOptIn || layout.rows.contains { $0.contains(item.key) }
-        })
+        }, keepsFirstRow: model.isFirstRowInMenuBar)
         switch command {
         case "pin": layout.pinned[slot.id] = !layout.isPinned(slot.id, default: slot.isPinned)
-        case "hide": layout.setHidden(slot.id, true)
+        case "hide": layout.setHidden(slot.id, true, keepsFirstRow: model.isFirstRowInMenuBar)
         case "left": layout.shift(slot.id, by: -1)
         case "right": layout.shift(slot.id, by: 1)
         case "up": layout.moveToRow(slot.id, offset: -1)
@@ -477,7 +477,7 @@ final class AppController {
         var layout = model.layout
         layout.rows = rows
         layout.pinned.merge(pins) { _, new in new }
-        if let hiding { layout.setHidden(hiding, true) }
+        if let hiding { layout.setHidden(hiding, true, keepsFirstRow: model.isFirstRowInMenuBar) }
         host.update(layout)
         adoption.refreshSlots()
         adoption.scanIfNeeded(force: false)

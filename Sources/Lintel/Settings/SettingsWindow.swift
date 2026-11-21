@@ -560,14 +560,30 @@ private struct ItemsPane: View {
 
     private func edit(_ change: (inout BarLayout) -> Void) {
         var layout = model.layout
-        layout.materialise(model.layoutItems.filter { item in !item.isOptIn || layout.rows.contains { $0.contains(item.key) } })
+        layout.materialise(
+            model.layoutItems.filter { item in !item.isOptIn || layout.rows.contains { $0.contains(item.key) } },
+            keepsFirstRow: model.isFirstRowInMenuBar
+        )
         change(&layout)
         app.host.update(layout)
         app.adoption.scanIfNeeded(force: true)
     }
 
     private func title(_ key: String) -> String {
-        model.slot(key)?.title ?? state.menuBarItems.first { $0.key == key }?.label ?? key
+        model.slot(key)?.title
+            ?? state.listings.first { $0.id == key }?.title
+            ?? state.menuBarItems.first { $0.key == key }?.label
+            ?? key
+    }
+
+    private func showHidden(_ key: String) {
+        if let listing = state.listings.first(where: { $0.id == key }), !listing.isEnabled {
+            app.host.setEnabled(listing.id, true, origin: listing.origin)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { app.showSettings(tab: .items) }
+            return
+        }
+        let isOptIn = model.slot(key)?.isOptIn == true || key.hasPrefix("menubar:")
+        edit { $0.show(key, isOptIn: isOptIn) }
     }
 
     var body: some View {
@@ -594,7 +610,7 @@ private struct ItemsPane: View {
                                 Button { edit { $0.moveToRow(key, offset: 1) } } label: { Image(systemName: "arrow.down") }
                             }
                             .frame(width: 130)
-                            Button { edit { $0.setHidden(key, true) } } label: { Image(systemName: "eye.slash") }
+                            Button { edit { $0.setHidden(key, true, keepsFirstRow: model.isFirstRowInMenuBar) } } label: { Image(systemName: "eye.slash") }
                                 .help("Hide from the bar")
                         }
                     }
@@ -608,7 +624,7 @@ private struct ItemsPane: View {
                     HStack {
                         Text(title(key))
                         Spacer()
-                        Button("Show") { edit { $0.setHidden(key, false) } }
+                        Button("Show") { showHidden(key) }
                     }
                 }
             }
@@ -685,7 +701,7 @@ private struct ModulesPane: View {
             if !listings.isEmpty {
                 Card(title: origin == .user ? "Yours" : origin == .builtIn ? "Built in" : "Library") {
                     ForEach(listings) { listing in
-                        ModuleRow(app: app, listing: listing)
+                        ModuleRow(app: app, listing: listing, isHidden: model.layout.isHidden(listing.id))
                         if listing.id != listings.last?.id { Divider() }
                     }
                 }
@@ -698,6 +714,7 @@ private struct ModulesPane: View {
 private struct ModuleRow: View {
     let app: AppController
     let listing: ModuleListing
+    let isHidden: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -714,9 +731,17 @@ private struct ModuleRow: View {
                     Text(failure).font(.footnote).foregroundStyle(.red).lineLimit(3)
                 } else if listing.needsApproval {
                     Text("Waiting for you to allow its permissions. Click it in the bar.").font(.footnote).foregroundStyle(.orange)
+                } else if listing.isEnabled && isHidden {
+                    Text("Hidden from the bar.").font(.footnote).foregroundStyle(.orange)
                 }
             }
             Spacer()
+            if listing.isEnabled && isHidden {
+                Button("Show in Bar") {
+                    app.host.showInBar(listing.id)
+                }
+                .controlSize(.small)
+            }
             if listing.origin == .user {
                 Menu {
                     Button("Export…") { ModuleSharing.export(listing, app: app) }

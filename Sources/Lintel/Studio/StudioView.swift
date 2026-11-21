@@ -157,15 +157,18 @@ private struct SidebarModuleRow: View {
     private var moduleJobs: [JobSnapshot] { jobs.snapshots(for: listing.id) }
     private var liveNeedsApproval: Bool { model.slot(listing.id)?.needsApproval ?? listing.needsApproval }
     private var liveFailure: String? { model.slot(listing.id)?.failure ?? listing.failure }
+    private var isHiddenFromBar: Bool { listing.isEnabled && model.layout.isHidden(listing.id) }
 
     private var statusColor: Color {
         if liveFailure != nil || moduleJobs.contains(where: { $0.effectiveStatus == .failed }) { return .red }
         if liveNeedsApproval { return .orange }
+        if isHiddenFromBar { return .secondary }
         if moduleJobs.contains(where: { $0.effectiveStatus == .running }) { return .blue }
         return listing.isEnabled ? .green : .secondary.opacity(0.45)
     }
 
     private var trailingText: String {
+        if isHiddenFromBar { return "hidden" }
         if !moduleJobs.isEmpty {
             return moduleJobs.count == 1 ? "1 job" : "\(moduleJobs.count) jobs"
         }
@@ -306,7 +309,7 @@ private struct StudioDashboardPane: View {
                         Text("No enabled modules.").foregroundStyle(.secondary)
                     } else {
                         ForEach(enabledListings) { listing in
-                            DashboardModuleRow(app: app, jobs: jobs, listing: listing) {
+                            DashboardModuleRow(app: app, jobs: jobs, listing: listing, isHiddenFromBar: model.layout.isHidden(listing.id)) {
                                 state.selection = .module(listing.id)
                             }
                             if listing.id != enabledListings.last?.id { Divider() }
@@ -352,6 +355,7 @@ private struct DashboardModuleRow: View {
     let app: AppController
     @ObservedObject var jobs: JobHost
     let listing: ModuleListing
+    let isHiddenFromBar: Bool
     let onSelect: () -> Void
 
     var body: some View {
@@ -379,6 +383,8 @@ private struct DashboardModuleRow: View {
                             TagPill(text: "Needs approval", color: .orange)
                         } else if listing.failure != nil || hasJobError {
                             TagPill(text: "Error", color: .red)
+                        } else if isHiddenFromBar {
+                            TagPill(text: "Hidden from bar", color: .orange)
                         }
                     }
 
@@ -583,6 +589,24 @@ private struct StudioModuleInspector: View {
                     }
                     .padding(14)
                     .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                if listing.isEnabled && model.layout.isHidden(listing.id) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "eye.slash.fill").font(.title3).foregroundStyle(.orange)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Hidden from the bar").fontWeight(.semibold)
+                            Text("This module is enabled, but currently hidden from your bar.")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Show in Bar") {
+                            app.host.showInBar(listing.id)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(14)
+                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
                 // Live Preview

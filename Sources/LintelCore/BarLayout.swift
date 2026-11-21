@@ -258,12 +258,25 @@ public struct BarLayout: Equatable, Codable, Sendable {
         }
     }
 
-    public mutating func setHidden(_ key: String, _ isHidden: Bool) {
+    public func isHidden(_ key: String) -> Bool {
+        hidden.contains(key)
+    }
+
+    public mutating func setHidden(_ key: String, _ isHidden: Bool, keepsFirstRow: Bool = false) {
         hidden.removeAll { $0 == key }
         if isHidden {
             hidden.append(key)
-            remove(key)
+            remove(key, keepsFirstRow: keepsFirstRow)
             setWidget(nil, for: key)
+        }
+    }
+
+    /// Makes a hidden item visible again. Opt-in items (such as adopted menu bar items) are placed back into a row
+    /// because `arranged` omits unlisted opt-in items.
+    public mutating func show(_ key: String, isOptIn: Bool = false) {
+        hidden.removeAll { $0 == key }
+        if isOptIn, row(of: key) == nil {
+            place(key, row: max(rows.count - 1, 0))
         }
     }
 }

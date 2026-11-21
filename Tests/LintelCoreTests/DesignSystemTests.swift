@@ -306,6 +306,31 @@ private func evaluate(_ script: String) -> JSValue {
         layout.setHidden("system", false)
         #expect(layout.hidden.isEmpty)
     }
+
+    @Test func showingAHiddenModuleMakesItReappearInArrangedRows() {
+        var layout = BarLayout(rows: [["clock"]], hidden: ["system"])
+        #expect(layout.isHidden("system"))
+        #expect(!layout.arranged(items, isActive: true).joined().contains("system"))
+        layout.show("system")
+        #expect(!layout.isHidden("system"))
+        #expect(layout.arranged(items, isActive: true) == [["clock", "system", "battery"]])
+    }
+
+    @Test func showingAHiddenOptInItemPlacesItBackInARow() {
+        var layout = BarLayout(rows: [["clock"]], hidden: ["menubar:x"])
+        layout.show("menubar:x", isOptIn: true)
+        #expect(!layout.isHidden("menubar:x"))
+        #expect(layout.rows == [["clock", "menubar:x"]])
+        #expect(layout.arranged(items, isActive: true).joined().contains("menubar:x"))
+    }
+
+    @Test func hidingTheLastMenuBarItemKeepsTheFirstRowEmptyWhenPreserved() {
+        var layout = BarLayout(rows: [["system"], ["clock"]])
+        layout.setHidden("system", true, keepsFirstRow: true)
+        #expect(layout.rows == [[], ["clock"]])
+        #expect(layout.isHidden("system"))
+        #expect(layout.arranged(items, isActive: true, keepsFirstRow: true) == [[], ["clock", "battery"]])
+    }
 }
 
 @Suite struct MenuBarFitting {

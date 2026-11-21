@@ -651,6 +651,11 @@ final class ModuleHost {
             settings.disabledModules.removeAll { $0 == id }
             update(settings)
         }
+        if model.layout.isHidden(id) {
+            var layout = model.layout
+            layout.show(id)
+            update(layout)
+        }
         sync()
     }
 
@@ -698,7 +703,18 @@ final class ModuleHost {
             settings.disabledModules.append(id)
         }
         update(settings)
+        if model.layout.isHidden(id) {
+            var layout = model.layout
+            layout.show(id)
+            update(layout)
+        }
         sync()
+    }
+
+    func showInBar(_ id: String, isOptIn: Bool = false) {
+        var layout = model.layout
+        layout.show(id, isOptIn: isOptIn)
+        if layout != model.layout { update(layout) }
     }
 
     func update(_ settings: AppSettings) {
