@@ -350,20 +350,19 @@ function buildStacks(summaries, groupByStack) {
     for (const root of allRoots) {
       if (visited.has(root.pr.number)) continue;
       const nodes = [];
-      const walk = (node, depth, parentNumber, ancestorGuides, isLastSibling) => {
+      const walk = (node, depth, parentNumber, isLastSibling) => {
         if (visited.has(node.pr.number)) return;
         visited.add(node.pr.number);
-        const prefix = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '└ ' : '├ '}`;
+        const prefix = depth === 0 ? '' : (isLastSibling ? '└ ' : '├ ');
         nodes.push({ entry: node, depth, prefix, parentNumber });
         const kids = (childrenMap.get(node.pr.number) || [])
           .filter((k) => !visited.has(k.pr.number))
           .sort((a, b) => a.pr.number - b.pr.number);
-        const nextGuides = depth === 0 ? '' : `${ancestorGuides}${isLastSibling ? '  ' : '│ '}`;
         kids.forEach((child, idx) => {
-          walk(child, depth + 1, node.pr.number, nextGuides, idx === kids.length - 1);
+          walk(child, depth + 1, node.pr.number, idx === kids.length - 1);
         });
       };
-      walk(root, 0, null, '', true);
+      walk(root, 0, null, true);
 
       if (nodes.length >= 2) {
         const size = nodes.length;
@@ -398,44 +397,22 @@ function buildStacks(summaries, groupByStack) {
   return [...stackSections, ...standaloneSections];
 }
 
+function cleanTitle(raw) {
+  let value = String(raw || '').trim();
+  value = value.replace(/^(?:\[[^\]]+\]\s*)+/, '');
+  value = value.replace(/^[A-Z][A-Z0-9_]+-\d+\s*(?:[:\-–—|]\s*|\s+)/, '');
+  value = value.trim();
+  if (!value) return String(raw || '').trim();
+  return /^[a-z]/.test(value) && !/^[a-z]+(\([^)]+\))?:/.test(value)
+    ? value.charAt(0).toUpperCase() + value.slice(1)
+    : value;
+}
+
 function renderPRRow(host, rowInfo) {
   const { entry, prefix, parentNumber, stackIndex, stackSize } = rowInfo;
   const pr = entry.pr;
-  const title = stackSize >= 2 && prefix ? `${prefix}${pr.title}` : pr.title;
-
-  const refPart = parentNumber
-    ? `#${pr.number} ← #${parentNumber}`
-    : (pr.baseRefName && pr.baseRefName !== entry.defaultBranch ? `#${pr.number} ← ${pr.baseRefName}` : `#${pr.number}`);
-
-  const parts = [];
-  if (stackSize >= 2) parts.push(`${stackIndex}/${stackSize}`);
-  parts.push(refPart);
-  if (pr.isDraft && (entry.hasConflict || entry.hasChanges || entry.ci.state === 'failed' || entry.isApproved)) {
-    parts.push('Draft');
-  }
-  if (!entry.hasConflict && entry.isBehind) parts.push('Behind');
-
-  if (entry.ci.label) parts.push(entry.ci.label);
-
-  if (entry.changesBy.length > 0) {
-    parts.push(entry.changesBy.length === 1 ? `Changes (@${entry.changesBy[0]})` : `Changes (${entry.changesBy.length})`);
-  } else if (entry.approvedBy.length > 0) {
-    parts.push(entry.approvedBy.length === 1 ? `Approved (@${entry.approvedBy[0]})` : `Approved (${entry.approvedBy.length})`);
-  } else if (entry.commentedBy.length > 0) {
-    parts.push(entry.commentedBy.length === 1 ? `Commented (@${entry.commentedBy[0]})` : `Commented (${entry.commentedBy.length})`);
-  }
-
-  if (entry.requested.length > 0) {
-    const shown = entry.requested.slice(0, 2).join(', ');
-    const more = entry.requested.length > 2 ? ` +${entry.requested.length - 2}` : '';
-    parts.push(`Req ${shown}${more}`);
-  }
-
-  if (entry.unresolvedThreads > 0) {
-    parts.push(`${entry.unresolvedThreads} unresolved`);
-  } else if (entry.totalComments > 0 && entry.approvedBy.length === 0 && entry.changesBy.length === 0) {
-    parts.push(`${entry.totalComments} ${entry.totalComments === 1 ? 'comment' : 'comments'}`);
-  }
+  const cleaned = cleanTitle(pr.title);
+  const title = stackSize >= 2 && prefix ? `${prefix}${cleaned}` : cleaned;
 
   let iconName = 'arrow.triangle.branch';
   let badgeLabel;
@@ -474,6 +451,49 @@ function renderPRRow(host, rowInfo) {
     badgeLabel = 'In review';
     tone = 'accent';
   }
+
+  // Order actionable signals first so narrow widgets show real status instead of truncating after PR numbers.
+  const parts = [];
+  if (pr.isDraft && badgeLabel !== 'Draft') parts.push('Draft');
+  if (!entry.hasConflict && entry.isBehind) parts.push('Behind');
+
+  if (entry.changesBy.length > 0) {
+    parts.push(entry.changesBy.length === 1 ? `Changes (@${entry.changesBy[0]})` : `Changes (${entry.changesBy.length})`);
+  } else if (entry.approvedBy.length > 0) {
+    parts.push(entry.approvedBy.length === 1 ? `Approved (@${entry.approvedBy[0]})` : `Approved (${entry.approvedBy.length})`);
+  } else if (entry.commentedBy.length > 0) {
+    parts.push(entry.commentedBy.length === 1 ? `Commented (@${entry.commentedBy[0]})` : `Commented (${entry.commentedBy.length})`);
+  }
+
+  if (entry.requested.length > 0) {
+    const shown = entry.requested.slice(0, 2).join(', ');
+    const more = entry.requested.length > 2 ? ` +${entry.requested.length - 2}` : '';
+    parts.push(badgeLabel === 'In review' ? `${shown}${more}` : `Req ${shown}${more}`);
+  }
+
+  if (entry.unresolvedThreads > 0) {
+    parts.push(`${entry.unresolvedThreads} unresolved`);
+  }
+
+  if (entry.ci.label) {
+    if (badgeLabel === 'CI fail') {
+      if (entry.ci.failed > 1) parts.push(`${entry.ci.failed} failed`);
+    } else if (badgeLabel === 'CI running') {
+      if (entry.ci.total > 0) parts.push(`${entry.ci.passed}/${entry.ci.total}`);
+    } else {
+      parts.push(entry.ci.label);
+    }
+  }
+
+  if (entry.unresolvedThreads === 0 && entry.totalComments > 0 && entry.approvedBy.length === 0 && entry.changesBy.length === 0) {
+    parts.push(`${entry.totalComments} cmt`);
+  }
+
+  const refPart = parentNumber
+    ? `#${pr.number} ← #${parentNumber}`
+    : (pr.baseRefName && pr.baseRefName !== entry.defaultBranch ? `#${pr.number} ← ${pr.baseRefName}` : `#${pr.number}`);
+  if (stackSize >= 2) parts.push(`${stackIndex}/${stackSize}`);
+  parts.push(refPart);
 
   return item(title, {
     subtitle: parts.join(' · '),

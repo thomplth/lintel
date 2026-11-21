@@ -614,19 +614,19 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(stackRows[0].string("title") == "Add FreeText writer core")
         #expect(stackRows[0].string("badge") == "Ready")
         #expect(stackRows[0].string("tone") == "good")
-        #expect(stackRows[0].string("subtitle")?.hasPrefix("1/3 · #301") == true)
-        #expect(stackRows[0].string("subtitle")?.contains("Approved (2)") == true)
+        #expect(stackRows[0].string("subtitle")?.hasPrefix("Approved (2)") == true)
         #expect(stackRows[0].string("subtitle")?.contains("CI 12/12") == true)
+        #expect(stackRows[0].string("subtitle")?.contains("1/3 · #301") == true)
 
         // Layer 2 (#302): stacked on #301, requesting @dave & @xp, 2 unresolved threads, CI running
         #expect(stackRows[1].string("title")?.hasPrefix("└ ") == true)
         #expect(stackRows[1].string("subtitle")?.contains("2/3 · #302 ← #301") == true)
         #expect(stackRows[1].string("subtitle")?.contains("@dave") == true)
         #expect(stackRows[1].string("subtitle")?.contains("2 unresolved") == true)
-        #expect(stackRows[1].string("subtitle")?.contains("CI 9/12") == true)
+        #expect(stackRows[1].string("subtitle")?.contains("9/12") == true)
 
         // Layer 3 (#303): stacked on #302, conflicting + 2 CI failures across 218 checks
-        #expect(stackRows[2].string("title")?.hasPrefix("  └ ") == true)
+        #expect(stackRows[2].string("title")?.hasPrefix("└ ") == true)
         #expect(stackRows[2].string("badge") == "Conflict")
         #expect(stackRows[2].string("tone") == "bad")
         #expect(stackRows[2].string("subtitle")?.contains("3/3 · #303 ← #302") == true)
@@ -715,8 +715,8 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(stackItems.count == 3)
         #expect(stackItems[1].string("title")?.hasPrefix("├ ") == true)
         #expect(stackItems[2].string("title")?.hasPrefix("└ ") == true)
-        #expect(stackItems[1].string("subtitle")?.hasPrefix("2/3 · #11 ← #10") == true)
-        #expect(stackItems[2].string("subtitle")?.hasPrefix("3/3 · #12 ← #10") == true)
+        #expect(stackItems[1].string("subtitle")?.contains("2/3 · #11 ← #10") == true)
+        #expect(stackItems[2].string("subtitle")?.contains("3/3 · #12 ← #10") == true)
 
         let externalItem = items(in: secs[1]).first
         #expect(externalItem?.string("subtitle")?.contains("← teammate/shared") == true)
@@ -747,5 +747,34 @@ private func sampleMyPRsGraphQLResponse() -> String {
 
         try harness.act("showAll")
         #expect(allItems(in: try harness.render("widget")).count == 5)
+    }
+
+    @Test func modulesStripLeadingBracketAndTicketPrefixesForScannableTitles() throws {
+        let mySource = try #require(loadModuleSource("github-my-prs"))
+        let ticketed = jsonString([
+            "data": [
+                "viewer": ["login": "alice"],
+                "authored": [
+                    "nodes": [
+                        [
+                            "number": 1, "title": "[XP DX] XPLATFORM-22095: write text boxes as FreeText",
+                            "url": "https://github.com/org/repo/pull/1", "isDraft": false, "updatedAt": "2026-11-21T15:00:00Z",
+                            "additions": 10, "deletions": 2, "baseRefName": "main", "headRefName": "feat/1",
+                            "reviewDecision": "REVIEW_REQUIRED", "mergeable": "MERGEABLE", "mergeStateStatus": "BLOCKED",
+                            "repository": ["nameWithOwner": "org/repo", "name": "repo", "defaultBranchRef": ["name": "main"]],
+                            "reviewRequests": ["nodes": []], "latestOpinionatedReviews": ["nodes": []], "reviews": ["nodes": []],
+                            "reviewThreads": ["totalCount": 0, "nodes": []], "comments": ["totalCount": 0], "commits": ["nodes": []],
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        let harness = MockModuleHarness(
+            source: mySource,
+            execHandler: { _, _ in .success("gho_test_token\n") },
+            fetchHandler: { _, _ in .success(ticketed) }
+        )
+        let row = try #require(allItems(in: try harness.render("widget")).first)
+        #expect(row.string("title") == "Write text boxes as FreeText")
     }
 }

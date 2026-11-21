@@ -264,19 +264,19 @@ function groupByRepo(entries) {
   return groups;
 }
 
+function cleanTitle(raw) {
+  let value = String(raw || '').trim();
+  value = value.replace(/^(?:\[[^\]]+\]\s*)+/, '');
+  value = value.replace(/^[A-Z][A-Z0-9_]+-\d+\s*(?:[:\-–—|]\s*|\s+)/, '');
+  value = value.trim();
+  if (!value) return String(raw || '').trim();
+  return /^[a-z]/.test(value) && !/^[a-z]+(\([^)]+\))?:/.test(value)
+    ? value.charAt(0).toUpperCase() + value.slice(1)
+    : value;
+}
+
 function renderReviewItem(host, entry, showScopeHint) {
   const pr = entry.pr;
-  const parts = [`#${pr.number}`, `@${entry.authorLogin}`];
-  if (typeof pr.additions === 'number' && typeof pr.deletions === 'number') {
-    parts.push(`+${pr.additions} −${pr.deletions}`);
-  }
-  if (entry.changesBy.length > 0) parts.push(`Changes (@${entry.changesBy[0]})`);
-  else if (entry.approvedBy.length > 0) parts.push(`Approved (${entry.approvedBy.length})`);
-  else if (entry.commentedBy.length > 0) parts.push(`Commented (@${entry.commentedBy[0]})`);
-  if (entry.ciFailed) parts.push('CI fail');
-  if (showScopeHint && !entry.isDirect && entry.teams.length > 0) parts.push(`@${entry.teams[0]}`);
-  parts.push(host.format.ago(pr.updatedAt));
-
   let iconName = 'arrow.triangle.pull';
   let badgeLabel;
   let tone;
@@ -310,7 +310,19 @@ function renderReviewItem(host, entry, showScopeHint) {
     tone = 'accent';
   }
 
-  return item(pr.title, {
+  const parts = [`@${entry.authorLogin}`];
+  if (entry.changesBy.length > 0) parts.push(`Changes (@${entry.changesBy[0]})`);
+  else if (entry.approvedBy.length > 0) parts.push(`Approved (${entry.approvedBy.length})`);
+  else if (entry.commentedBy.length > 0) parts.push(`Commented (@${entry.commentedBy[0]})`);
+  if (entry.ciFailed && badgeLabel !== 'CI fail') parts.push('CI fail');
+  if (typeof pr.additions === 'number' && typeof pr.deletions === 'number') {
+    parts.push(`+${pr.additions} −${pr.deletions}`);
+  }
+  if (showScopeHint && !entry.isDirect && entry.teams.length > 0) parts.push(`@${entry.teams[0]}`);
+  parts.push(`#${pr.number}`);
+  parts.push(host.format.ago(pr.updatedAt));
+
+  return item(cleanTitle(pr.title), {
     subtitle: parts.join(' · '),
     icon: iconName,
     badge: badgeLabel,

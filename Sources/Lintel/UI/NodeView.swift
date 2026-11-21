@@ -222,7 +222,7 @@ struct NodeView: View {
                         .font(context.font(role: "caption", weight: "semibold"))
                         .foregroundStyle(context.secondary)
                         .textCase(.uppercase)
-                        .kerning(0.4)
+                        .kerning(context.isNarrowWidget ? 0.1 : 0.4)
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 4)
@@ -583,48 +583,53 @@ private struct ItemRow: View {
         Group {
             if isNarrow {
                 let subtitle = compactOverride ? nil : node.string("subtitle")
+                let badge = node.string("badge")
+                let value = node.string("value")
                 let hasMeta = !compactOverride && !context.isShortWidget
-                    && (node.string("badge") != nil || node.string("value") != nil || (subtitle?.isEmpty == false))
-                VStack(alignment: .leading, spacing: context.metrics.unit * 0.75) {
-                    HStack(spacing: context.metrics.unit * 1.5) {
-                        if let name = node.string("icon") {
-                            SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
-                                .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
-                                .frame(width: context.theme.fontSize * 1.05)
-                        }
-                        Text(node.string("title") ?? "")
-                            .font(context.font(role: "label", weight: context.theme.fontWeight))
-                            .foregroundStyle(context.primary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer(minLength: 2)
-                        if let accessory = node.string("accessoryAction") {
-                            ItemAccessory(
-                                symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
-                                focusKey: node.focusKey + "|accessory", context: context
-                            ) { context.perform(accessory, node.props["payload"] ?? .null) }
-                        }
+                    && (badge != nil || value != nil || (subtitle?.isEmpty == false))
+                let secondarySummary: String? = {
+                    let parts = [value, subtitle].compactMap { $0 }.filter { !$0.isEmpty }
+                    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+                }()
+                HStack(alignment: .top, spacing: context.metrics.unit * 1.5) {
+                    if let name = node.string("icon") {
+                        SymbolGlyph(name: name, size: context.metrics.fontSize(role: "label"), weight: context.weight(nil), symbolMode: context.symbolMode)
+                            .foregroundStyle(context.color(node.tone(), fallback: context.secondary))
+                            .frame(width: context.theme.fontSize * 0.95, height: context.metrics.fontSize(role: "label") * 1.25)
                     }
-                    if hasMeta {
-                        HStack(spacing: context.metrics.unit * 1.25) {
-                            if let badge = node.string("badge") {
-                                itemBadge(badge)
-                            }
-                            if let value = node.string("value") {
-                                Text(value)
-                                    .font(context.font(role: "caption", mono: true))
-                                    .foregroundStyle(context.secondary)
-                                    .lineLimit(1)
-                                    .fixedSize(horizontal: true, vertical: false)
-                            }
-                            if let subtitle, !subtitle.isEmpty {
-                                Text(subtitle)
-                                    .font(context.font(role: "caption"))
-                                    .foregroundStyle(context.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
+                    VStack(alignment: .leading, spacing: 1.5) {
+                        HStack(spacing: context.metrics.unit) {
+                            Text(node.string("title") ?? "")
+                                .font(context.font(role: "label", weight: context.theme.fontWeight))
+                                .foregroundStyle(context.primary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                             Spacer(minLength: 0)
+                            if let accessory = node.string("accessoryAction") {
+                                ItemAccessory(
+                                    symbol: node.string("accessoryIcon") ?? "minus.circle", label: node.string("accessoryLabel"),
+                                    focusKey: node.focusKey + "|accessory", context: context
+                                ) { context.perform(accessory, node.props["payload"] ?? .null) }
+                            }
+                        }
+                        if hasMeta {
+                            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                                if let badge {
+                                    Text(badge)
+                                        .font(context.font(role: "caption", weight: "semibold"))
+                                        .foregroundStyle(context.color(node.tone(), fallback: context.accent))
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                }
+                                if let secondarySummary {
+                                    Text(badge != nil ? " · \(secondarySummary)" : secondarySummary)
+                                        .font(context.font(role: "caption"))
+                                        .foregroundStyle(context.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                                Spacer(minLength: 0)
+                            }
                         }
                     }
                 }
