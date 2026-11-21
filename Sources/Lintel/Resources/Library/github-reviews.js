@@ -305,7 +305,7 @@ function renderReviewItem(host, entry) {
   else if (pr.isDraft) rowTone = 'secondary';
   else if (entry.isDirect) rowTone = 'info';
 
-  // Fixed 4-slot telemetry bar: [0] Health (Conflict/CI), [1] Scope/Review, [2] Diff, [3] Age
+  // Fixed 3-slot telemetry bar: [0] Health (Conflict/CI), [1] Diff, [2] Age
   let healthSlot;
   if (entry.hasConflict) {
     healthSlot = { icon: 'exclamationmark.triangle.fill', value: '', tone: 'bad' };
@@ -319,25 +319,32 @@ function renderReviewItem(host, entry) {
     healthSlot = { value: '—' };
   }
 
-  let scopeSlot;
-  if (entry.hasChanges) {
-    scopeSlot = { value: 'Chg', tone: 'warn' };
-  } else if (entry.isApproved) {
-    scopeSlot = { icon: 'checkmark', value: 'Ok', tone: 'good' };
-  } else if (entry.commentedBy.length > 0) {
-    scopeSlot = { icon: 'bubble.left', value: 'Rev', tone: 'info' };
-  } else if (entry.isDirect) {
-    scopeSlot = { value: 'Dir', tone: 'info' };
-  } else {
-    scopeSlot = { value: 'Team' };
-  }
-
   const diffSlot = typeof pr.additions === 'number'
     ? { value: `+${host.format.compact(pr.additions)}` }
     : { value: '—' };
 
   const age = compactAge(pr.updatedAt);
   const ageSlot = { value: age.label, tone: age.stale ? 'warn' : undefined };
+
+  let tag;
+  let tagTone;
+  if (pr.isDraft) {
+    tag = 'Draft';
+  } else if (entry.hasChanges) {
+    tag = 'Changes';
+    tagTone = 'warn';
+  } else if (entry.isApproved) {
+    tag = 'Approved';
+    tagTone = 'good';
+  } else if (entry.commentedBy.length > 0) {
+    tag = 'Reviewed';
+    tagTone = 'info';
+  } else if (entry.isDirect) {
+    tag = 'Direct';
+    tagTone = 'info';
+  } else {
+    tag = 'Team';
+  }
 
   const authorParts = [`@${entry.authorLogin}`];
   if (entry.changesBy.length > 0) {
@@ -353,10 +360,11 @@ function renderReviewItem(host, entry) {
   return item(cleaned, {
     compactTitle: cleaned,
     subtitle: authorParts.join(' · '),
-    tag: pr.isDraft ? 'Draft' : undefined,
+    tag,
+    tagTone,
     value: `#${pr.number}`,
     tone: rowTone,
-    slots: [healthSlot, scopeSlot, diffSlot, ageSlot],
+    slots: [healthSlot, diffSlot, ageSlot],
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,
   });
 }
@@ -423,7 +431,6 @@ defineModule({
           action: 'refresh',
           actionLabel: 'Refresh',
         }),
-        note(`Updated ${host.format.ago(loadedAt)} · ${cfg.refreshLabel} cadence`, { priority: 'detail' }),
       ];
     }
 
@@ -434,28 +441,18 @@ defineModule({
           action: 'showAll',
           actionLabel: 'Show all open',
         }),
-        note(`Filter: ${cfg.statusFilter} · ${cfg.scope} · Updated ${host.format.ago(loadedAt)}`, { priority: 'detail' }),
       ];
     }
 
     const groups = groupByRepo(visible);
-    const hiddenCount = Math.max(0, pulls.length - visible.length);
 
     const blocks = groups.slice(0, 10).map((group) => list(
       group.items.slice(0, 30).map((entry) => renderReviewItem(host, entry)),
-      {
-        title: group.title,
-        trailing: group.directCount > 0 ? `${group.directCount} direct` : `${group.items.length} ${group.items.length === 1 ? 'PR' : 'PRs'}`,
-        trailingTone: group.directCount > 0 ? 'info' : undefined,
-      }
+      { title: group.title }
     ));
 
     if (failure) {
       blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
-    } else {
-      const metaParts = [host.format.ago(loadedAt)];
-      if (hiddenCount > 0) metaParts.push(`${hiddenCount} hidden`);
-      blocks.push(note(metaParts.join(' · '), { priority: 'detail' }));
     }
     return blocks;
   },

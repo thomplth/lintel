@@ -254,14 +254,14 @@ public enum Catalog {
             props: [
                 PropSpec("title", .string, required: true), PropSpec("subtitle", .string),
                 PropSpec("compactTitle", .string), PropSpec("compactSubtitle", .string),
-                PropSpec("tag", .string), PropSpec("caption", .string), PropSpec("slots", .any),
+                PropSpec("tag", .string), PropSpec("tagTone", .tone), PropSpec("caption", .string), PropSpec("slots", .any),
                 PropSpec("icon", .symbol),
                 PropSpec("value", .string), PropSpec("badge", .string), PropSpec("tone", .tone), PropSpec("action", .action),
                 PropSpec("payload", .any), PropSpec("url", .url), PropSpec("accessoryIcon", .symbol),
                 PropSpec("accessoryAction", .action), PropSpec("accessoryLabel", .string),
             ],
             hasChildren: false,
-            signature: "item(title, { subtitle?, compactTitle?, compactSubtitle?, tag?, caption?, slots?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
+            signature: "item(title, { subtitle?, compactTitle?, compactSubtitle?, tag?, tagTone?, caption?, slots?, icon?, value?, badge?, tone?, action?, payload?, url?, accessoryIcon?, accessoryAction?, accessoryLabel? })",
             doc: "One list row: icon, title and subtitle at the left, value or badge at the right. compactTitle and compactSubtitle are optional shorter labels used automatically when the widget is narrow. slots: [{ icon?, value, tone? }] renders a fixed equal-width telemetry bar (2 to 4 slots) with optional tag and caption underneath. action runs a module action on click; url opens an https link in the browser instead. accessoryAction adds a small icon button at the far right (accessoryIcon, default 'minus.circle'; accessoryLabel is its tooltip) that runs with the same payload, e.g. to remove the row."
         ),
         ComponentSpec(

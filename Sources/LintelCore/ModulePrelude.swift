@@ -67,7 +67,7 @@ public enum ModulePrelude {
       var o = __options(options);
       return __node('item', { title: __string(title), subtitle: o.subtitle,
         compactTitle: o.compactTitle, compactSubtitle: o.compactSubtitle,
-        tag: o.tag, caption: o.caption, slots: o.slots,
+        tag: o.tag, tagTone: o.tagTone || o.tagColor, caption: o.caption, slots: o.slots,
         icon: o.icon, value: o.value, badge: o.badge,
         tone: o.tone || o.color, action: o.action, payload: o.payload, url: o.url,
         accessoryIcon: o.accessoryIcon || (o.accessoryAction ? 'minus.circle' : undefined), accessoryAction: o.accessoryAction, accessoryLabel: o.accessoryLabel });

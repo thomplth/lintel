@@ -441,8 +441,8 @@ function cleanTitle(raw) {
     : value;
 }
 
-function renderPRRow(host, rowInfo, headerIsDraft) {
-  const { entry, parentNumber } = rowInfo;
+function renderPRRow(host, rowInfo) {
+  const { entry, parentNumber, stackIndex, stackSize } = rowInfo;
   const pr = entry.pr;
   const cleaned = cleanTitle(pr.title);
   const slug = branchSlug(pr.headRefName, cleaned);
@@ -460,7 +460,7 @@ function renderPRRow(host, rowInfo, headerIsDraft) {
     dotTone = 'info';
   }
 
-  // Fixed 4-slot telemetry bar: [0] CI, [1] Review, [2] Comments, [3] Merge
+  // Fixed 3-slot telemetry bar: [0] CI, [1] Review, [2] Merge (comment counts hidden)
   let ciSlot;
   if (entry.ci.state === 'failed') {
     ciSlot = { icon: 'xmark', value: String(entry.ci.failed || 1), tone: 'bad' };
@@ -483,10 +483,6 @@ function renderPRRow(host, rowInfo, headerIsDraft) {
     reviewSlot = { icon: 'person', value: '0' };
   }
 
-  const commentSlot = entry.unresolvedThreads > 0
-    ? { icon: 'bubble.left', value: String(entry.unresolvedThreads), tone: 'warn' }
-    : { icon: 'bubble.left', value: String(entry.totalComments) };
-
   let mergeSlot;
   if (entry.hasConflict) {
     mergeSlot = { icon: 'exclamationmark.triangle.fill', value: '', tone: 'bad' };
@@ -498,7 +494,17 @@ function renderPRRow(host, rowInfo, headerIsDraft) {
     mergeSlot = { icon: 'checkmark', value: '' };
   }
 
+  let tag;
+  if (stackSize >= 2) {
+    tag = pr.isDraft ? `${stackIndex}/${stackSize} Draft` : `${stackIndex}/${stackSize}`;
+  } else if (pr.isDraft) {
+    tag = 'Draft';
+  }
+
   const captionParts = [];
+  if (entry.unresolvedThreads > 0) {
+    captionParts.push(`${entry.unresolvedThreads} unresolved`);
+  }
   if (entry.changesBy.length > 0) {
     const names = entry.changesBy.slice(0, 2).map((u) => `@${u}`).join(', ');
     captionParts.push(`Changes ${names}`);
@@ -520,10 +526,10 @@ function renderPRRow(host, rowInfo, headerIsDraft) {
 
   return item(cleaned, {
     compactTitle: slug,
-    tag: pr.isDraft && !headerIsDraft ? 'Draft' : undefined,
+    tag,
     value: `#${pr.number}`,
     tone: dotTone,
-    slots: [ciSlot, reviewSlot, commentSlot, mergeSlot],
+    slots: [ciSlot, reviewSlot, mergeSlot],
     caption: captionParts.length > 0 ? captionParts.join(' · ') : undefined,
     url: pr.url && pr.url.startsWith('https://') ? pr.url : undefined,
   });
@@ -610,7 +616,6 @@ defineModule({
           action: 'refresh',
           actionLabel: 'Refresh',
         }),
-        note(`Updated ${host.format.ago(loadedAt)} · ${cfg.refreshLabel} cadence`, { priority: 'detail' }),
       ];
     }
 
@@ -621,29 +626,18 @@ defineModule({
           action: 'showAll',
           actionLabel: 'Show all open',
         }),
-        note(`Updated ${host.format.ago(loadedAt)} · ${cfg.refreshLabel} cadence`, { priority: 'detail' }),
       ];
     }
 
     const groups = buildStacks(summaries, cfg.groupByStack);
-    const stackCount = groups.filter((g) => g.kind === 'stack').length;
 
     const blocks = groups.slice(0, 10).map((group) => list(
-      group.rows.slice(0, 30).map((r) => renderPRRow(host, r, group.trailing === 'Draft')),
-      {
-        title: group.title,
-        trailing: group.trailing,
-        trailingTone: group.trailingTone,
-        rail: group.kind === 'stack',
-      }
+      group.rows.slice(0, 30).map((r) => renderPRRow(host, r)),
+      { title: group.title }
     ));
 
     if (failure) {
       blocks.push(note(`Cached · ${failure}`, { tone: 'warn', icon: 'exclamationmark.triangle.fill', priority: 'detail' }));
-    } else {
-      const meta = [host.format.ago(loadedAt)];
-      if (stackCount > 0) meta.push(`${stackCount} ${stackCount === 1 ? 'stack' : 'stacks'}`);
-      blocks.push(note(meta.join(' · '), { priority: 'detail' }));
     }
     return blocks;
   },

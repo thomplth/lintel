@@ -583,11 +583,11 @@ struct ListCardHeader: View {
 
     var body: some View {
         if let title = node.string("title"), !title.isEmpty {
-            let padH = context.isNarrowWidget ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+            let padH = context.isNarrowWidget ? context.metrics.unit * 1.6 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(title)
-                    .font(context.font(role: "caption", weight: "bold"))
-                    .foregroundStyle(context.primary)
+                    .font(context.font(role: "caption", weight: "medium"))
+                    .foregroundStyle(context.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 3)
@@ -612,8 +612,8 @@ struct ListCardHeader: View {
                 }
             }
             .padding(.horizontal, padH)
-            .padding(.top, context.metrics.unit * (isCompact ? 1.45 : 2))
-            .padding(.bottom, context.metrics.unit * 0.65)
+            .padding(.top, context.metrics.unit * (isCompact ? 1.5 : 1.9))
+            .padding(.bottom, context.metrics.unit * 0.5)
         }
     }
 }
@@ -655,7 +655,7 @@ struct AdaptiveListView: View {
     var body: some View {
         let items = node.children
         let footerLabels = showsSummary ? AdaptiveOverflowFit.footerLabels(itemCount: items.count) : []
-        let padH = context.isNarrowWidget ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+        let padH = context.isNarrowWidget ? context.metrics.unit * 1.6 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
         let railOffset: CGFloat = context.isNarrowWidget ? 12 : 15
         let sepLead = hasRail ? padH + railOffset : padH
         VStack(spacing: 0) {

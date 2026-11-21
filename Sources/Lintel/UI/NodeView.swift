@@ -631,45 +631,86 @@ struct ItemRow: View {
         let subtitle = compactOverride ? nil : node.string("subtitle")
         let caption = compactOverride ? nil : node.string("caption")
         let tag = node.string("tag")
+        let tagTone = node.tone("tagTone")
         let value = node.string("value")
-        let padH = isNarrow ? context.metrics.unit * 1.4 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
-        let padV = context.metrics.unit * (isCompact ? 1.4 : 1.85)
+        let padH = isNarrow ? context.metrics.unit * 1.6 : (isCompact ? context.metrics.unit * 1.75 : context.metrics.tilePadding)
+        let padV = context.metrics.unit * (isCompact ? 1.45 : 1.85)
         let railWidth: CGFloat = isNarrow ? 9 : 11
         let railGap: CGFloat = isNarrow ? 3 : 4
-        let dotSize: CGFloat = isNarrow ? 6 : 7
+        let dotSize: CGFloat = isNarrow ? 5.5 : 6.5
         let dotY = padV + context.metrics.fontSize(role: "label") * 0.58
         let captionSize = context.metrics.fontSize(role: "caption")
+        let splitHeader = rail == .none && (value?.isEmpty == false || tag?.isEmpty == false)
 
         return VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
+            if splitHeader {
+                HStack(alignment: .center, spacing: 4) {
+                    Circle()
+                        .fill(context.color(node.tone(), fallback: context.tertiary.opacity(0.65)))
+                        .frame(width: dotSize, height: dotSize)
+                    if let value, !value.isEmpty {
+                        Text(value)
+                            .font(.system(size: captionSize * (isNarrow ? 0.92 : 1.0), design: .monospaced))
+                            .foregroundStyle(context.secondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    Spacer(minLength: 4)
+                    if let tag, !tag.isEmpty {
+                        let tagColor = tagTone != nil ? context.color(tagTone) : context.secondary
+                        let tagBg = tagTone != nil ? tagColor.opacity(0.16) : context.primary.opacity(0.08)
+                        Text(tag)
+                            .font(.system(size: captionSize * 0.88, weight: .semibold, design: tag.contains("/") ? .monospaced : .default))
+                            .foregroundStyle(tagColor)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 4.5)
+                            .padding(.vertical, 0.5)
+                            .background(tagBg, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+                    if !isNarrow, isClickable, node.string("accessoryAction") == nil {
+                        Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
+                            .font(.system(size: captionSize * 0.82, weight: .semibold))
+                            .foregroundStyle(context.tertiary)
+                    }
+                }
                 Text(displayTitle)
                     .font(context.font(role: "label", weight: "semibold"))
                     .foregroundStyle(context.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let tag, !tag.isEmpty {
-                    Text(tag)
-                        .font(context.font(role: "caption", weight: "semibold"))
-                        .foregroundStyle(context.secondary)
-                        .textCase(.uppercase)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Text(displayTitle)
+                        .font(context.font(role: "label", weight: "semibold"))
+                        .foregroundStyle(context.primary)
                         .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 0.5)
-                        .background(context.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 3.5, style: .continuous))
-                }
-                Spacer(minLength: 3)
-                if let value, !value.isEmpty {
-                    Text(value)
-                        .font(.system(size: captionSize * (isNarrow ? 0.88 : 1.0), design: .monospaced))
-                        .foregroundStyle(context.tertiary)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                if !isNarrow, isClickable, node.string("accessoryAction") == nil {
-                    Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
-                        .font(.system(size: captionSize * 0.85, weight: .semibold))
-                        .foregroundStyle(context.tertiary)
+                        .truncationMode(.tail)
+                    if let tag, !tag.isEmpty {
+                        let tagColor = tagTone != nil ? context.color(tagTone) : context.secondary
+                        let tagBg = tagTone != nil ? tagColor.opacity(0.16) : context.primary.opacity(0.08)
+                        Text(tag)
+                            .font(context.font(role: "caption", weight: "semibold"))
+                            .foregroundStyle(tagColor)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 0.5)
+                            .background(tagBg, in: RoundedRectangle(cornerRadius: 3.5, style: .continuous))
+                    }
+                    Spacer(minLength: 3)
+                    if let value, !value.isEmpty {
+                        Text(value)
+                            .font(.system(size: captionSize * (isNarrow ? 0.88 : 1.0), design: .monospaced))
+                            .foregroundStyle(context.tertiary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    if !isNarrow, isClickable, node.string("accessoryAction") == nil {
+                        Image(systemName: node.string("url") != nil && node.string("action") == nil ? "arrow.up.right" : "chevron.right")
+                            .font(.system(size: captionSize * 0.85, weight: .semibold))
+                            .foregroundStyle(context.tertiary)
+                    }
                 }
             }
             if let subtitle, !subtitle.isEmpty {
@@ -679,17 +720,18 @@ struct ItemRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            HStack(spacing: isNarrow ? 2 : 3) {
+            HStack(spacing: isNarrow && slots.count >= 4 ? 2 : 3) {
                 ForEach(Array(slots.enumerated()), id: \.offset) { entry in
                     let slot = entry.element
                     let isToned = slot.tone != nil
                     let fg = isToned ? context.color(slot.tone) : context.secondary
                     let bg = isToned ? fg.opacity(0.15) : context.primary.opacity(0.055)
-                    HStack(spacing: isNarrow ? 1 : 2) {
+                    let tight = isNarrow && slots.count >= 4
+                    HStack(spacing: tight ? 1 : 2.5) {
                         if let icon = slot.icon {
                             SymbolGlyph(
                                 name: icon,
-                                size: captionSize * (isNarrow ? 0.78 : 0.86),
+                                size: captionSize * (tight ? 0.78 : 0.86),
                                 weight: isToned ? .semibold : .medium,
                                 symbolMode: context.symbolMode
                             )
@@ -697,16 +739,16 @@ struct ItemRow: View {
                         }
                         if !slot.value.isEmpty {
                             Text(slot.value)
-                                .font(.system(size: captionSize * (isNarrow ? 0.86 : 1.0), weight: isToned ? .semibold : .regular, design: .monospaced))
+                                .font(.system(size: captionSize * (tight ? 0.86 : 0.95), weight: isToned ? .semibold : .regular, design: .monospaced))
                                 .foregroundStyle(fg)
                                 .lineLimit(1)
-                                .minimumScaleFactor(0.65)
+                                .minimumScaleFactor(0.7)
                                 .allowsTightening(true)
                         }
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 2.5)
-                    .padding(.horizontal, isNarrow ? 1 : 2)
+                    .padding(.horizontal, tight ? 1 : 2.5)
                     .background(bg, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 }
             }
