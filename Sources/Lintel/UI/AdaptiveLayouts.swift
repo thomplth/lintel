@@ -75,13 +75,6 @@ extension ViewNode {
 
 // MARK: - Zero-Void Card Wrapper Layout
 
-struct NaturalContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat? = nil
-    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
-        value = nextValue() ?? value
-    }
-}
-
 /// Enforces the zero-void invariant:
 /// - If `hasUnboundedFlex` is true (chart/web/app/image), fills `requestedHeight`.
 /// - If finite, clamps the card's actual height to `min(requestedHeight, max(naturalHeight, minHeight))` so empty

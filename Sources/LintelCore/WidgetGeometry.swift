@@ -385,3 +385,93 @@ public enum AdaptiveOverflowFit {
         )
     }
 }
+
+/// Pure, stateless height and chrome (legend / axis labels) allocation for `ChartView`.
+/// Keeps legend/label visibility inside a single `Layout` pass so charts never flash or oscillate on threshold heights.
+public enum ChartBlockFit {
+    public static let legendMinTotalHeight: CGFloat = 56
+    public static let labelsMinTotalHeight: CGFloat = 76
+
+    public struct Result: Equatable, Sendable {
+        public var showLegend: Bool
+        public var showLabels: Bool
+        public var canvasHeight: CGFloat
+        public var totalHeight: CGFloat
+
+        public init(showLegend: Bool, showLabels: Bool, canvasHeight: CGFloat, totalHeight: CGFloat) {
+            self.showLegend = showLegend
+            self.showLabels = showLabels
+            self.canvasHeight = canvasHeight
+            self.totalHeight = totalHeight
+        }
+    }
+
+    public static func fit(
+        hasLegend: Bool,
+        legendHeight: CGFloat,
+        hasLabels: Bool,
+        labelsHeight: CGFloat,
+        allowLabels: Bool,
+        minCanvasHeight: CGFloat,
+        fixedCanvasHeight: CGFloat?,
+        spacing: CGFloat,
+        maxHeight: CGFloat?
+    ) -> Result {
+        let legendCost = hasLegend ? (legendHeight + spacing) : 0
+        let labelsCost = (hasLabels && allowLabels) ? (labelsHeight + spacing) : 0
+
+        func naturalResult(canvas: CGFloat) -> Result {
+            let showLegend = hasLegend && (canvas + legendCost + 0.5 >= legendMinTotalHeight)
+            let usedLegend = showLegend ? legendCost : 0
+            let showLabels = hasLabels && allowLabels && (canvas + usedLegend + labelsCost + 0.5 >= labelsMinTotalHeight)
+            let usedLabels = showLabels ? labelsCost : 0
+            return Result(
+                showLegend: showLegend,
+                showLabels: showLabels,
+                canvasHeight: canvas,
+                totalHeight: canvas + (usedLegend + usedLabels)
+            )
+        }
+
+        guard let maxH = maxHeight, maxH.isFinite else {
+            return naturalResult(canvas: fixedCanvasHeight ?? max(minCanvasHeight, 120))
+        }
+
+        if maxH <= 0.5 {
+            if let fixed = fixedCanvasHeight {
+                return naturalResult(canvas: fixed)
+            }
+            return Result(showLegend: false, showLabels: false, canvasHeight: minCanvasHeight, totalHeight: minCanvasHeight)
+        }
+
+        let showLegend = hasLegend
+            && maxH + 0.5 >= max(legendMinTotalHeight, minCanvasHeight + legendCost)
+            && (fixedCanvasHeight == nil || (fixedCanvasHeight! + legendCost) + 0.5 >= legendMinTotalHeight)
+        let usedLegend = showLegend ? legendCost : 0
+
+        let showLabels = hasLabels && allowLabels
+            && maxH + 0.5 >= max(labelsMinTotalHeight, minCanvasHeight + usedLegend + labelsCost)
+            && (fixedCanvasHeight == nil || (fixedCanvasHeight! + usedLegend + labelsCost) + 0.5 >= labelsMinTotalHeight)
+        let usedLabels = showLabels ? labelsCost : 0
+
+        let extras = usedLegend + usedLabels
+        if let fixed = fixedCanvasHeight {
+            let availableCanvas = max(0, maxH - extras)
+            let canvasH = availableCanvas + 1e-6 >= fixed ? fixed : availableCanvas
+            return Result(
+                showLegend: showLegend,
+                showLabels: showLabels,
+                canvasHeight: canvasH,
+                totalHeight: min(maxH, canvasH + extras)
+            )
+        } else {
+            let canvasH = max(minCanvasHeight, maxH - extras)
+            return Result(
+                showLegend: showLegend,
+                showLabels: showLabels,
+                canvasHeight: canvasH,
+                totalHeight: max(maxH, canvasH + extras)
+            )
+        }
+    }
+}

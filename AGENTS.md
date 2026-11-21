@@ -58,6 +58,9 @@ Local and debug builds log metrics once a minute to `Metrics/metrics-<day>.jsonl
 build's commit (README, "Performance metrics"). Compare those lines, or `Lintel metrics`, before and after a change that
 could cost CPU. Views in the bar must not observe `BarModel` per chip: `ChipView` takes plain values and is compared with
 `.equatable()`, and state that changes every frame, like the dragged module's pointer, lives outside the model.
+Never mutate `@State` or `@Published` from `Layout` (`sizeThatFits`/`placeSubviews`), `.onGeometryChange`, or
+`.onPreferenceChange` inside widget primitives to toggle subviews or labels; compute overflow and visibility purely in
+a single `Layout` pass backed by idempotent `LintelCore` math (guarded in `WidgetSystemTests`).
 
 ## Testing in the VM
 

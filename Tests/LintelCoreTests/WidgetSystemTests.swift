@@ -363,6 +363,162 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(hugeFit.activeFooterSlot == AdaptiveOverflowFit.maxFooterSlots - 1)
         #expect(hugeFit.totalHeight == 56)
     }
+
+    @Test("AdaptiveOverflowFit stays idempotent across a 0.5pt height sweep")
+    func adaptiveOverflowFitIdempotenceSweep() {
+        let rows: [CGFloat] = [32.3, 31.7, 32.1, 29.8, 33.4]
+        for spacing in [CGFloat(0), CGFloat(6)] {
+            for step in 0...440 {
+                let maxH = CGFloat(step) * 0.5
+                let first = AdaptiveOverflowFit.fit(
+                    itemHeights: rows,
+                    spacing: spacing,
+                    maxHeight: maxH,
+                    showsFooter: true,
+                    footerHeight: 22
+                )
+                let second = AdaptiveOverflowFit.fit(
+                    itemHeights: rows,
+                    spacing: spacing,
+                    maxHeight: first.totalHeight,
+                    showsFooter: true,
+                    footerHeight: 22
+                )
+                #expect(second == first, "Non-idempotent at maxH=\(maxH), spacing=\(spacing)")
+                let ceiled = AdaptiveOverflowFit.fit(
+                    itemHeights: rows,
+                    spacing: spacing,
+                    maxHeight: ceil(first.totalHeight),
+                    showsFooter: true,
+                    footerHeight: 22
+                )
+                #expect(ceiled.fittedCount == first.fittedCount)
+                #expect(ceiled.activeFooterSlot == first.activeFooterSlot)
+            }
+        }
+    }
+
+    @Test("ChartBlockFit decides legend and labels purely from bounds and stays idempotent")
+    func chartBlockFitStatelessAndIdempotent() {
+        // Flexible chart at tight floor collapses legend and labels to keep the canvas floor clean.
+        let floor = ChartBlockFit.fit(
+            hasLegend: true, legendHeight: 14,
+            hasLabels: true, labelsHeight: 14,
+            allowLabels: true,
+            minCanvasHeight: 38, fixedCanvasHeight: nil,
+            spacing: 4, maxHeight: 0
+        )
+        #expect(!floor.showLegend)
+        #expect(!floor.showLabels)
+        #expect(floor.canvasHeight == 38)
+        #expect(floor.totalHeight == 38)
+
+        // Medium flexible height shows legend without axis labels.
+        let mid = ChartBlockFit.fit(
+            hasLegend: true, legendHeight: 14,
+            hasLabels: true, labelsHeight: 14,
+            allowLabels: true,
+            minCanvasHeight: 38, fixedCanvasHeight: nil,
+            spacing: 4, maxHeight: 68
+        )
+        #expect(mid.showLegend)
+        #expect(!mid.showLabels)
+        #expect(mid.canvasHeight == 50)
+        #expect(mid.totalHeight == 68)
+
+        // Generous flexible height shows both legend and axis labels.
+        let tall = ChartBlockFit.fit(
+            hasLegend: true, legendHeight: 14,
+            hasLabels: true, labelsHeight: 14,
+            allowLabels: true,
+            minCanvasHeight: 38, fixedCanvasHeight: nil,
+            spacing: 4, maxHeight: 120
+        )
+        #expect(tall.showLegend)
+        #expect(tall.showLabels)
+        #expect(tall.canvasHeight == 84)
+        #expect(tall.totalHeight == 120)
+
+        // Sweep 0...240pt across flexible and fixed heights to guarantee zero threshold oscillation.
+        let fixedOptions: [CGFloat?] = [nil, 32, 48, 64, 120]
+        for fixed in fixedOptions {
+            for step in 0...480 {
+                let maxH = CGFloat(step) * 0.5
+                let first = ChartBlockFit.fit(
+                    hasLegend: true, legendHeight: 14.4,
+                    hasLabels: true, labelsHeight: 14.4,
+                    allowLabels: true,
+                    minCanvasHeight: fixed ?? 38, fixedCanvasHeight: fixed,
+                    spacing: 4, maxHeight: maxH
+                )
+                let second = ChartBlockFit.fit(
+                    hasLegend: true, legendHeight: 14.4,
+                    hasLabels: true, labelsHeight: 14.4,
+                    allowLabels: true,
+                    minCanvasHeight: fixed ?? 38, fixedCanvasHeight: fixed,
+                    spacing: 4, maxHeight: first.totalHeight
+                )
+                #expect(second == first, "ChartBlockFit non-idempotent at fixed=\(String(describing: fixed)), maxH=\(maxH)")
+            }
+        }
+    }
+
+    @Test("UI layouts and widget primitives never feed geometry back into @State")
+    func uiLayoutsStayPureWithoutGeometryStateFeedback() throws {
+        let uiDir = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .appending(path: "../../Sources/Lintel/UI")
+            .standardizedFileURL
+        let files = try FileManager.default.contentsOfDirectory(at: uiDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty)
+
+        // 1. Every `Layout` conformance across UI/ must be pure (no async dispatch or state callbacks).
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for block in Self.extractLayoutBlocks(in: source) {
+                #expect(!block.contains("DispatchQueue"), "\(file.lastPathComponent) Layout must not use DispatchQueue")
+                #expect(!block.contains("Task {"), "\(file.lastPathComponent) Layout must not spawn Task")
+                #expect(!block.contains("@State"), "\(file.lastPathComponent) Layout must not hold @State")
+            }
+        }
+
+        // 2. Widget primitive files must decide visibility/overflow in pure Layout, never via geometry-to-state hooks.
+        for name in ["AdaptiveLayouts.swift", "ChartView.swift", "NodeView.swift"] {
+            let source = try String(contentsOf: uiDir.appending(path: name), encoding: .utf8)
+            #expect(!source.contains(".onGeometryChange"), "\(name) must not use .onGeometryChange")
+            #expect(!source.contains(".onPreferenceChange"), "\(name) must not use .onPreferenceChange")
+            #expect(!source.contains("NaturalContentHeightKey"), "\(name) should not retain unused PreferenceKey")
+        }
+    }
+
+    private static func extractLayoutBlocks(in source: String) -> [String] {
+        var blocks: [String] = []
+        let lines = source.components(separatedBy: "\n")
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+            if line.contains("struct "), line.contains(": Layout") {
+                var depth = 0
+                var started = false
+                var collected: [String] = []
+                while index < lines.count {
+                    let current = lines[index]
+                    collected.append(current)
+                    for ch in current {
+                        if ch == "{" { depth += 1; started = true }
+                        else if ch == "}" { depth -= 1 }
+                    }
+                    index += 1
+                    if started && depth == 0 { break }
+                }
+                blocks.append(collected.joined(separator: "\n"))
+            } else {
+                index += 1
+            }
+        }
+        return blocks
+    }
 }
 
 private extension JSONValue {
