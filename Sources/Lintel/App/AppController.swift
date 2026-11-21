@@ -50,14 +50,25 @@ final class AppController {
         model.onSlotClick = { [weak self] slot in self?.clicked(slot) }
         model.onSlotSecondaryAction = { [weak self] slot, command in self?.edit(slot, command) }
         model.onRearrange = { [weak self] rows, pins, hiding in self?.rearrange(rows: rows, pins: pins, hiding: hiding) }
-        model.onResizeWidget = { [weak self] id, box in self?.host.setWidget(id, to: box) }
+        model.onResizeWidget = { [weak self] id, box in
+            if self?.model.temporaryExpandedWidget?.slotID == id {
+                self?.bar?.collapseTemporaryWidget()
+            }
+            self?.host.setWidget(id, to: box)
+        }
         model.onResizePeek = { [weak self] id, box in self?.host.setPeekBox(id, to: box) }
         model.onEnsureWidgetRendered = { [weak self] id in self?.host.ensureWidgetRendered(id) }
-        model.onMoveWidget = { [weak self] id, drop in self?.host.moveWidget(id, to: drop) }
+        model.onMoveWidget = { [weak self] id, drop in
+            if self?.model.temporaryExpandedWidget?.slotID == id {
+                self?.bar?.collapseTemporaryWidget()
+            }
+            self?.host.moveWidget(id, to: drop)
+        }
         model.onToggleConfigure = { [weak self] id, isConfiguring, isPeek in
             self?.host.setConfiguring(id, isConfiguring: isConfiguring, isPeek: isPeek)
         }
         model.onWidgetCommand = { [weak self] id, command in self?.widgetCommand(id, command) }
+        model.onWidgetClick = { [weak self] id in self?.bar?.expandWidgetTemporarily(id) }
         model.onDismiss = { [weak self] in self?.dismiss() }
         model.onPanelCommand = { [weak self] command in self?.panelCommand(command) }
         model.onChatSubmit = { [weak self] message in self?.chat.submit(message) }
@@ -266,7 +277,17 @@ final class AppController {
             bar?.yieldFocusForExternalMenu()
             adoption.press(slot.id)
         case .module:
-            if model.panel?.slotID == slot.id { closePanel() } else { openModulePanel(slot.id) }
+            if model.layout.isWidget(slot.id) {
+                if model.temporaryExpandedWidget?.slotID == slot.id {
+                    bar?.collapseTemporaryWidget()
+                } else {
+                    bar?.expandWidgetTemporarily(slot.id)
+                }
+            } else if model.panel?.slotID == slot.id {
+                closePanel()
+            } else {
+                openModulePanel(slot.id)
+            }
         case .pinDivider:
             break
         }
@@ -274,8 +295,10 @@ final class AppController {
 
     func openModulePanel(_ id: String) {
         guard model.slot(id) != nil else { return }
+        bar?.collapseTemporaryWidget()
         host.closePanel()
-        host.openPanel(id)
+        let corner = bar?.peekCorner(forSlot: id) ?? WidgetResize.corner(for: model.settings.anchor)
+        host.openPanel(id, corner: corner)
         bar?.hold()
         // Key, so that fields in the panel take typing and Escape closes it; the app itself is never activated.
         panelWindow?.show(focus: true)
@@ -322,7 +345,9 @@ final class AppController {
         if model.panel != nil, model.isDrivenByKeyboard {
             closePanel(releasing: false)
             bar?.takeKeyboardFocus()
-        } else if model.panel != nil { closePanel() } else {
+        } else if model.panel != nil { closePanel() } else if model.temporaryExpandedWidget != nil {
+            bar?.collapseTemporaryWidget()
+        } else {
             isHeldByDock = false
             bar?.release()
         }
@@ -367,6 +392,9 @@ final class AppController {
     private func widgetCommand(_ id: String, _ command: String) {
         switch command {
         case "collapse":
+            if model.temporaryExpandedWidget?.slotID == id {
+                bar?.collapseTemporaryWidget()
+            }
             host.setWidget(id, to: nil)
         case "stack-up":
             var layout = model.layout

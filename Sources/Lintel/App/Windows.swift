@@ -75,6 +75,7 @@ final class BarWindowController {
     let panel: FloatingPanel
     private let model: BarModel
     private var activation = Activation()
+    private var widgetExpansion = WidgetExpansion()
     private var contentSize = CGSize(width: 1, height: 1)
     private var pointerTimer: Timer?
     private var hotkeys: [Hotkey] = []
@@ -126,9 +127,13 @@ final class BarWindowController {
         model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
         model.onResizingChanged = { [weak self] in self?.updateMouseCapture() }
         let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.updateMouseCapture() } }
+        let outsideClick: (NSEvent) -> Void = { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleGlobalClickOutsideWidget() }
+        }
         mouseMonitors = [
             NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .flagsChanged], handler: follow) as Any,
             NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .flagsChanged]) { follow($0); return $0 } as Any,
+            NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: outsideClick) as Any,
         ]
 
         NotificationCenter.default.addObserver(
@@ -167,6 +172,7 @@ final class BarWindowController {
     func applySettings() {
         activation.dwell = model.settings.dwell
         activation.grace = model.settings.grace
+        widgetExpansion.grace = model.settings.grace
         var visibility = model.visibility
         visibility.setAutoHideInFullScreen(model.settings.autoHideInFullScreen)
         applyVisibility(visibility)
@@ -192,8 +198,48 @@ final class BarWindowController {
 
     func release() {
         activation.release()
+        collapseTemporaryWidget()
         applyActivation()
         if panel.isKeyWindow { panel.resignKey() }
+    }
+
+    func expandWidgetTemporarily(_ id: String) {
+        guard let savedBox = model.layout.widgetBox(of: id) else { return }
+        let topOffset = model.slotFrames[id]?.minY ?? model.shelfOriginInBarSpace.y
+        let expandedBox = WidgetResize.temporaryMaxBox(
+            from: savedBox,
+            metrics: Metrics(model.theme),
+            screenSize: model.maxWidgetScreenSize,
+            topOffset: topOffset
+        )
+        widgetExpansion.expand(id)
+        withAnimation(model.theme.motion == "full" ? BarModel.reflow : nil) {
+            model.temporaryExpandedWidget = TemporaryWidgetExpansion(slotID: id, box: expandedBox)
+        }
+        updateMouseCapture()
+    }
+
+    func collapseTemporaryWidget() {
+        guard widgetExpansion.slotID != nil || model.temporaryExpandedWidget != nil else { return }
+        widgetExpansion.collapse()
+        withAnimation(model.theme.motion == "full" ? BarModel.reflow : nil) {
+            model.temporaryExpandedWidget = nil
+        }
+        updateMouseCapture()
+    }
+
+    private func handleGlobalClickOutsideWidget() {
+        guard let expandedID = widgetExpansion.slotID else { return }
+        let inBarCoords = barPoint(NSEvent.mouseLocation)
+        if !model.isPointInWidget(inBarCoords, slotID: expandedID) {
+            collapseTemporaryWidget()
+        }
+    }
+
+    func peekCorner(forSlot id: String) -> ResizeCorner {
+        guard let screen else { return WidgetResize.corner(for: model.settings.anchor) }
+        let chip = screenFrame(ofSlot: id) ?? contentFrame
+        return WidgetResize.peekCorner(forChip: chip, on: screen.visibleFrame.union(contentFrame))
     }
 
     /// Taking key status must happen inside the hotkey's own event, as for the assistant panel.
@@ -352,6 +398,14 @@ final class BarWindowController {
         guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil, model.resizingSlotID == nil, model.draggingWidgetID == nil else { return }
         let pointer = NSEvent.mouseLocation
         let inBarCoords = barPoint(pointer)
+        if let expandedID = widgetExpansion.slotID {
+            let keepOpen = model.slot(expandedID)?.isConfiguring == true
+                || model.isPointInWidget(inBarCoords, slotID: expandedID)
+            widgetExpansion.pointer(inside: keepOpen, at: ProcessInfo.processInfo.systemUptime)
+            if widgetExpansion.slotID == nil {
+                collapseTemporaryWidget()
+            }
+        }
         let isOverWidget = model.isPointInWidget(inBarCoords)
         let isOverChip = model.isPointInBarChip(inBarCoords)
         var isInside = isOverChip || isOverWidget
@@ -374,7 +428,10 @@ final class BarWindowController {
     private func applyActivation() {
         guard model.isActive != activation.isActive else { return }
         model.isActive = activation.isActive
-        if !activation.isActive { model.isDrivenByKeyboard = false }
+        if !activation.isActive {
+            model.isDrivenByKeyboard = false
+            collapseTemporaryWidget()
+        }
         updateMouseCapture()
         if !activation.isActive, panel.isKeyWindow { panel.resignKey() }
         onActiveChanged(activation.isActive)

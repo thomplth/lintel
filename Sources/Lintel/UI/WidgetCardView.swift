@@ -96,6 +96,7 @@ struct ResizeArcHandle: View {
 
     @State private var isHandleHovered = false
     @State private var isDragging = false
+    @State private var dragStartScreenPoint: CGPoint?
 
     private var handleBox: CGFloat { isCompactChip ? 14 : 20 }
     private var arcRadius: CGFloat { isCompactChip ? min(cornerRadius, 9) : min(cornerRadius - 3, 14) }
@@ -127,15 +128,19 @@ struct ResizeArcHandle: View {
             }
             .highPriorityGesture(
                 DragGesture(minimumDistance: 3, coordinateSpace: coordinateSpace)
-                    .onChanged { value in
+                    .onChanged { _ in
+                        let current = NSEvent.mouseLocation
                         if !isDragging {
                             isDragging = true
+                            dragStartScreenPoint = current
                             onDragStart()
                         }
-                        onDragChanged(value.translation)
+                        let start = dragStartScreenPoint ?? current
+                        onDragChanged(WidgetResize.screenTranslation(from: start, to: current))
                     }
                     .onEnded { _ in
                         isDragging = false
+                        dragStartScreenPoint = nil
                         NSCursor.arrow.set()
                         onDragEnded()
                     }
@@ -154,6 +159,7 @@ private struct ResizeEdgeHandle: View {
     var onDoubleClick: (() -> Void)? = nil
 
     @State private var isDragging = false
+    @State private var dragStartScreenPoint: CGPoint?
 
     var body: some View {
         Color.clear
@@ -171,15 +177,19 @@ private struct ResizeEdgeHandle: View {
             }
             .highPriorityGesture(
                 DragGesture(minimumDistance: 3, coordinateSpace: coordinateSpace)
-                    .onChanged { value in
+                    .onChanged { _ in
+                        let current = NSEvent.mouseLocation
                         if !isDragging {
                             isDragging = true
+                            dragStartScreenPoint = current
                             onDragStart()
                         }
-                        onDragChanged(value.translation)
+                        let start = dragStartScreenPoint ?? current
+                        onDragChanged(WidgetResize.screenTranslation(from: start, to: current))
                     }
                     .onEnded { _ in
                         isDragging = false
+                        dragStartScreenPoint = nil
                         NSCursor.arrow.set()
                         onDragEnded()
                     }
@@ -197,11 +207,10 @@ private struct LiveResizeDriver<Content: View>: View {
     @ViewBuilder let content: (CGSize, Bool) -> Content
 
     var body: some View {
-        if isResizingThis && !isPeek && !drag.fromChip {
-            content(drag.liveSize.width > 1 ? drag.liveSize : baseBox.cgSize, drag.collapsesToChip)
-        } else {
-            content(baseBox.cgSize, false)
-        }
+        let active = isResizingThis && !drag.fromChip
+        let size = active && drag.liveSize.width > 1 ? drag.liveSize : baseBox.cgSize
+        let collapsing = active && !isPeek && drag.collapsesToChip
+        content(size, collapsing)
     }
 }
 
@@ -223,12 +232,15 @@ struct WidgetCardView: View, Equatable {
     let isSelected: Bool
     let isResizingThis: Bool
     let isDraggingThis: Bool
+    var isTemporarilyExpanded: Bool = false
+    var cornerOverride: ResizeCorner? = nil
     let columnCount: Int
     let stackCount: Int
     let model: BarModel
 
     @State private var isHovered = false
     @State private var isGripDragging = false
+    @State private var renderedSize: CGSize = .zero
     @Environment(\.colorScheme) private var systemScheme
 
     nonisolated static func == (lhs: WidgetCardView, rhs: WidgetCardView) -> Bool {
@@ -247,6 +259,8 @@ struct WidgetCardView: View, Equatable {
                 && lhs.isSelected == rhs.isSelected
                 && lhs.isResizingThis == rhs.isResizingThis
                 && lhs.isDraggingThis == rhs.isDraggingThis
+                && lhs.isTemporarilyExpanded == rhs.isTemporarilyExpanded
+                && lhs.cornerOverride == rhs.cornerOverride
                 && lhs.columnCount == rhs.columnCount
                 && lhs.stackCount == rhs.stackCount
         }
@@ -257,7 +271,7 @@ struct WidgetCardView: View, Equatable {
     }
 
     private var corner: ResizeCorner {
-        WidgetResize.corner(for: anchor)
+        cornerOverride ?? WidgetResize.corner(for: anchor)
     }
 
     private var handleAlignment: Alignment {
@@ -299,7 +313,7 @@ struct WidgetCardView: View, Equatable {
         let pad = CGFloat(context.metrics.widgetPadding)
         let minH = context.metrics.minWidgetSize.height
         let hasUnbounded = isConfiguring || (node?.hasUnboundedFlex ?? false) || (node == nil)
-        let idleFade: Double = (!isPeek && !isHovered && !isConfiguring && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.90) : 1.0
+        let idleFade: Double = (!isPeek && !isHovered && !isConfiguring && !isTemporarilyExpanded && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.90) : 1.0
 
         return ZeroVoidCardLayout(
             requestedWidth: max(activeSize.width, 100),
@@ -322,9 +336,17 @@ struct WidgetCardView: View, Equatable {
         .clipped()
         .modifier(SurfaceBackground(context: context, material: material, shape: context.widgetShape, isInteractive: false))
         .clipShape(context.widgetShape)
+        .contentShape(context.widgetShape)
+        .onTapGesture {
+            guard !isPeek, !isConfiguring, !isResizingThis, !isDraggingThis, !isTemporarilyExpanded,
+                  slot.supportsResize, !NSEvent.modifierFlags.contains(.command)
+            else { return }
+            model.onWidgetClick(slot.id)
+        }
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { renderedSize = $0 }
         .overlay {
             context.widgetShape.stroke(
-                collapsing ? Color.orange.opacity(0.75) : context.primary.opacity(isHovered || isResizingThis ? 0.18 : 0.08),
+                collapsing ? Color.orange.opacity(0.75) : context.primary.opacity(isHovered || isResizingThis || isTemporarilyExpanded ? 0.18 : 0.08),
                 lineWidth: collapsing ? 1.5 : 0.75
             )
             .allowsHitTesting(false)
@@ -411,7 +433,12 @@ struct WidgetCardView: View, Equatable {
     }
 
     private func beginResize(_ handle: ResizeHandle, fallbackSize: CGSize) {
-        let startRect = model.slotFrames[slot.id] ?? CGRect(origin: .zero, size: fallbackSize)
+        let measured = renderedSize.width > 1 && renderedSize.height > 1 ? renderedSize : fallbackSize
+        let startRect: CGRect = if isPeek {
+            CGRect(origin: .zero, size: measured)
+        } else {
+            model.slotFrames[slot.id] ?? CGRect(origin: .zero, size: measured)
+        }
         model.beginResizing(slot.id, fromChip: false, handle: handle, startRect: startRect, isPeek: isPeek)
     }
 

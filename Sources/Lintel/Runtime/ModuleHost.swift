@@ -353,10 +353,14 @@ final class ModuleHost {
     }
 
     func setPeekBox(_ key: String, to box: WidgetBox) {
-        guard var panel = model.panel, panel.slotID == key else { return }
-        if panel.widgetBox != box {
+        if var panel = model.panel, panel.slotID == key, panel.widgetBox != box {
             panel.widgetBox = box
             model.panel = panel
+        }
+        if model.layout.panelSize(of: key) != box {
+            var layout = model.layout
+            layout.setPanelSize(box, for: key)
+            update(layout)
         }
     }
 
@@ -501,10 +505,20 @@ final class ModuleHost {
 
     // MARK: Panels (Transient Click-to-Peek)
 
-    func openPanel(_ key: String) {
+    func openPanel(_ key: String, corner: ResizeCorner? = nil) {
         let shape = model.slot(key)?.defaultShape ?? .card
-        let defaultBox = Metrics(model.theme).defaultWidgetBox(for: shape)
-        model.panel = PanelState(slotID: key, content: .module, widgetBox: defaultBox, isLoading: true)
+        let metrics = Metrics(model.theme)
+        let box: WidgetBox = if let remembered = model.layout.panelSize(of: key) {
+            WidgetResize.clampedBox(
+                remembered,
+                metrics: metrics,
+                maxSize: metrics.maxWidgetSize(in: model.maxWidgetScreenSize)
+            )
+        } else {
+            metrics.defaultWidgetBox(for: shape)
+        }
+        let resolvedCorner = corner ?? WidgetResize.corner(for: model.settings.anchor)
+        model.panel = PanelState(slotID: key, content: .module, widgetBox: box, resizeCorner: resolvedCorner, isLoading: true)
         updateSamplerDemand()
         sampler.refreshProcesses { [weak self] in
             self?.pushData()
@@ -663,6 +677,8 @@ final class ModuleHost {
         home.save(approvals, to: home.approvalsFile)
         var layout = model.layout
         layout.remove(id)
+        layout.setWidget(nil, for: id)
+        layout.setPanelSize(nil, for: id)
         layout.pinned[id] = nil
         layout.hidden.removeAll { $0 == id }
         if layout != model.layout { update(layout) }

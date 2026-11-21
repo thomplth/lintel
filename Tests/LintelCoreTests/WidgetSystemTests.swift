@@ -119,6 +119,125 @@ private func evaluate(_ script: String) -> JSValue {
         let collapsed = WidgetResize.step(from: smallest, delta: -1, defaultShape: .card, metrics: metrics)
         #expect(collapsed == nil)
     }
+
+    @Test func screenSpaceTranslationIsInvariantToWindowMovementAndConvertsYAxis() {
+        // AppKit screen coordinates grow right (+x) and up (+y); drag translation grows right (+w) and down (+h).
+        let start = CGPoint(x: 900, y: 700)
+        // Pulling bottom-left handle left by 60pt and down by 80pt:
+        let current = CGPoint(x: 840, y: 620)
+        let delta = WidgetResize.screenTranslation(from: start, to: current)
+        #expect(delta == CGSize(width: -60, height: 80))
+
+        let proposed = WidgetResize.proposedSize(from: CGSize(width: 280, height: 200), translation: delta, handle: .corner(.bottomLeft))
+        #expect(proposed == CGSize(width: 340, height: 280))
+    }
+
+    @Test func peekResizeNeverCollapsesToChipAndMatchesAnchoredSide() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let rightChip = CGRect(x: 1200, y: 860, width: 80, height: 28)
+        let leftChip = CGRect(x: 120, y: 860, width: 80, height: 28)
+        #expect(WidgetResize.peekCorner(forChip: rightChip, on: screen) == .bottomLeft)
+        #expect(WidgetResize.peekCorner(forChip: leftChip, on: screen) == .bottomRight)
+
+        // Shrinking a peek panel far below minWidgetSize clamps smoothly instead of collapsing to zero/chip.
+        let shrunk = WidgetResize.resolve(
+            fromChip: false,
+            startSize: CGSize(width: 260, height: 200),
+            translation: CGSize(width: 220, height: -180),
+            handle: .corner(.bottomLeft),
+            metrics: metrics,
+            maxSize: CGSize(width: 640, height: 640),
+            maxContentHeight: nil,
+            snapWidths: [],
+            snapHeights: [],
+            allowsCollapse: false
+        )
+        #expect(!shrunk.collapsesToChip)
+        #expect(shrunk.committedSize == metrics.minWidgetSize)
+        #expect(shrunk.liveSize.width >= metrics.minWidgetSize.width * 0.75)
+        #expect(shrunk.liveSize.height >= metrics.minWidgetSize.height * 0.75)
+    }
+
+    @Test func wideningShortFiniteWidgetFromSideEdgeNeverFalselyCollapses() {
+        let shortCard = CGSize(width: 220, height: 50)
+        let widened = WidgetResize.resolve(
+            fromChip: false,
+            startSize: shortCard,
+            translation: CGSize(width: -60, height: 0),
+            handle: .side(.bottomLeft),
+            metrics: metrics,
+            maxSize: CGSize(width: 640, height: 640),
+            maxContentHeight: 50,
+            snapWidths: [],
+            snapHeights: []
+        )
+        #expect(!widened.collapsesToChip)
+        #expect(widened.committedSize.width == 280)
+    }
+
+    @Test func temporaryMaxBoxExpandsWithinScreenAndNeverShrinksBase() {
+        let screen = CGSize(width: 1440, height: 900)
+        let small = WidgetBox(width: 183, height: 234)
+        let expanded = WidgetResize.temporaryMaxBox(from: small, metrics: metrics, screenSize: screen, topOffset: 44)
+        let maxS = metrics.maxWidgetSize(in: screen)
+        #expect(expanded.width == Double(maxS.width))
+        #expect(expanded.height == Double(maxS.height))
+
+        // Stacked lower on screen: capped so it never extends off the bottom edge.
+        let lowStacked = WidgetResize.temporaryMaxBox(from: small, metrics: metrics, screenSize: screen, topOffset: 500)
+        #expect(lowStacked.height == 384) // 900 - 500 - 16
+        #expect(lowStacked.width == Double(maxS.width))
+
+        // Never shrinks a widget that is already larger than available cap.
+        let huge = WidgetBox(width: 900, height: 800)
+        let kept = WidgetResize.temporaryMaxBox(from: huge, metrics: metrics, screenSize: screen, topOffset: 44)
+        #expect(kept.width == 900)
+        #expect(kept.height == 800)
+    }
+
+    @Test func clampedBoxRespectsMinAndMaxWidgetBounds() {
+        let maxS = CGSize(width: 600, height: 500)
+        let tooLarge = WidgetResize.clampedBox(WidgetBox(width: 900, height: 800), metrics: metrics, maxSize: maxS)
+        #expect(tooLarge == WidgetBox(width: 600, height: 500))
+        let tooSmall = WidgetResize.clampedBox(WidgetBox(width: 40, height: 30), metrics: metrics, maxSize: maxS)
+        #expect(tooSmall == WidgetBox(metrics.minWidgetSize))
+    }
+
+    @Test func widgetExpansionStaysExpandedWhileHoveredAndCollapsesAfterGrace() {
+        var expansion = WidgetExpansion(grace: 0.6)
+        #expect(expansion.slotID == nil)
+
+        expansion.expand("cliproxy-usage")
+        #expect(expansion.slotID == "cliproxy-usage")
+        #expect(expansion.state == .expanded(slotID: "cliproxy-usage"))
+
+        // Pointer stays inside: remains expanded.
+        expansion.pointer(inside: true, at: 10.0)
+        #expect(expansion.state == .expanded(slotID: "cliproxy-usage"))
+
+        // Pointer leaves: enters leaving grace, still expanded during grace window.
+        expansion.pointer(inside: false, at: 10.5)
+        #expect(expansion.state == .leaving(slotID: "cliproxy-usage", since: 10.5))
+        #expect(expansion.slotID == "cliproxy-usage")
+
+        // Pointer re-enters before grace expires: cancels leaving.
+        expansion.pointer(inside: true, at: 10.9)
+        #expect(expansion.state == .expanded(slotID: "cliproxy-usage"))
+
+        // Pointer leaves and stays outside past grace: collapses to idle.
+        expansion.pointer(inside: false, at: 12.0)
+        expansion.pointer(inside: false, at: 12.5)
+        #expect(expansion.slotID == "cliproxy-usage")
+        expansion.pointer(inside: false, at: 12.6)
+        #expect(expansion.state == .collapsed)
+        #expect(expansion.slotID == nil)
+
+        // Zero grace collapses immediately when leaving.
+        expansion.grace = 0
+        expansion.expand("battery")
+        expansion.pointer(inside: false, at: 15.0)
+        #expect(expansion.state == .collapsed)
+    }
 }
 
 @Suite struct WidgetShelfStackingAndDrops {
@@ -215,6 +334,25 @@ private func evaluate(_ script: String) -> JSValue {
         let encoded = try JSONEncoder().encode(layout)
         let decoded = try JSONDecoder().decode(BarLayout.self, from: encoded)
         #expect(decoded == layout)
+    }
+
+    @Test func barLayoutPersistsRememberedPanelSizesAndDecodesLegacyLayouts() throws {
+        var layout = BarLayout(rows: [["battery", "system"]])
+        #expect(layout.panelSize(of: "battery") == nil)
+
+        let resized = WidgetBox(width: 420, height: 310)
+        layout.setPanelSize(resized, for: "battery")
+        #expect(layout.panelSize(of: "battery") == resized)
+
+        let encoded = try JSONEncoder().encode(layout)
+        let decoded = try JSONDecoder().decode(BarLayout.self, from: encoded)
+        #expect(decoded.panelSize(of: "battery") == resized)
+        #expect(decoded == layout)
+
+        // Legacy layout JSON without panelSizes still decodes cleanly.
+        let legacyJSON = Data(#"{"rows":[["battery"]],"widgets":{}}"#.utf8)
+        let legacy = try JSONDecoder().decode(BarLayout.self, from: legacyJSON)
+        #expect(legacy.panelSizes.isEmpty)
     }
 }
 

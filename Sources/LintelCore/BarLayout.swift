@@ -24,6 +24,8 @@ public struct BarLayout: Equatable, Codable, Sendable {
     /// Explicit vertical widget stacks (columns) on the shelf below the chip strip.
     /// Column 0 hugs the bar's anchored edge; entries within a column stack top to bottom.
     public var widgetColumns: [[String]] = []
+    /// Remembered click-to-peek (chip expand) sizes per module id so reopening restores the user's last resized dimensions.
+    public var panelSizes: [String: WidgetBox] = [:]
 
     public init() {}
 
@@ -33,7 +35,8 @@ public struct BarLayout: Equatable, Codable, Sendable {
         pinned: [String: Bool] = [:],
         symbols: [String: String] = [:],
         widgets: [String: WidgetBox] = [:],
-        widgetColumns: [[String]] = []
+        widgetColumns: [[String]] = [],
+        panelSizes: [String: WidgetBox] = [:]
     ) {
         self.rows = rows
         self.hidden = hidden
@@ -41,10 +44,11 @@ public struct BarLayout: Equatable, Codable, Sendable {
         self.symbols = symbols
         self.widgets = widgets
         self.widgetColumns = widgetColumns
+        self.panelSizes = panelSizes
     }
 
     private enum Key: String, CodingKey {
-        case rows, hidden, pinned, symbols, widgets, widgetColumns
+        case rows, hidden, pinned, symbols, widgets, widgetColumns, panelSizes
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +59,15 @@ public struct BarLayout: Equatable, Codable, Sendable {
         symbols = try container.decodeIfPresent([String: String].self, forKey: .symbols) ?? [:]
         widgets = try container.decodeIfPresent([String: WidgetBox].self, forKey: .widgets) ?? [:]
         widgetColumns = try container.decodeIfPresent([[String]].self, forKey: .widgetColumns) ?? []
+        panelSizes = try container.decodeIfPresent([String: WidgetBox].self, forKey: .panelSizes) ?? [:]
+    }
+
+    public func panelSize(of key: String) -> WidgetBox? {
+        panelSizes[key]
+    }
+
+    public mutating func setPanelSize(_ box: WidgetBox?, for key: String) {
+        panelSizes[key] = box
     }
 
     public func widgetBox(of key: String) -> WidgetBox? {

@@ -61,12 +61,18 @@ struct PanelState: Equatable {
     var slotID: String
     var content: Content
     var widgetBox: WidgetBox = WidgetBox(width: 312, height: 268)
+    var resizeCorner: ResizeCorner = .bottomLeft
     var node: ViewNode?
     var configureNode: ViewNode?
     var isConfiguring = false
     var failure: String?
     var isLoading = false
     var isPinnedOpen = false
+}
+
+struct TemporaryWidgetExpansion: Equatable {
+    var slotID: String
+    var box: WidgetBox
 }
 
 /// Live freeform resize state kept outside BarModel so 120Hz drag ticks never redraw unrelated chips or widgets.
@@ -201,6 +207,10 @@ final class BarModel: ObservableObject {
     @Published var draggingWidgetID: String? {
         didSet { if (oldValue == nil) != (draggingWidgetID == nil) { onResizingChanged() } }
     }
+    /// Always-on desktop widget temporarily expanded to max size after a click until the cursor leaves.
+    @Published var temporaryExpandedWidget: TemporaryWidgetExpansion? {
+        didSet { if oldValue != temporaryExpandedWidget { onResizingChanged() } }
+    }
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
     @Published var showsPinDividers = false
     /// The bar was opened with the keyboard shortcut, so its keys move `keyboardSelection` and act on that module.
@@ -303,6 +313,12 @@ final class BarModel: ObservableObject {
         return false
     }
 
+    /// True if `barPoint` (in bar window top-left coordinates) hits the specific desktop widget `slotID`.
+    func isPointInWidget(_ barPoint: CGPoint, slotID: String) -> Bool {
+        guard let rect = reportedWidgetFrames[slotID] else { return false }
+        return rect.insetBy(dx: -8, dy: -8).contains(barPoint)
+    }
+
     /// True if `barPoint` (in bar window top-left coordinates) hits a visible chip in the bar window.
     func isPointInBarChip(_ barPoint: CGPoint) -> Bool {
         let chipKeys = Set(visibleRows.joined().map(\.id))
@@ -345,6 +361,7 @@ final class BarModel: ObservableObject {
     var onResizingChanged: () -> Void = {}
     var onToggleConfigure: (_ id: String, _ isConfiguring: Bool, _ isPeek: Bool) -> Void = { _, _, _ in }
     var onWidgetCommand: (_ id: String, _ command: String) -> Void = { _, _ in }
+    var onWidgetClick: (_ id: String) -> Void = { _ in }
     var manifestFor: (String) -> ModuleManifest? = { _ in nil }
 
     var alignment: HorizontalAlignment {
@@ -552,7 +569,8 @@ final class BarModel: ObservableObject {
             maxSize: maxSize,
             maxContentHeight: maxContentH,
             snapWidths: resizeDrag.isPeek ? [] : snapWidths,
-            snapHeights: resizeDrag.isPeek ? [] : snapHeights
+            snapHeights: resizeDrag.isPeek ? [] : snapHeights,
+            allowsCollapse: !resizeDrag.isPeek
         )
 
         let wasCollapsed = resizeDrag.collapsesToChip
@@ -572,10 +590,6 @@ final class BarModel: ObservableObject {
             || (resolved.didSnapHeight && !wasSnapH)
             || (resolved.hitContentCeiling && !wasCeiling) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        }
-
-        if resizeDrag.isPeek && !resizeDrag.collapsesToChip {
-            onResizePeek(id, WidgetBox(resolved.liveSize))
         }
     }
 

@@ -90,6 +90,46 @@ public enum WidgetResize {
         }
     }
 
+    /// Which bottom corner of a click-to-peek panel is free to drag without fighting its anchored edge.
+    /// Matches `Placement.panel(size:under:on:)`, which right-aligns chips on the right half of the screen
+    /// and left-aligns chips on the left half.
+    public static func peekCorner(forChip chip: CGRect, on screen: CGRect) -> ResizeCorner {
+        chip.midX < screen.midX ? .bottomRight : .bottomLeft
+    }
+
+    /// Converts global AppKit screen pointer coordinates (bottom-left origin, Y growing upward) into
+    /// top-left drag translation deltas (X right, Y down). Invariant to window moves or resizes.
+    public static func screenTranslation(from start: CGPoint, to current: CGPoint) -> CGSize {
+        CGSize(width: current.x - start.x, height: start.y - current.y)
+    }
+
+    /// Clamps a persisted box into valid freeform widget bounds for the current metrics and screen size.
+    public static func clampedBox(_ box: WidgetBox, metrics: Metrics, maxSize: CGSize) -> WidgetBox {
+        let minS = metrics.minWidgetSize
+        let maxW = max(maxSize.width, minS.width)
+        let maxH = max(maxSize.height, minS.height)
+        let w = min(max(CGFloat(box.width), minS.width), maxW)
+        let h = min(max(CGFloat(box.height), minS.height), maxH)
+        return WidgetBox(width: Double(w.rounded()), height: Double(h.rounded()))
+    }
+
+    /// Computes the temporary max-size box when clicking an always-on desktop widget, capped to the visible screen
+    /// below `topOffset` and never shrinking below `base`.
+    public static func temporaryMaxBox(
+        from base: WidgetBox,
+        metrics: Metrics,
+        screenSize: CGSize,
+        topOffset: CGFloat = 0
+    ) -> WidgetBox {
+        let maxSize = metrics.maxWidgetSize(in: screenSize)
+        let screenMargin: CGFloat = 16
+        let availableW = max(screenSize.width - screenMargin * 2, metrics.minWidgetSize.width)
+        let availableH = max(screenSize.height - max(topOffset, 0) - screenMargin, metrics.minWidgetSize.height)
+        let targetW = max(min(maxSize.width, availableW), CGFloat(base.width))
+        let targetH = max(min(maxSize.height, availableH), CGFloat(base.height))
+        return WidgetBox(width: Double(targetW.rounded()), height: Double(targetH.rounded()))
+    }
+
     /// Raw frame size produced by pulling a corner, bottom edge, or side edge from `startSize` by `translation`.
     public static func proposedSize(from startSize: CGSize, translation: CGSize, handle: ResizeHandle) -> CGSize {
         switch handle {
@@ -114,7 +154,8 @@ public enum WidgetResize {
         maxSize: CGSize,
         maxContentHeight: CGFloat?,
         snapWidths: [CGFloat],
-        snapHeights: [CGFloat]
+        snapHeights: [CGFloat],
+        allowsCollapse: Bool = true
     ) -> Resolution {
         let minS = metrics.minWidgetSize
         let raw = proposedSize(from: startSize, translation: translation, handle: handle)
@@ -137,10 +178,15 @@ public enum WidgetResize {
                     hitContentCeiling: false
                 )
             }
-        } else {
-            let tooShort = raw.height < minS.height * 0.62
-            let tooSmallBoth = raw.width < minS.width * 0.65 && raw.height < minS.height * 0.78
-            if tooShort || tooSmallBoth {
+        } else if allowsCollapse {
+            let collapses: Bool = switch handle {
+            case .side:
+                raw.width < minS.width * 0.55
+            case .corner, .bottom:
+                raw.height < min(minS.height * 0.62, startSize.height * 0.85)
+                    || (raw.width < minS.width * 0.65 && raw.height < minS.height * 0.78)
+            }
+            if collapses {
                 return Resolution(
                     collapsesToChip: true,
                     liveSize: rubberySize(proposed: raw, min: CGSize(width: 72, height: 28), max: maxSize),
@@ -247,6 +293,54 @@ public enum WidgetResize {
         candidates
             .filter { abs($0 - value) <= threshold }
             .min { abs($0 - value) < abs($1 - value) }
+    }
+}
+
+/// Tracks a desktop widget's temporary click-to-expand state until the cursor leaves and enters idle mode.
+public struct WidgetExpansion: Equatable, Sendable {
+    public enum State: Equatable, Sendable {
+        case collapsed
+        case expanded(slotID: String)
+        case leaving(slotID: String, since: TimeInterval)
+    }
+
+    public private(set) var state: State = .collapsed
+    public var grace: TimeInterval
+
+    public init(grace: TimeInterval = 0.6) {
+        self.grace = grace
+    }
+
+    public var slotID: String? {
+        switch state {
+        case .collapsed: nil
+        case .expanded(let id), .leaving(let id, _): id
+        }
+    }
+
+    public mutating func expand(_ slotID: String) {
+        state = .expanded(slotID: slotID)
+    }
+
+    public mutating func collapse() {
+        state = .collapsed
+    }
+
+    public mutating func pointer(inside: Bool, at now: TimeInterval) {
+        switch state {
+        case .collapsed:
+            break
+        case .expanded(let id):
+            if !inside {
+                state = grace <= 0 ? .collapsed : .leaving(slotID: id, since: now)
+            }
+        case .leaving(let id, let since):
+            if inside {
+                state = .expanded(slotID: id)
+            } else if now - since + 1e-9 >= grace {
+                state = .collapsed
+            }
+        }
     }
 }
 

@@ -270,6 +270,9 @@ final class ControlChannel {
                 "active": .bool(app.model.isActive), "panel": app.model.panel.map { .string($0.slotID) } ?? .null,
                 "panelBox": app.model.panel.map { ["width": .number($0.widgetBox.width), "height": .number($0.widgetBox.height)] } ?? .null,
                 "panelFailure": app.model.panel?.failure.map(JSONValue.string) ?? .null,
+                "temporarilyExpandedWidget": app.model.temporaryExpandedWidget.map {
+                    ["id": .string($0.slotID), "width": .number($0.box.width), "height": .number($0.box.height)]
+                } ?? .null,
                 "rows": .array(app.model.visibleRows.map { .array($0.map { .string($0.id) }) }),
                 "widgetColumns": .array(app.model.visibleWidgetColumns.map { col in
                     .array(col.map { ["id": .string($0.slot.id), "width": .number($0.box.width), "height": .number($0.box.height)] })

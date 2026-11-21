@@ -41,8 +41,9 @@ spacious multi-column dashboard—or shrink it back into a chip. Double-click th
 to content; widgets with finite content automatically clamp to their natural height so blank space never appears.
 Desktop widgets stay visible while idle, adapt every block natively without scrolling, and reveal a quiet utility pill
 (drag grip to reorder/stack vertically into columns or place side by side, Configure, Collapse, Studio, Settings) on
-hover; you can also ⌘-drag any widget card to stack or move it. Clicking a chip opens a transient peek widget; click
-its pin icon to keep it on the desktop.
+hover; you can also ⌘-drag any widget card to stack or move it. Clicking an always-on desktop widget expands it
+temporarily to max size until the pointer leaves and it returns to idle. Clicking a chip opens a transient peek widget
+whose resized dimensions are remembered for next time; click its pin icon to keep it on the desktop.
 Holding ⌘ over the open bar also shows a slim divider in each of its rows (except one in the menu bar, which shows all
 its modules anyway): modules on the anchored side of it stay in the bar while it is closed, the rest only show while it
 is open. Drop a module across a divider, or ⌘-drag the divider along its row, to pin or unpin modules.

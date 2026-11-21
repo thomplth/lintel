@@ -601,7 +601,7 @@ private struct ItemRow: View {
         .background(isHovered && isClickable ? context.fill : .clear)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture(perform: press)
+        .modifier(OptionalTapAction(action: isClickable ? press : nil))
         .modifier(OptionalKeyboardOperable(context: context, focusKey: node.focusKey, activate: isClickable ? press : nil))
     }
 
@@ -611,6 +611,15 @@ private struct ItemRow: View {
         } else if let address = node.string("url"), let url = URL(string: address), url.scheme == "https" {
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+/// Only clickable rows intercept taps; display rows let taps bubble to an enclosing desktop widget card.
+private struct OptionalTapAction: ViewModifier {
+    let action: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let action { content.onTapGesture(perform: action) } else { content }
     }
 }
 

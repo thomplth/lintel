@@ -18,6 +18,9 @@ struct PanelView: View {
             let material: SurfaceMaterial = model.theme.panelMaterial == "solid" ? .solid : .glass
             let context = makeContext(panel, material: material)
             let usesUnifiedWidget = panel.content == .module && slot != nil && slot?.needsApproval == false && (panel.node != nil || panel.isLoading || panel.failure == nil)
+            let panelAlignment: Alignment = usesUnifiedWidget
+                ? Alignment(horizontal: panel.resizeCorner == .bottomLeft ? .trailing : .leading, vertical: .top)
+                : .top
 
             Group {
                 if usesUnifiedWidget, let slot {
@@ -35,6 +38,8 @@ struct PanelView: View {
                         isSelected: false,
                         isResizingThis: model.resizingSlotID == slot.id,
                         isDraggingThis: false,
+                        isTemporarilyExpanded: false,
+                        cornerOverride: panel.resizeCorner,
                         columnCount: 1,
                         stackCount: 1,
                         model: model
@@ -73,7 +78,7 @@ struct PanelView: View {
                 }
             }
             .padding(Self.margin)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: panelAlignment)
             .onExitCommand { model.onDismiss() }
         }
     }

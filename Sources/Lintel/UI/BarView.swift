@@ -77,9 +77,11 @@ struct BarView: View {
                     columnCount: widgetColumns.count
                 ) {
                     ForEach(flatWidgets, id: \.slot.id) { entry in
+                        let isExpanded = model.temporaryExpandedWidget?.slotID == entry.slot.id
+                        let displayBox = isExpanded ? (model.temporaryExpandedWidget?.box ?? entry.box) : entry.box
                         WidgetCardView(
                             slot: entry.slot,
-                            box: entry.box,
+                            box: displayBox,
                             node: entry.slot.widgetNode,
                             configureNode: entry.slot.configureNode,
                             isConfiguring: entry.slot.isConfiguring,
@@ -91,6 +93,7 @@ struct BarView: View {
                             isSelected: model.keyboardSelection == entry.slot.id,
                             isResizingThis: model.resizingSlotID == entry.slot.id,
                             isDraggingThis: model.draggingWidgetID == entry.slot.id,
+                            isTemporarilyExpanded: isExpanded,
                             columnCount: widgetColumns.count,
                             stackCount: entry.stackCount,
                             model: model
@@ -108,6 +111,7 @@ struct BarView: View {
                     model.shelfOriginInBarSpace = $0
                 })
                 .animation(theme.motion == "full" ? BarModel.reflow : nil, value: widgetColumns.map { $0.map(\.slot.id) })
+                .animation(theme.motion == "full" ? BarModel.reflow : nil, value: model.temporaryExpandedWidget)
             }
         }
         .overlayPreferenceValue(SelectionMark.Key.self) { mark in
