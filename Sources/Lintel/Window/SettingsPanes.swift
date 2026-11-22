@@ -544,7 +544,7 @@ struct PresetPicker: View {
     static let blurbs = [
         "halo": "Plain text with a shadow; glass on hover",
         "glass": "Liquid Glass capsules, always",
-        "adaptive": "Liquid Glass that blends with the desktop behind it",
+        "adaptive": "Liquid Glass that adapts to the background",
         "ink": "Solid dark capsules and panels",
         "paper": "Solid light, serif",
         "terminal": "Monospaced green on black",
@@ -561,30 +561,29 @@ struct PresetPicker: View {
                     VStack(alignment: .leading, spacing: 8) {
                         if name == "adaptive" {
                             HStack(spacing: 6) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "cpu")
-                                    Text("12%")
-                                }
-                                .font(context.font())
-                                .foregroundStyle(Color.black.opacity(0.85))
-                                .padding(.horizontal, 8).padding(.vertical, 4)
-                                .background(.white.opacity(0.62), in: Capsule())
-                                .overlay(Capsule().stroke(.black.opacity(0.08), lineWidth: 0.5))
+                                Text("12%")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Color.black.opacity(0.88))
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(.white.opacity(0.75), in: Capsule())
+                                    .overlay(Capsule().stroke(.black.opacity(0.08), lineWidth: 0.5))
+                                    .frame(maxWidth: .infinity)
 
                                 Text("09:41")
-                                    .font(context.font())
-                                    .foregroundStyle(Color.white.opacity(0.92))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(Color.white.opacity(0.94))
                                     .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(.black.opacity(0.45), in: Capsule())
+                                    .background(.black.opacity(0.55), in: Capsule())
                                     .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                                    .frame(maxWidth: .infinity)
                             }
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .background {
                                 HStack(spacing: 0) {
                                     Color(white: 0.96)
-                                    Color(white: 0.10)
+                                    Color(white: 0.08)
                                 }
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
@@ -629,23 +628,7 @@ struct AppearanceSettingsPane: View {
             VStack(alignment: .leading, spacing: 18) {
                 PaneHeader("Appearance", subtitle: "Pick a preset or fine-tune typography, materials, spacing, and colors across every module.")
 
-                WindowCard(title: "Design language") {
-                    PresetPicker(app: app, model: model)
-                    if model.theme.usesAdaptiveBackdrop && !CGPreflightScreenCaptureAccess() {
-                        Divider()
-                        HStack(spacing: 10) {
-                            Image(systemName: "rectangle.dashed.badge.record")
-                                .foregroundStyle(.secondary)
-                            Text("Grant Screen Recording so Adaptive Glass can sample the windows behind the bar. Without it, capsules follow macOS light or dark mode.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer()
-                            Button("Allow…") { _ = CGRequestScreenCaptureAccess() }
-                                .controlSize(.small)
-                        }
-                    }
-                }
+                WindowCard(title: "Design language") { PresetPicker(app: app, model: model) }
 
                 WindowCard(
                     title: "Details",

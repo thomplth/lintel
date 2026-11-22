@@ -95,6 +95,7 @@ private struct StageView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: Alignment(horizontal: model.alignment, vertical: .top))
         }
+        .environment(\.isStagedBackdrop, true)
     }
 }
 
@@ -124,6 +125,7 @@ private struct MatrixStageView: View {
                 .padding(20)
             }
         }
+        .environment(\.isStagedBackdrop, true)
     }
 
     private func cell(_ vp: WidgetViewport, slot: Slot) -> some View {

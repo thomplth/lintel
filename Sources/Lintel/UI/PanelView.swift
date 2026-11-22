@@ -8,7 +8,10 @@ struct PanelView: View {
     var maxHeight: CGFloat
     var onSize: (CGSize) -> Void
     @State private var contentHeight: CGFloat = 80
+    @State private var sensedLuma: Double?
+    @State private var sensedTone: BackdropTone?
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.isStagedBackdrop) private var isStagedBackdrop
 
     static let margin: CGFloat = 28
 
@@ -16,7 +19,20 @@ struct PanelView: View {
         if let panel = model.panel {
             let slot = model.slot(panel.slotID)
             let material = SurfaceMaterial(panel: model.theme.panelMaterial)
-            let adaptiveSurface = material == .adaptive ? (model.adaptiveBackdrop.panelSurface ?? model.adaptiveBackdrop.defaultSurface) : nil
+            let sampledPanel = material == .adaptive ? (model.adaptiveBackdrop.panelSurface ?? model.adaptiveBackdrop.defaultSurface) : nil
+            let adaptiveSurface: AdaptiveSurface? = if material != .adaptive {
+                nil
+            } else if isStagedBackdrop {
+                sampledPanel
+            } else if let sensedLuma {
+                AdaptiveBackdrop.surface(
+                    forLuma: sensedLuma,
+                    hueSample: sampledPanel,
+                    previous: sensedTone.map { AdaptiveSurface.neutral(for: $0) }
+                )
+            } else {
+                sampledPanel
+            }
             let context = makeContext(panel, material: material, adaptiveSurface: adaptiveSurface)
             let usesUnifiedWidget = panel.content == .module && slot != nil && slot?.needsApproval == false && (panel.node != nil || panel.isLoading || panel.failure == nil)
             let panelAlignment: Alignment = usesUnifiedWidget
@@ -74,6 +90,18 @@ struct PanelView: View {
                     .frame(width: width)
                     .modifier(SurfaceBackground(context: context, material: material, shape: context.panelShape))
                     .clipShape(context.panelShape)
+                    .background {
+                        if material == .adaptive, !isStagedBackdrop {
+                            BackdropLumaSensor { luma in
+                                let nextTone = AdaptiveBackdrop.resolveLumaTone(luma: luma, previous: sensedTone)
+                                if sensedTone != nextTone || sensedLuma == nil {
+                                    sensedTone = nextTone
+                                    sensedLuma = luma
+                                }
+                            }
+                            .clipShape(context.panelShape)
+                        }
+                    }
                     .shadow(color: .black.opacity(material == .solid ? 0.3 : 0.12), radius: 14, y: 6)
                     .environment(\.colorScheme, context.colorScheme ?? systemScheme)
                     .animation(model.theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)

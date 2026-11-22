@@ -242,7 +242,10 @@ struct WidgetCardView: View, Equatable {
     @State private var isHovered = false
     @State private var isGripDragging = false
     @State private var renderedSize: CGSize = .zero
+    @State private var sensedLuma: Double?
+    @State private var sensedTone: BackdropTone?
     @Environment(\.colorScheme) private var systemScheme
+    @Environment(\.isStagedBackdrop) private var isStagedBackdrop
 
     nonisolated static func == (lhs: WidgetCardView, rhs: WidgetCardView) -> Bool {
         MainActor.assumeIsolated {
@@ -288,6 +291,19 @@ struct WidgetCardView: View, Equatable {
         corner == .bottomLeft ? .leading : .trailing
     }
 
+    private var effectiveAdaptiveSurface: AdaptiveSurface? {
+        guard material == .adaptive else { return nil }
+        if isStagedBackdrop { return adaptiveSurface }
+        if let sensedLuma {
+            return AdaptiveBackdrop.surface(
+                forLuma: sensedLuma,
+                hueSample: adaptiveSurface,
+                previous: sensedTone.map { AdaptiveSurface.neutral(for: $0) }
+            )
+        }
+        return adaptiveSurface
+    }
+
     private func makeContext(bounds: CGSize?, forConfig: Bool = false) -> RenderContext {
         var context = RenderContext(
             theme: theme,
@@ -296,7 +312,7 @@ struct WidgetCardView: View, Equatable {
             moduleID: slot.id,
             manifest: model.manifestFor(slot.id),
             widgetBounds: forConfig ? nil : bounds,
-            adaptiveSurface: material == .adaptive ? adaptiveSurface : nil
+            adaptiveSurface: effectiveAdaptiveSurface
         )
         let model = model
         context.panelFocus = model.panelFocus
@@ -339,6 +355,18 @@ struct WidgetCardView: View, Equatable {
         .clipped()
         .modifier(SurfaceBackground(context: context, material: material, shape: context.widgetShape, isInteractive: false))
         .clipShape(context.widgetShape)
+        .background {
+            if material == .adaptive, !isStagedBackdrop {
+                BackdropLumaSensor { luma in
+                    let nextTone = AdaptiveBackdrop.resolveLumaTone(luma: luma, previous: sensedTone)
+                    if sensedTone != nextTone || sensedLuma == nil {
+                        sensedTone = nextTone
+                        sensedLuma = luma
+                    }
+                }
+                .clipShape(context.widgetShape)
+            }
+        }
         .contentShape(context.widgetShape)
         .onTapGesture {
             guard !isPeek, !isConfiguring, !isResizingThis, !isDraggingThis, !isTemporarilyExpanded,
@@ -421,7 +449,7 @@ struct WidgetCardView: View, Equatable {
         .animation(theme.motion == "full" ? .spring(response: 0.28, dampingFraction: 0.84) : nil, value: isConfiguring)
         .animation(theme.motion == "full" ? .spring(response: 0.22, dampingFraction: 0.82) : nil, value: collapsing)
         .animation(theme.motion == "full" ? .easeOut(duration: 0.16) : nil, value: isHovered)
-        .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)
+        .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: effectiveAdaptiveSurface)
         .environment(\.colorScheme, context.colorScheme ?? systemScheme)
         .onHover { hovering in
             isHovered = hovering

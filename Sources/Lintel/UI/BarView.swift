@@ -227,8 +227,11 @@ struct ChipView: View, Equatable {
     let isSelected: Bool
     let isResizingThis: Bool
     @Environment(\.isInMenuBar) private var isInMenuBar
+    @Environment(\.isStagedBackdrop) private var isStagedBackdrop
     @Environment(\.colorScheme) private var systemScheme
     @State private var isHovered = false
+    @State private var sensedLuma: Double?
+    @State private var sensedTone: BackdropTone?
 
     init(slot: Slot, model: BarModel, material: SurfaceMaterial, isCarried: Bool = false) {
         self.slot = slot
@@ -289,9 +292,23 @@ struct ChipView: View, Equatable {
             .accessibilityLabel("Pin divider")
     }
 
+    private var effectiveAdaptiveSurface: AdaptiveSurface? {
+        guard material == .adaptive else { return nil }
+        if isStagedBackdrop { return adaptiveSurface }
+        if let sensedLuma {
+            return AdaptiveBackdrop.surface(
+                forLuma: sensedLuma,
+                hueSample: adaptiveSurface,
+                previous: sensedTone.map { AdaptiveSurface.neutral(for: $0) }
+            )
+        }
+        return adaptiveSurface
+    }
+
     private var chip: some View {
+        let resolvedAdaptive = effectiveAdaptiveSurface
         let context = RenderContext(
-            theme: theme, surface: .chip, material: material, moduleID: slot.id, adaptiveSurface: adaptiveSurface
+            theme: theme, surface: .chip, material: material, moduleID: slot.id, adaptiveSurface: resolvedAdaptive
         )
         let hasCapsule = material.hasCapsule
         let isOpen = isActive || isInMenuBar
@@ -307,8 +324,20 @@ struct ChipView: View, Equatable {
             }
             .modifier(SurfaceBackground(context: context, material: material, shape: context.chipShape, isInteractive: isClickable))
             .glassEffectTransition(.identity)
+            .background {
+                if material == .adaptive, !isStagedBackdrop, !isCarried {
+                    BackdropLumaSensor { luma in
+                        let nextTone = AdaptiveBackdrop.resolveLumaTone(luma: luma, previous: sensedTone)
+                        if sensedTone != nextTone || sensedLuma == nil {
+                            sensedTone = nextTone
+                            sensedLuma = luma
+                        }
+                    }
+                    .clipShape(context.chipShape)
+                }
+            }
             .environment(\.colorScheme, context.colorScheme ?? systemScheme)
-            .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)
+            .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: resolvedAdaptive)
             .overlay {
                 if hasCapsule, isPanelOpen {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)

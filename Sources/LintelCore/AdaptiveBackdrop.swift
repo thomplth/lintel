@@ -52,12 +52,16 @@ public struct AdaptiveSurface: Equatable, Sendable {
 
 /// Pure, deterministic maths that turns sampled desktop pixels into non-flickering, legible adaptive Liquid Glass.
 public enum AdaptiveBackdrop {
-    /// Switch to dark glass at or below this WCAG relative luminance.
+    /// Switch to dark glass at or below this WCAG relative luminance (linear RGB).
     public static let darkThreshold = 0.14
-    /// Switch to light glass at or above this WCAG relative luminance.
+    /// Switch to light glass at or above this WCAG relative luminance (linear RGB).
     public static let lightThreshold = 0.24
     /// Initial split when no previous tone exists (WCAG equal-contrast point between black and white is ~0.179).
     public static let midpointThreshold = 0.18
+    /// Hysteresis thresholds for WindowServer perceptual sRGB luma (`0...1`, where 50% grey reports ~0.50).
+    public static let lumaDarkThreshold = 0.44
+    public static let lumaLightThreshold = 0.56
+    public static let lumaMidpoint = 0.50
     /// Subtle tint strength that blends Liquid Glass into white, black, and coloured desktops while staying translucent.
     public static let defaultTintOpacity = 0.28
     /// Suppress tint updates smaller than this per-channel delta when the tone has not flipped.
@@ -70,6 +74,23 @@ public enum AdaptiveBackdrop {
         if luminance <= darkThreshold { return .dark }
         if let previous { return previous }
         return luminance >= midpointThreshold ? .light : .dark
+    }
+
+    public static func resolveLumaTone(luma: Double, previous: BackdropTone?) -> BackdropTone {
+        if luma >= lumaLightThreshold { return .light }
+        if luma <= lumaDarkThreshold { return .dark }
+        if let previous { return previous }
+        return luma >= lumaMidpoint ? .light : .dark
+    }
+
+    /// Combines real-time WindowServer perceptual luma with an optional ScreenCaptureKit hue sample.
+    /// The luma polarity is authoritative; the hue sample enriches the tint only when it agrees on polarity.
+    public static func surface(forLuma luma: Double, hueSample: AdaptiveSurface?, previous: AdaptiveSurface?) -> AdaptiveSurface {
+        let tone = resolveLumaTone(luma: luma, previous: previous?.tone)
+        if let hueSample, hueSample.tone == tone {
+            return hueSample
+        }
+        return AdaptiveSurface.neutral(for: tone)
     }
 
     /// Computes a gentle, background-matched tint that preserves desktop hue while keeping foreground text crisp.

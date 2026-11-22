@@ -82,4 +82,31 @@ import Testing
         #expect(AdaptiveBackdrop.sample(rgba: [], width: 0, height: 0, region: CGRect(x: 0, y: 0, width: 1, height: 1)) == nil)
         #expect(AdaptiveBackdrop.sample(rgba: [0, 0, 0, 255], width: 2, height: 2, region: CGRect(x: 0, y: 0, width: 1, height: 1)) == nil)
     }
+
+    @Test func perceptualLumaUsesHysteresisAroundMidpoint() {
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 0.0, previous: nil) == .dark)
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 1.0, previous: nil) == .light)
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 0.48, previous: .light) == .light)
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 0.43, previous: .light) == .dark)
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 0.52, previous: .dark) == .dark)
+        #expect(AdaptiveBackdrop.resolveLumaTone(luma: 0.57, previous: .dark) == .light)
+    }
+
+    @Test func combiningLumaWithOptionalHueSamplePrefersLumaPolarityWhenDisagreeing() {
+        let darkNeutral = AdaptiveBackdrop.surface(forLuma: 0.05, hueSample: nil, previous: nil)
+        #expect(darkNeutral.tone == .dark)
+        #expect(darkNeutral.tint == HexColor(red: 0, green: 0, blue: 0))
+
+        let lightNeutral = AdaptiveBackdrop.surface(forLuma: 0.96, hueSample: nil, previous: nil)
+        #expect(lightNeutral.tone == .light)
+        #expect(lightNeutral.tint == HexColor(red: 1, green: 1, blue: 1))
+
+        let navyHue = AdaptiveSurface(tone: .dark, tint: HexColor(red: 0.06, green: 0.08, blue: 0.16))
+        let matched = AdaptiveBackdrop.surface(forLuma: 0.10, hueSample: navyHue, previous: nil)
+        #expect(matched == navyHue)
+
+        let mismatched = AdaptiveBackdrop.surface(forLuma: 0.95, hueSample: navyHue, previous: nil)
+        #expect(mismatched.tone == .light)
+        #expect(mismatched.tint == HexColor(red: 1, green: 1, blue: 1))
+    }
 }
