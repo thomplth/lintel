@@ -2,6 +2,7 @@ const REFRESH_OPTIONS = { '15s': 15, '30s': 30, '60s': 60, '2m': 120 };
 const STATUS_OPTIONS = ['Unreviewed', 'Needs approval', 'All'];
 const SCOPE_OPTIONS = ['Direct + Team', 'Direct only'];
 const REPO_MODES = ['All repos', 'Only selected', 'Exclude'];
+const ATTENTION_MODES = ['Direct only', 'All new', 'Off'];
 const KNOWN_BOTS = new Set([
   'github-actions', 'dependabot', 'renovate', 'coderabbitai', 'copilot',
   'copilot-pull-request-reviewer', 'linear', 'vercel', 'netlify',
@@ -62,6 +63,7 @@ function config(host) {
   const scope = host.storage.get('scope', 'Direct + Team');
   const repoMode = host.storage.get('repoMode', 'All repos');
   const refreshLabel = host.storage.get('refreshLabel', '15s');
+  const attentionMode = host.storage.get('attentionMode', 'Direct only');
   return {
     statusFilter: STATUS_OPTIONS.includes(statusFilter) ? statusFilter : 'Unreviewed',
     scope: SCOPE_OPTIONS.includes(scope) ? scope : 'Direct + Team',
@@ -71,6 +73,7 @@ function config(host) {
     selectedRepos: (host.storage.get('selectedRepos', []) || []).filter((r) => typeof r === 'string' && r.includes('/')),
     refreshLabel: REFRESH_OPTIONS[refreshLabel] ? refreshLabel : '15s',
     refreshSeconds: REFRESH_OPTIONS[refreshLabel] || 15,
+    attentionMode: ATTENTION_MODES.includes(attentionMode) ? attentionMode : 'Direct only',
     notifyNew: !!host.storage.get('notifyNew', false),
   };
 }
@@ -369,6 +372,12 @@ function renderReviewItem(host, entry) {
   });
 }
 
+function writeSeenReviewUrls(host, urls) {
+  const prev = host.storage.get('seenReviewUrls', []);
+  if (Array.isArray(prev) && prev.length === urls.length && prev.every((u, i) => u === urls[i])) return;
+  host.storage.set('seenReviewUrls', urls);
+}
+
 function allCandidateRepos(host) {
   const set = new Set([...knownRepos, ...config(host).selectedRepos]);
   return Array.from(set).sort((a, b) => a.localeCompare(b));
@@ -397,7 +406,12 @@ defineModule({
     const visible = filteredPulls(host);
     const seen = new Set(host.storage.get('seenReviewUrls', []));
     const unseen = visible.filter((entry) => !seen.has(entry.pr.url));
-    host.attention(!failure && unseen.length > 0);
+    const attentionMatches = cfg.attentionMode === 'Off'
+      ? []
+      : cfg.attentionMode === 'Direct only'
+        ? unseen.filter((entry) => entry.isDirect)
+        : unseen;
+    host.attention(!failure && attentionMatches.length > 0);
     if (cfg.notifyNew) {
       for (const entry of unseen) {
         if (!notifiedUrls.has(entry.pr.url)) {
@@ -421,7 +435,10 @@ defineModule({
     }
     const cfg = config(host);
     const visible = filteredPulls(host);
-    host.storage.set('seenReviewUrls', visible.map((entry) => entry.pr.url));
+    if (!failure && hasLoaded) {
+      writeSeenReviewUrls(host, visible.map((entry) => entry.pr.url));
+    }
+    host.attention(false);
     for (const entry of visible) notifiedUrls.add(entry.pr.url);
 
     if (pulls.length === 0) {
@@ -491,9 +508,13 @@ defineModule({
         toggle('Ignore bot reviews', cfg.ignoreBots, 'setIgnoreBots'),
       ]),
       section('Repositories', repoChildren, { trailing: cfg.repoMode === 'All repos' ? 'All' : String(cfg.selectedRepos.length) }),
+      section('Alerts', [
+        segmented(ATTENTION_MODES, cfg.attentionMode, 'setAttentionMode'),
+        note('Surfaces the unpinned chip on the idle bar until you open this panel.'),
+        toggle('Notify on new requests', cfg.notifyNew, 'setNotifyNew'),
+      ]),
       section('Updates', [
         segmented(Object.keys(REFRESH_OPTIONS), cfg.refreshLabel, 'setRefresh'),
-        toggle('Notify on new requests', cfg.notifyNew, 'setNotifyNew'),
         button('Refresh now', 'refresh', { icon: 'arrow.clockwise' }),
       ]),
     ];
@@ -545,6 +566,11 @@ defineModule({
     },
     setRefresh(host, label) {
       if (REFRESH_OPTIONS[label]) host.storage.set('refreshLabel', label);
+    },
+    setAttentionMode(host, value) {
+      if (!ATTENTION_MODES.includes(value)) return;
+      host.storage.set('attentionMode', value);
+      if (value === 'Off') host.attention(false);
     },
     setNotifyNew(host, isOn) {
       host.storage.set('notifyNew', !!isOn);

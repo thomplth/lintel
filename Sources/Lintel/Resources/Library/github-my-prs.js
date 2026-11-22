@@ -1,5 +1,6 @@
 const REFRESH_OPTIONS = { '15s': 15, '30s': 30, '60s': 60, '2m': 120 };
 const REPO_MODES = ['All repos', 'Only selected', 'Exclude'];
+const ATTENTION_MODES = ['Blocked', 'Blocked + Ready', 'Off'];
 const KNOWN_BOTS = new Set([
   'github-actions', 'dependabot', 'renovate', 'coderabbitai', 'copilot',
   'copilot-pull-request-reviewer', 'linear', 'vercel', 'netlify',
@@ -54,6 +55,7 @@ const MY_PRS_QUERY = `query {
         commits(last: 1) {
           nodes {
             commit {
+              oid
               statusCheckRollup {
                 state
                 contexts {
@@ -76,6 +78,7 @@ let cachedToken = null, knownRepos = [], previousStatus = new Map(), inflight = 
 function config(host) {
   const repoMode = host.storage.get('repoMode', 'All repos');
   const refreshLabel = host.storage.get('refreshLabel', '15s');
+  const attentionMode = host.storage.get('attentionMode', 'Blocked');
   return {
     includeDrafts: host.storage.get('includeDrafts', true) !== false,
     groupByStack: host.storage.get('groupByStack', true) !== false,
@@ -84,6 +87,7 @@ function config(host) {
     selectedRepos: (host.storage.get('selectedRepos', []) || []).filter((r) => typeof r === 'string' && r.includes('/')),
     refreshLabel: REFRESH_OPTIONS[refreshLabel] ? refreshLabel : '15s',
     refreshSeconds: REFRESH_OPTIONS[refreshLabel] || 15,
+    attentionMode: ATTENTION_MODES.includes(attentionMode) ? attentionMode : 'Blocked',
     notifyChanges: !!host.storage.get('notifyChanges', false),
   };
 }
@@ -231,6 +235,8 @@ function summarizePR(pr, viewer, ignoreBots) {
   const threadNodes = (pr.reviewThreads && pr.reviewThreads.nodes) || [];
   const unresolvedThreads = threadNodes.filter((t) => t && !t.isResolved).length;
   const totalComments = ((pr.comments && pr.comments.totalCount) || 0) + ((pr.reviewThreads && pr.reviewThreads.totalCount) || 0);
+  const commitNode = pr.commits && pr.commits.nodes && pr.commits.nodes[0];
+  const headOid = (commitNode && commitNode.commit && commitNode.commit.oid) || '';
   const ci = summarizeCI(pr);
   const hasConflict = pr.mergeable === 'CONFLICTING' || pr.mergeStateStatus === 'DIRTY';
   const isBehind = pr.mergeStateStatus === 'BEHIND';
@@ -257,6 +263,7 @@ function summarizePR(pr, viewer, ignoreBots) {
     unresolvedThreads,
     totalComments,
     ci,
+    headOid,
     hasConflict,
     isBehind,
     isApproved,
@@ -535,13 +542,76 @@ function renderPRRow(host, rowInfo) {
   });
 }
 
+function attentionToken(entry, attentionMode) {
+  if (attentionMode === 'Off' || entry.pr.isDraft) return null;
+  if (entry.isBlocked) {
+    if (entry.statusKey === 'ci-fail' && entry.headOid) return `ci-fail:${entry.headOid}`;
+    return entry.statusKey;
+  }
+  if (attentionMode === 'Blocked + Ready' && entry.isReady) return 'ready';
+  return null;
+}
+
+function readSeenStates(host) {
+  const raw = host.storage.get('seenPrStates', {});
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const result = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === 'string') result[key] = value;
+  }
+  return result;
+}
+
+function sameStateMap(a, b) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+function writeSeenStates(host, next) {
+  const prev = readSeenStates(host);
+  if (!sameStateMap(prev, next)) {
+    host.storage.set('seenPrStates', next);
+  }
+}
+
+function pruneSeenStates(host, summaries, attentionMode) {
+  const current = readSeenStates(host);
+  if (failure || !hasLoaded) return current;
+  const pruned = {};
+  for (const entry of summaries) {
+    const token = attentionToken(entry, attentionMode);
+    if (token && current[entry.pr.url] === token) {
+      pruned[entry.pr.url] = token;
+    }
+  }
+  writeSeenStates(host, pruned);
+  return pruned;
+}
+
+function markSeenStates(host, summaries, attentionMode) {
+  if (!failure && hasLoaded) {
+    const next = {};
+    for (const entry of summaries) {
+      const token = attentionToken(entry, attentionMode);
+      if (token) next[entry.pr.url] = token;
+    }
+    writeSeenStates(host, next);
+  }
+  host.attention(false);
+}
+
 function maybeNotifyStatusChanges(host, summaries, enabled) {
   const nextStatus = new Map();
   for (const entry of summaries) {
     const key = entry.pr.url;
     const prev = previousStatus.get(key);
     nextStatus.set(key, entry.statusKey);
-    if (!enabled || !prev || prev === entry.statusKey) continue;
+    if (!enabled || !prev || prev === entry.statusKey || entry.pr.isDraft) continue;
     const labels = {
       ready: 'ready to merge',
       approved: 'approved',
@@ -584,9 +654,15 @@ defineModule({
     const summaries = filteredSummaries(host);
     maybeNotifyStatusChanges(host, summaries, cfg.notifyChanges);
 
-    const blockedCount = summaries.filter((e) => e.isBlocked).length;
+    const seen = pruneSeenStates(host, summaries, cfg.attentionMode);
+    const hasUnseenAlert = summaries.some((e) => {
+      const token = attentionToken(e, cfg.attentionMode);
+      return token !== null && seen[e.pr.url] !== token;
+    });
+    host.attention(!failure && hasUnseenAlert);
+
+    const blockedCount = summaries.filter((e) => !e.pr.isDraft && e.isBlocked).length;
     const readyCount = summaries.filter((e) => e.isReady).length;
-    host.attention(!failure && blockedCount > 0);
 
     if (summaries.length === 0) return icon('arrow.triangle.branch');
     const tone = blockedCount > 0 ? 'bad' : readyCount > 0 ? 'good' : 'accent';
@@ -608,6 +684,7 @@ defineModule({
     const cfg = config(host);
     const summaries = filteredSummaries(host);
     maybeNotifyStatusChanges(host, summaries, cfg.notifyChanges);
+    markSeenStates(host, summaries, cfg.attentionMode);
 
     if (pulls.length === 0) {
       return [
@@ -676,9 +753,13 @@ defineModule({
         toggle('Ignore bot reviews', cfg.ignoreBots, 'setIgnoreBots'),
       ]),
       section('Repositories', repoChildren, { trailing: cfg.repoMode === 'All repos' ? 'All' : String(cfg.selectedRepos.length) }),
+      section('Alerts', [
+        segmented(ATTENTION_MODES, cfg.attentionMode, 'setAttentionMode'),
+        note('Surfaces the unpinned chip on the idle bar until you open this panel.'),
+        toggle('Notify on status changes', cfg.notifyChanges, 'setNotifyChanges'),
+      ]),
       section('Updates', [
         segmented(Object.keys(REFRESH_OPTIONS), cfg.refreshLabel, 'setRefresh'),
-        toggle('Notify on status changes', cfg.notifyChanges, 'setNotifyChanges'),
         button('Refresh now', 'refresh', { icon: 'arrow.clockwise' }),
       ]),
     ];
@@ -727,6 +808,11 @@ defineModule({
     },
     setRefresh(host, label) {
       if (REFRESH_OPTIONS[label]) host.storage.set('refreshLabel', label);
+    },
+    setAttentionMode(host, value) {
+      if (!ATTENTION_MODES.includes(value)) return;
+      host.storage.set('attentionMode', value);
+      if (value === 'Off') host.attention(false);
     },
     setNotifyChanges(host, isOn) {
       host.storage.set('notifyChanges', !!isOn);

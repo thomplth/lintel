@@ -340,8 +340,14 @@ struct ChipView: View, Equatable {
             .onHover { isHovered = $0 }
             .onTapGesture { if isClickable, model.rearrangement == nil { model.onSlotClick(slot) } }
             .contextMenu { menu }
-            .help(isOpen ? slot.failure ?? slot.title : "")
+            .help(isOpen ? chipHelp : "")
             .accessibilityLabel(slot.title)
+    }
+
+    private var chipHelp: String {
+        if let failure = slot.failure { return failure }
+        if !isPinned, slot.isRaised { return "\(slot.title) · Showing for attention" }
+        return slot.title
     }
 
     @ViewBuilder private func content(_ context: RenderContext) -> some View {

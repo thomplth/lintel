@@ -18,6 +18,7 @@ private final class MockModuleHarness {
     var fetchCalls: [(url: String, method: String, auth: String?)] = []
     var attentionLog: [Bool] = []
     var notifications: [(title: String, body: String)] = []
+    var storageWrites: [(key: String, value: Any)] = []
     var execHandler: (_ tool: String, _ args: [String]) -> Result<String, Error>
     var fetchHandler: (_ url: String, _ options: [String: Any]) -> Result<String, Error>
 
@@ -77,6 +78,8 @@ private final class MockModuleHarness {
                 self.attentionLog.append(args.first as? Bool ?? false)
             case "notify":
                 self.notifications.append((args.first as? String ?? "", args.count > 1 ? args[1] as? String ?? "" : ""))
+            case "storage.set":
+                self.storageWrites.append((args.first as? String ?? "", args.count > 1 ? args[1] : NSNull()))
             default:
                 break
             }
@@ -813,5 +816,194 @@ private func sampleMyPRsGraphQLResponse() -> String {
         let row = try #require(allItems(in: try harness.render("widget")).first)
         #expect(row.string("title") == "Write text boxes as FreeText")
         #expect(row.string("compactTitle") == "freetext-pdfium-writer")
+    }
+
+    @Test func myPRsAttentionDismissesOnViewIgnoresDraftsAndRealertsOnNewState() throws {
+        let source = try #require(loadModuleSource("github-my-prs"))
+
+        func payload(nodes: [[String: Any]]) -> String {
+            jsonString(["data": ["viewer": ["login": "alice"], "authored": ["nodes": nodes]]])
+        }
+
+        func prNode(
+            number: Int,
+            isDraft: Bool = false,
+            mergeable: String = "MERGEABLE",
+            mergeStateStatus: String = "BLOCKED",
+            ciState: String = "SUCCESS",
+            oid: String = "aaa111",
+            reviewState: String? = nil
+        ) -> [String: Any] {
+            let reviews: [[String: Any]] = reviewState.map {
+                [["state": $0, "author": ["__typename": "User", "login": "bob"]]]
+            } ?? []
+            return [
+                "number": number,
+                "title": "PR #\(number)",
+                "url": "https://github.com/org/repo/pull/\(number)",
+                "isDraft": isDraft,
+                "updatedAt": "2026-11-21T15:00:00Z",
+                "additions": 10,
+                "deletions": 2,
+                "baseRefName": "main",
+                "headRefName": "feat/pr-\(number)",
+                "reviewDecision": reviewState == "APPROVED" ? "APPROVED" : "REVIEW_REQUIRED",
+                "mergeable": mergeable,
+                "mergeStateStatus": mergeStateStatus,
+                "repository": ["nameWithOwner": "org/repo", "name": "repo", "defaultBranchRef": ["name": "main"]],
+                "reviewRequests": ["nodes": []],
+                "latestOpinionatedReviews": ["nodes": reviews],
+                "reviews": ["nodes": reviews],
+                "reviewThreads": ["totalCount": 0, "nodes": []],
+                "comments": ["totalCount": 0],
+                "commits": ["nodes": [["commit": [
+                    "oid": oid,
+                    "statusCheckRollup": [
+                        "state": ciState,
+                        "contexts": [
+                            "totalCount": 1,
+                            "checkRunCountsByState": [["state": ciState, "count": 1]],
+                            "statusContextCountsByState": [],
+                        ],
+                    ],
+                ]]]],
+            ]
+        }
+
+        // 1. Draft PR with conflict & failing CI must NOT raise attention or tint chip red.
+        var currentPayload = payload(nodes: [
+            prNode(number: 549, isDraft: true, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", ciState: "FAILURE"),
+        ])
+        let harness = MockModuleHarness(
+            source: source,
+            execHandler: { _, _ in .success("gho_test_token\n") },
+            fetchHandler: { _, _ in .success(currentPayload) }
+        )
+
+        let draftChip = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
+        #expect(!draftChip.descendants.contains { $0.component == .badge && $0.string("tone") == "bad" })
+
+        // 2. Non-draft PR with failing CI raises attention until widget is opened.
+        harness.advanceTime(seconds: 20)
+        currentPayload = payload(nodes: [
+            prNode(number: 66594, isDraft: false, ciState: "FAILURE", oid: "aaa111"),
+        ])
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == true)
+
+        // Opening the widget immediately clears attention and records seen state.
+        _ = try harness.render("widget")
+        #expect(harness.attentionLog.last == false)
+
+        // Subsequent poll with the same commit failure stays dismissed and does not spam storage writes.
+        let writesAfterView = harness.storageWrites.count
+        harness.advanceTime(seconds: 20)
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
+        _ = try harness.render("widget")
+        #expect(harness.storageWrites.count == writesAfterView)
+
+        // 3. Pushing a new commit (bbb222) that also fails CI re-raises attention.
+        harness.advanceTime(seconds: 20)
+        currentPayload = payload(nodes: [
+            prNode(number: 66594, isDraft: false, ciState: "FAILURE", oid: "bbb222"),
+        ])
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == true)
+        _ = try harness.render("widget")
+        #expect(harness.attentionLog.last == false)
+
+        // 4. Becoming ready raises attention only in 'Blocked + Ready' mode, not default 'Blocked'.
+        harness.advanceTime(seconds: 20)
+        currentPayload = payload(nodes: [
+            prNode(number: 66594, isDraft: false, mergeStateStatus: "CLEAN", ciState: "SUCCESS", oid: "ccc333", reviewState: "APPROVED"),
+        ])
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
+
+        try harness.act("setAttentionMode", payload: "Blocked + Ready")
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == true)
+        _ = try harness.render("widget")
+        #expect(harness.attentionLog.last == false)
+
+        // 5. 'Off' mode suppresses attention even on brand-new conflicts.
+        try harness.act("setAttentionMode", payload: "Off")
+        harness.advanceTime(seconds: 20)
+        currentPayload = payload(nodes: [
+            prNode(number: 66594, isDraft: false, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", ciState: "FAILURE", oid: "ddd444"),
+        ])
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
+    }
+
+    @Test func reviewsAttentionDismissesImmediatelyOnViewAndRespectsMode() throws {
+        let source = try #require(loadModuleSource("github-reviews"))
+
+        func teamOnlyPayload() -> String {
+            jsonString([
+                "data": [
+                    "viewer": ["login": "alice"],
+                    "reviewRequested": [
+                        "nodes": [
+                            [
+                                "number": 202,
+                                "title": "Team review PR",
+                                "url": "https://github.com/GoodNotes/infra/pull/202",
+                                "isDraft": false,
+                                "updatedAt": "2026-11-21T15:00:00Z",
+                                "createdAt": "2026-11-21T12:00:00Z",
+                                "additions": 40,
+                                "deletions": 10,
+                                "changedFiles": 2,
+                                "reviewDecision": "REVIEW_REQUIRED",
+                                "mergeable": "MERGEABLE",
+                                "mergeStateStatus": "BLOCKED",
+                                "repository": ["nameWithOwner": "GoodNotes/infra", "name": "infra"],
+                                "author": ["__typename": "User", "login": "carol"],
+                                "assignees": ["nodes": []],
+                                "reviewRequests": ["nodes": [
+                                    ["requestedReviewer": ["__typename": "Team", "slug": "platform", "combinedSlug": "GoodNotes/platform"]],
+                                ]],
+                                "latestOpinionatedReviews": ["nodes": []],
+                                "reviews": ["nodes": []],
+                                "commits": ["nodes": [["commit": ["statusCheckRollup": ["state": "SUCCESS"]]]]],
+                            ],
+                        ],
+                    ],
+                    "assigned": ["nodes": []],
+                ],
+            ])
+        }
+
+        // Default mode ('Direct only') stays quiet for team-only requests.
+        var currentPayload = teamOnlyPayload()
+        let harness = MockModuleHarness(
+            source: source,
+            execHandler: { _, _ in .success("gho_test_token\n") },
+            fetchHandler: { _, _ in .success(currentPayload) }
+        )
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
+
+        // Switching to 'All new' raises attention for unseen team PR.
+        try harness.act("setAttentionMode", payload: "All new")
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == true)
+
+        // Opening the widget immediately clears attention (without waiting for next chip poll) and avoids redundant writes.
+        _ = try harness.render("widget")
+        #expect(harness.attentionLog.last == false)
+        let writesAfterView = harness.storageWrites.count
+        _ = try harness.render("widget")
+        #expect(harness.storageWrites.count == writesAfterView)
+
+        // Switching to 'Off' suppresses attention even when a direct request arrives.
+        try harness.act("setAttentionMode", payload: "Off")
+        harness.advanceTime(seconds: 20)
+        currentPayload = sampleReviewsGraphQLResponse()
+        _ = try harness.render("chip")
+        #expect(harness.attentionLog.last == false)
     }
 }
