@@ -217,13 +217,11 @@ private struct LiveResizeDriver<Content: View>: View {
 // MARK: - Unified Freeform Widget Card (Desktop Shelf & Click-to-Peek)
 
 /// Draws one freeform-resizable module card with zero-void height clamping, container-responsive blocks,
-/// quiet hover utility pill (with drag-to-stack grip), configure flip, and corner + edge resize handles.
+/// quiet hover utility pill (with drag-to-stack grip), and corner + edge resize handles.
 struct WidgetCardView: View, Equatable {
     let slot: Slot
     let box: WidgetBox
     let node: ViewNode?
-    let configureNode: ViewNode?
-    let isConfiguring: Bool
     let isLoading: Bool
     let failure: String?
     let theme: Theme
@@ -253,8 +251,6 @@ struct WidgetCardView: View, Equatable {
                 && lhs.slot == rhs.slot
                 && lhs.box == rhs.box
                 && lhs.node == rhs.node
-                && lhs.configureNode == rhs.configureNode
-                && lhs.isConfiguring == rhs.isConfiguring
                 && lhs.isLoading == rhs.isLoading
                 && lhs.failure == rhs.failure
                 && lhs.theme == rhs.theme
@@ -304,14 +300,14 @@ struct WidgetCardView: View, Equatable {
         return adaptiveSurface
     }
 
-    private func makeContext(bounds: CGSize?, forConfig: Bool = false) -> RenderContext {
+    private func makeContext(bounds: CGSize?) -> RenderContext {
         var context = RenderContext(
             theme: theme,
             surface: .panel,
             material: material,
             moduleID: slot.id,
             manifest: model.manifestFor(slot.id),
-            widgetBounds: forConfig ? nil : bounds,
+            widgetBounds: bounds,
             adaptiveSurface: effectiveAdaptiveSurface
         )
         let model = model
@@ -331,26 +327,18 @@ struct WidgetCardView: View, Equatable {
         let context = makeContext(bounds: activeSize)
         let pad = CGFloat(context.metrics.widgetPadding)
         let minH = context.metrics.minWidgetSize.height
-        let hasUnbounded = isConfiguring || (node?.hasUnboundedFlex ?? false) || (node == nil)
-        let idleFade: Double = (!isPeek && !isHovered && !isConfiguring && !isTemporarilyExpanded && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.90) : 1.0
+        let hasUnbounded = (node?.hasUnboundedFlex ?? false) || (node == nil)
+        let idleFade: Double = (!isPeek && !isHovered && !isTemporarilyExpanded && theme.idleMaterial == "halo") ? max(theme.idleOpacity, 0.90) : 1.0
 
         return ZeroVoidCardLayout(
             requestedWidth: max(activeSize.width, 100),
             requestedHeight: max(activeSize.height, minH),
             minHeight: minH,
             hasUnboundedFlex: hasUnbounded,
-            padding: isConfiguring ? 0 : pad
+            padding: pad
         ) {
-            if isConfiguring {
-                configureContent(context: makeContext(bounds: nil, forConfig: true), pad: pad)
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .scale(scale: 0.96)),
-                        removal: .opacity.combined(with: .scale(scale: 0.96))
-                    ))
-            } else {
-                liveContent(context: context, innerWidth: max(activeSize.width - pad * 2, 40), pad: pad, hasUnbounded: hasUnbounded)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
-            }
+            liveContent(context: context, innerWidth: max(activeSize.width - pad * 2, 40), pad: pad, hasUnbounded: hasUnbounded)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
         }
         .clipped()
         .modifier(SurfaceBackground(context: context, material: material, shape: context.widgetShape, isInteractive: false))
@@ -369,7 +357,7 @@ struct WidgetCardView: View, Equatable {
         }
         .contentShape(context.widgetShape)
         .onTapGesture {
-            guard !isPeek, !isConfiguring, !isResizingThis, !isDraggingThis, !isTemporarilyExpanded,
+            guard !isPeek, !isResizingThis, !isDraggingThis, !isTemporarilyExpanded,
                   slot.supportsResize, !NSEvent.modifierFlags.contains(.command)
             else { return }
             model.onWidgetClick(slot.id)
@@ -446,21 +434,11 @@ struct WidgetCardView: View, Equatable {
         }
         .opacity(isDraggingThis ? 0.28 : (collapsing ? 0.62 : idleFade))
         .scaleEffect(collapsing ? 0.92 : (isDraggingThis ? 0.96 : 1.0))
-        .animation(theme.motion == "full" ? .spring(response: 0.28, dampingFraction: 0.84) : nil, value: isConfiguring)
         .animation(theme.motion == "full" ? .spring(response: 0.22, dampingFraction: 0.82) : nil, value: collapsing)
         .animation(theme.motion == "full" ? .easeOut(duration: 0.16) : nil, value: isHovered)
         .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: effectiveAdaptiveSurface)
         .environment(\.colorScheme, context.colorScheme ?? systemScheme)
-        .onHover { hovering in
-            isHovered = hovering
-            if !hovering && isConfiguring && !isPeek {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    if !isHovered && isConfiguring {
-                        model.onToggleConfigure(slot.id, false, false)
-                    }
-                }
-            }
-        }
+        .onHover { isHovered = $0 }
         .contextMenu { widgetContextMenu }
     }
 
@@ -530,57 +508,9 @@ struct WidgetCardView: View, Equatable {
         }
     }
 
-    private func configureContent(context: RenderContext, pad: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: context.metrics.unit * 1.5) {
-                Image(systemName: slot.icon)
-                    .font(.system(size: context.metrics.fontSize(role: "label"), weight: .medium))
-                    .foregroundStyle(context.accent)
-                Text(slot.title)
-                    .font(context.font(role: "label", weight: "semibold"))
-                    .foregroundStyle(context.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Button("Done") {
-                    model.onToggleConfigure(slot.id, false, isPeek)
-                }
-                .buttonStyle(.plain)
-                .font(context.font(role: "caption", weight: "semibold"))
-                .foregroundStyle(context.accent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(context.accent.opacity(0.14), in: Capsule())
-            }
-            .padding(.horizontal, pad)
-            .padding(.vertical, context.metrics.unit * 2)
-
-            Rectangle().fill(context.separator).frame(height: 1)
-
-            ScrollView(.vertical) {
-                if let configureNode {
-                    let children = (configureNode.component == .column && configureNode.props.isEmpty) ? configureNode.children : [configureNode]
-                    VStack(alignment: .leading, spacing: context.metrics.unit * 2.5) {
-                        ForEach(Array(children.enumerated()), id: \.offset) { child in
-                            NodeView(node: child.element, context: context)
-                        }
-                    }
-                    .padding(pad)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 24)
-                }
-            }
-            .scrollIndicators(.hidden)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
     @ViewBuilder
     private func hoverUtilityPill(context: RenderContext) -> some View {
-        let showPill = isHovered && !isResizingThis && !isDraggingThis && !isConfiguring
+        let showPill = isHovered && !isResizingThis && !isDraggingThis
         HStack(spacing: 3) {
             if !isPeek {
                 // Dedicated drag grip to reorder or stack widgets vertically/horizontally on the shelf.
@@ -609,8 +539,8 @@ struct WidgetCardView: View, Equatable {
                     .help("Drag to reorder or stack (or ⌘-drag card)")
             }
             if slot.hasConfigure {
-                pillButton("slider.horizontal.3", "Configure \(slot.title)", context: context, isActive: isConfiguring) {
-                    model.onToggleConfigure(slot.id, !isConfiguring, isPeek)
+                pillButton("slider.horizontal.3", "Configure \(slot.title) in Lintel", context: context) {
+                    if isPeek { model.onPanelCommand("configure") } else { model.onWidgetCommand(slot.id, "configure") }
                 }
             }
             if isPeek {
@@ -679,8 +609,8 @@ struct WidgetCardView: View, Equatable {
             }
         }
         if slot.hasConfigure {
-            Button(isConfiguring ? "Done Configuring" : "Configure Widget") {
-                model.onToggleConfigure(slot.id, !isConfiguring, isPeek)
+            Button("Configure \(slot.title)…") {
+                if isPeek { model.onPanelCommand("configure") } else { model.onWidgetCommand(slot.id, "configure") }
             }
         }
         Divider()

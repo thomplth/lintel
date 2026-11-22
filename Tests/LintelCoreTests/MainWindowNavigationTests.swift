@@ -75,4 +75,32 @@ import Testing
         #expect(MainWindowSection.general.showsAssistantByDefault)
         #expect(MainWindowSection.module("clock").showsAssistantByDefault)
     }
+
+    @Test func inspectorTabRoutesMapConfigureAndStandardTabs() {
+        #expect(ModuleInspectorTab.fromRoute("overview") == .overview)
+        #expect(ModuleInspectorTab.fromRoute("configure") == .overview)
+        #expect(ModuleInspectorTab.fromRoute("config") == .overview)
+        #expect(ModuleInspectorTab.fromRoute("settings") == .overview)
+        #expect(ModuleInspectorTab.fromRoute("logs") == .logs)
+        #expect(ModuleInspectorTab.fromRoute("code") == .code)
+        #expect(ModuleInspectorTab.fromRoute("unknown") == nil)
+    }
+
+    @Test func windowSettingsThemeUsesNativeLegibleMetrics() {
+        let theme = Theme.windowSettings(accentColor: "#FF6B35")
+        let metrics = Metrics(theme)
+        #expect(theme.panelMaterial == "glass")
+        #expect(theme.colorScheme == "auto")
+        #expect(theme.fontDesign == "default")
+        #expect(theme.cornerStyle == "rounded")
+        #expect(theme.accentColor == "#FF6B35")
+        #expect(metrics.fontSize(role: "label") == 13)
+        #expect(metrics.fontSize(role: "caption") == 11)
+    }
+
+    @Test func designGuidePlacesModuleConfigurationInTheLintelWindow() {
+        #expect(DesignGuide.reference.contains("Lintel window"))
+        #expect(!DesignGuide.reference.contains("hover-revealed backside"))
+        #expect(!DesignGuide.reference.contains("revealed via the hover utility pill"))
+    }
 }

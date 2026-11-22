@@ -52,7 +52,7 @@ public enum DesignLint {
         return problems
     }
 
-    /// Validates a module's configure backside (controls only; scrollable, no tiny-floor audit).
+    /// Validates a module's configure view (rendered in the Lintel window; controls only, no tiny-floor audit).
     public static func checkConfigure(
         _ node: ViewNode, manifest: ModuleManifest, actions: [String],
         limits: Limits = Limits(), symbolExists: (String) -> Bool

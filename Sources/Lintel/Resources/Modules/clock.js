@@ -114,9 +114,9 @@ function zoneMoment(zone, now) {
   };
 }
 
-function worldClock(entry, now, twelveHour) {
+function worldClock(entry, now, twelveHour, editable) {
   const moment = zoneMoment(entry.zone, now);
-  const remove = { accessoryAction: 'removeZone', accessoryLabel: `Remove ${entry.name}`, payload: entry.name };
+  const remove = editable ? { accessoryAction: 'removeZone', accessoryLabel: `Remove ${entry.name}`, payload: entry.name } : {};
   if (!moment) return item(entry.name, { subtitle: 'Unknown time zone', icon: 'questionmark.circle', ...remove });
   const day = moment.dayShift > 0 ? 'Tomorrow' : moment.dayShift < 0 ? 'Yesterday' : 'Today';
   const isDaytime = moment.minuteOfDay >= 6 * 60 && moment.minuteOfDay < 18 * 60;
@@ -172,12 +172,14 @@ function dateOrderExamples(host, now, c) {
 
 function worldSection(now, zones, c, options) {
   const o = options || {};
+  const editable = o.editable !== false;
+  const emptyText = editable ? 'Add a city to compare its time with yours.' : 'Add cities in Lintel to compare times.';
   return section('World', [
     zones.length
-      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour)))
-      : note('Add a city to compare its time with yours.'),
-    ...(o.withField !== false ? [field('Add a city', 'addZone', { icon: 'plus', suggest: 'suggestZones' })] : []),
-    ...(unmatchedZone && o.withField !== false ? [note(`No city or time zone matches “${unmatchedZone}”.`, { tone: 'warn' })] : []),
+      ? list(zones.map((entry) => worldClock(entry, now, c.twelveHour, editable)))
+      : note(emptyText),
+    ...(editable ? [field('Add a city', 'addZone', { icon: 'plus', suggest: 'suggestZones' })] : []),
+    ...(unmatchedZone && editable ? [note(`No city or time zone matches “${unmatchedZone}”.`, { tone: 'warn' })] : []),
   ], { priority: o.priority });
 }
 
@@ -229,7 +231,7 @@ defineModule({
     return [
       split([
         column([header(host, now, c), calendar(now)], { spacing: 'normal' }),
-        worldSection(now, savedZones(host), c, { priority: 'supporting' }),
+        worldSection(now, savedZones(host), c, { priority: 'supporting', editable: false }),
       ], { weights: [1.05, 1] }),
     ];
   },

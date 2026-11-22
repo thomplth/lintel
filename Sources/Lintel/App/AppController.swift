@@ -64,9 +64,6 @@ final class AppController {
             }
             self?.host.moveWidget(id, to: drop)
         }
-        model.onToggleConfigure = { [weak self] id, isConfiguring, isPeek in
-            self?.host.setConfiguring(id, isConfiguring: isConfiguring, isPeek: isPeek)
-        }
         model.onWidgetCommand = { [weak self] id, command in self?.widgetCommand(id, command) }
         model.onWidgetClick = { [weak self] id in self?.bar?.expandWidgetTemporarily(id) }
         model.onDismiss = { [weak self] in self?.dismiss() }
@@ -81,6 +78,10 @@ final class AppController {
         host.onModulesChanged = { [weak self] in
             guard let self, self.mainWindow?.isVisible == true else { return }
             self.mainWindow?.refresh()
+        }
+        host.onModuleAction = { [weak self] id in
+            guard let self, self.mainWindow?.isVisible == true else { return }
+            self.mainWindow?.refreshModule(id)
         }
         services.onLogChanged = { [weak self] moduleID in
             self?.mainWindow?.notifyLogsChanged(for: moduleID)
@@ -123,7 +124,6 @@ final class AppController {
                 self?.adoption.scanIfNeeded(force: false)
             } else {
                 self?.closePanel(releasing: false)
-                self?.host.clearIdleConfigurations()
             }
         }
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
@@ -387,6 +387,9 @@ final class AppController {
         case "change":
             closePanel()
             showWindow(.module(id), focusChat: true)
+        case "configure":
+            closePanel()
+            showWindow(.module(id), inspectorTab: .overview)
         case "studio":
             closePanel()
             showWindow(.module(id))
@@ -437,6 +440,9 @@ final class AppController {
         case "change":
             closePanel()
             showWindow(.module(id), focusChat: true)
+        case "configure":
+            closePanel()
+            showWindow(.module(id), inspectorTab: .overview)
         case "settings":
             closePanel()
             showWindow(.general)
@@ -478,6 +484,10 @@ final class AppController {
         case "change":
             closePanel()
             showWindow(.module(slot.id), focusChat: true)
+            return
+        case "configure":
+            closePanel()
+            showWindow(.module(slot.id), inspectorTab: .overview)
             return
         case "settings":
             closePanel()

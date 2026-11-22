@@ -25,8 +25,6 @@ struct Slot: Identifiable, Equatable {
     var hasConfigure = false
     var defaultShape: WidgetShape = .card
     var widgetNode: ViewNode?
-    var configureNode: ViewNode?
-    var isConfiguring = false
     var permissions: [String] = []
     var isUserModule = false
     var isRaised = false
@@ -63,8 +61,6 @@ struct PanelState: Equatable {
     var widgetBox: WidgetBox = WidgetBox(width: 312, height: 268)
     var resizeCorner: ResizeCorner = .bottomLeft
     var node: ViewNode?
-    var configureNode: ViewNode?
-    var isConfiguring = false
     var failure: String?
     var isLoading = false
     var isPinnedOpen = false
@@ -376,7 +372,6 @@ final class BarModel: ObservableObject {
     var onEnsureWidgetRendered: (_ id: String) -> Void = { _ in }
     var onMoveWidget: (_ id: String, _ drop: WidgetShelfDrop) -> Void = { _, _ in }
     var onResizingChanged: () -> Void = {}
-    var onToggleConfigure: (_ id: String, _ isConfiguring: Bool, _ isPeek: Bool) -> Void = { _, _, _ in }
     var onWidgetCommand: (_ id: String, _ command: String) -> Void = { _, _ in }
     var onWidgetClick: (_ id: String) -> Void = { _ in }
     var manifestFor: (String) -> ModuleManifest? = { _ in nil }

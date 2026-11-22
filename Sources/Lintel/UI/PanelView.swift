@@ -45,8 +45,6 @@ struct PanelView: View {
                         slot: slot,
                         box: panel.widgetBox,
                         node: panel.node,
-                        configureNode: panel.configureNode,
-                        isConfiguring: panel.isConfiguring,
                         isLoading: panel.isLoading,
                         failure: panel.failure ?? slot.failure,
                         theme: model.theme,

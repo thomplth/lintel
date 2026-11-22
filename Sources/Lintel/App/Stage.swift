@@ -138,8 +138,6 @@ private struct MatrixStageView: View {
                 slot: slot,
                 box: WidgetBox(vp.size),
                 node: slot.widgetNode,
-                configureNode: slot.configureNode,
-                isConfiguring: false,
                 isLoading: slot.widgetNode == nil,
                 failure: slot.failure,
                 theme: model.theme,
@@ -264,6 +262,7 @@ final class ControlChannel {
                 ?? command["tab"].string.flatMap(MainWindowSection.fromRoute)
             app.showWindow(
                 destination,
+                inspectorTab: command["inspector"].string.flatMap(ModuleInspectorTab.fromRoute),
                 showAssistant: command["assistant"].bool,
                 focusChat: command["chat"].bool ?? false,
                 draft: command["draft"].string
@@ -310,6 +309,7 @@ final class ControlChannel {
                 let box = app.model.layout.widgetBox(of: slot.id)
                 return ["id": .string(slot.id), "title": .string(slot.title), "failure": slot.failure.map(JSONValue.string) ?? .null,
                  "needsApproval": .bool(slot.needsApproval), "hasChip": .bool(slot.chip != nil || slot.image != nil),
+                 "hasConfigure": .bool(slot.hasConfigure),
                  "widget": box.map { ["width": .number($0.width), "height": .number($0.height)] } ?? .null,
                  "frame": app.bar?.screenFrame(ofSlot: slot.id).map { [.number($0.minX), .number($0.minY), .number($0.width), .number($0.height)] } ?? .null]
             }

@@ -402,8 +402,7 @@ final class BarWindowController {
         let pointer = NSEvent.mouseLocation
         let inBarCoords = barPoint(pointer)
         if let expandedID = widgetExpansion.slotID {
-            let keepOpen = model.slot(expandedID)?.isConfiguring == true
-                || model.isPointInWidget(inBarCoords, slotID: expandedID)
+            let keepOpen = model.isPointInWidget(inBarCoords, slotID: expandedID)
             widgetExpansion.pointer(inside: keepOpen, at: ProcessInfo.processInfo.systemUptime)
             if widgetExpansion.slotID == nil {
                 collapseTemporaryWidget()

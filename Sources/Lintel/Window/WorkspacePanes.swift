@@ -422,7 +422,7 @@ private struct CatalogModuleRow: View {
                 .controlSize(.small)
             }
 
-            Button("Inspect", action: onInspect)
+            Button(listing.hasConfigure ? "Configure" : "Inspect", action: onInspect)
                 .controlSize(.small)
 
             if listing.origin == .user {
@@ -634,6 +634,50 @@ struct ModuleInspectorPane: View {
                     }
                     .padding(14)
                     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                let hasConfigure = listing.hasConfigure || slot?.hasConfigure == true || app.host.hasConfigure(of: listing.id)
+                if hasConfigure {
+                    if listing.isEnabled && !needsApproval {
+                        WindowCard(
+                            title: "Configuration",
+                            subtitle: "Settings for \(listing.title). Changes apply immediately."
+                        ) {
+                            if let configureNode = state.configureNode {
+                                let configureContext = makeConfigureContext(listing.id)
+                                let children = (configureNode.component == .column && configureNode.props.isEmpty) ? configureNode.children : [configureNode]
+                                VStack(alignment: .leading, spacing: configureContext.metrics.sectionSpacing) {
+                                    ForEach(Array(children.enumerated()), id: \.offset) { child in
+                                        NodeView(node: child.element, context: configureContext)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if let failure = state.configureFailure {
+                                Text(failure)
+                                    .font(.footnote.monospaced())
+                                    .foregroundStyle(.red)
+                                    .textSelection(.enabled)
+                            } else if state.configureIsLoading {
+                                HStack(spacing: 8) {
+                                    ProgressView().controlSize(.small)
+                                    Text("Loading configuration…").font(.caption).foregroundStyle(.secondary)
+                                }
+                            } else {
+                                HStack {
+                                    Text("Configuration unavailable.").font(.footnote).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("Reload") { controller.refreshConfigure(for: listing.id) }
+                                        .controlSize(.small)
+                                }
+                            }
+                        }
+                    } else if !listing.isEnabled {
+                        WindowCard(title: "Configuration") {
+                            Text("Enable \(listing.title) above to configure its settings.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 if listing.isEnabled && !needsApproval {
@@ -888,13 +932,28 @@ struct ModuleInspectorPane: View {
         ctx.perform = { action, payload in
             Task {
                 await app.host.perform(id, action: action, payload: payload)
-                controller.refreshPreview(for: id)
+                controller.refreshModule(id)
             }
         }
         ctx.performForResult = { action, payload in
             let res = await app.host.perform(id, action: action, payload: payload)
             controller.refreshPreview(for: id)
             return res
+        }
+        return ctx
+    }
+
+    private func makeConfigureContext(_ id: String) -> RenderContext {
+        let settingsTheme = Theme.windowSettings(accentColor: model.theme.accentColor)
+        var ctx = RenderContext(theme: settingsTheme, surface: .panel, material: .glass, moduleID: id, manifest: app.host.manifest(of: id))
+        ctx.perform = { action, payload in
+            Task {
+                await app.host.perform(id, action: action, payload: payload)
+                controller.refreshModule(id)
+            }
+        }
+        ctx.performForResult = { action, payload in
+            await app.host.perform(id, action: action, payload: payload)
         }
         return ctx
     }

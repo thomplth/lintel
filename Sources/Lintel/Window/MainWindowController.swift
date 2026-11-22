@@ -14,6 +14,9 @@ final class MainWindowState: ObservableObject {
     @Published var previewPanelNode: ViewNode?
     @Published var previewPanelFailure: String?
     @Published var previewIsLoading = false
+    @Published var configureNode: ViewNode?
+    @Published var configureFailure: String?
+    @Published var configureIsLoading = false
     @Published var codeDraft = ""
     @Published var codeLoadedModuleID: String?
     @Published var codeDirty = false
@@ -49,11 +52,20 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                 self.refreshMenuBarItems()
             }
             if let id = selection.moduleID {
+                self.state.previewPanelNode = nil
+                self.state.previewPanelFailure = nil
+                self.state.configureNode = nil
+                self.state.configureFailure = nil
+                self.state.configureIsLoading = false
                 self.loadCodeIfNeeded(for: id, force: false)
                 self.refreshPreview(for: id)
+                self.refreshConfigure(for: id)
             } else {
                 self.state.previewPanelNode = nil
                 self.state.previewPanelFailure = nil
+                self.state.configureNode = nil
+                self.state.configureFailure = nil
+                self.state.configureIsLoading = false
             }
             self.syncTimer()
         }
@@ -145,6 +157,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             if let id = state.selection.moduleID {
                 loadCodeIfNeeded(for: id, force: !state.codeDirty)
                 refreshPreview(for: id)
+                refreshConfigure(for: id)
             }
         }
         state.secretNames = SecretStore(home: app.home).names.filter { $0 != ChatEngine.apiKeySecret }
@@ -179,6 +192,31 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             state.previewPanelNode = result.node
             state.previewPanelFailure = result.failure
         }
+    }
+
+    func refreshConfigure(for id: String) {
+        guard state.selection.moduleID == id else { return }
+        guard app.host.hasConfigure(of: id) else {
+            state.configureIsLoading = false
+            state.configureNode = nil
+            state.configureFailure = nil
+            return
+        }
+        let isInitial = state.configureNode == nil
+        if isInitial { state.configureIsLoading = true }
+        Task {
+            let result = await app.host.previewConfigure(of: id)
+            guard state.selection.moduleID == id else { return }
+            state.configureIsLoading = false
+            if state.configureNode != result.node { state.configureNode = result.node }
+            if state.configureFailure != result.failure { state.configureFailure = result.failure }
+        }
+    }
+
+    func refreshModule(_ id: String) {
+        guard isVisible, state.selection.moduleID == id else { return }
+        refreshPreview(for: id)
+        refreshConfigure(for: id)
     }
 
     func loadCodeIfNeeded(for id: String, force: Bool) {
@@ -238,6 +276,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     self.state.tick += 1
                     if let id = self.state.selection.moduleID, self.state.inspectorTab == .overview {
                         self.refreshPreview(for: id)
+                        if self.state.configureNode == nil, self.app.host.hasConfigure(of: id), !self.state.configureIsLoading {
+                            self.refreshConfigure(for: id)
+                        }
                     }
                 }
             }

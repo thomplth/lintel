@@ -74,7 +74,7 @@ public enum DesignGuide {
           },
           chip(host) { return <bar item view>; },           // one-line bar chip
           widget(host) { return [<responsive blocks>]; },   // one responsive widget tree — adapts to any freeform size
-          configure(host) { return [<settings controls>]; }, // optional: hover-revealed backside for formatting/config
+          configure(host) { return [<settings controls>]; }, // optional: module settings shown in the Lintel window
           actions: {                                        // optional; run by buttons, toggles, fields, list rows
             name(host, payload) { ... },                    // may be async; views re-render afterwards
           },
@@ -100,7 +100,7 @@ public enum DesignGuide {
            - Leave `chart()` / `app()` / `web()` height unset (or `'fill'`) so they expand fluidly with available height.
            - Keep at least one `essential` (default priority) hero block at the top; mark secondary groups with
              `{ priority: 'supporting' }` or `{ priority: 'detail' }` so they yield cleanly at tiny sizes.
-           - Put settings (formats, toggles, pickers) in `configure(host)`, revealed via the hover utility pill.
+           - Put settings (formats, toggles, pickers) in `configure(host)`; Lintel shows them in the module's page in the Lintel window.
            - Finite widgets automatically clamp their height to their natural content height so dragging taller never
              creates empty blank space.
         3. Widgets can be stacked vertically in columns or placed side-by-side on the shelf by dragging their grip handle

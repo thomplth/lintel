@@ -17,6 +17,7 @@ struct ModuleListing: Identifiable, Equatable {
     var permissions: [String]
     var failure: String?
     var needsApproval: Bool
+    var hasConfigure = false
     var file: URL
 }
 
@@ -73,6 +74,7 @@ final class ModuleHost {
     private var libraryCache: [String: (stamp: Date, description: ModuleDescription)] = [:]
     var onSettingsChanged: () -> Void = {}
     var onModulesChanged: () -> Void = {}
+    var onModuleAction: (String) -> Void = { _ in }
 
     init(home: AppHome, model: BarModel, runner: RunnerClient, services: HostServices) {
         self.home = home
@@ -322,9 +324,6 @@ final class ModuleHost {
         var layout = model.layout
         layout.setWidget(box, for: key)
         update(layout)
-        if box == nil, let idx = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
-            model.slots[idx].isConfiguring = false
-        }
         if wasWidget != (box != nil) {
             schedule(key)
         }
@@ -339,9 +338,6 @@ final class ModuleHost {
         layout.moveWidget(key, to: drop)
         update(layout)
         if wasWidget != layout.isWidget(key) {
-            if !layout.isWidget(key), let idx = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
-                model.slots[idx].isConfiguring = false
-            }
             schedule(key)
         }
     }
@@ -361,24 +357,6 @@ final class ModuleHost {
             var layout = model.layout
             layout.setPanelSize(box, for: key)
             update(layout)
-        }
-    }
-
-    func setConfiguring(_ key: String, isConfiguring: Bool, isPeek: Bool) {
-        if isPeek {
-            guard var panel = model.panel, panel.slotID == key else { return }
-            panel.isConfiguring = isConfiguring
-            model.panel = panel
-            if isConfiguring { renderConfigure(key, isPeek: true) }
-        } else if let idx = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
-            model.slots[idx].isConfiguring = isConfiguring
-            if isConfiguring { renderConfigure(key, isPeek: false) }
-        }
-    }
-
-    func clearIdleConfigurations() {
-        for index in model.slots.indices where model.slots[index].isConfiguring {
-            model.slots[index].isConfiguring = false
         }
     }
 
@@ -403,10 +381,7 @@ final class ModuleHost {
 
     // MARK: Publishing
 
-    private func publish(
-        _ key: String, chip: ViewNode? = nil, widget: ViewNode? = nil,
-        configure: ViewNode? = nil
-    ) {
+    private func publish(_ key: String, chip: ViewNode? = nil, widget: ViewNode? = nil) {
         guard let entry = loaded[key] else { return }
         let previous = model.slot(key)
         var slot = Slot(id: key, title: entry.description?.manifest.title ?? key)
@@ -428,8 +403,6 @@ final class ModuleHost {
         slot.isUserModule = entry.source.origin == .user
         slot.chip = chip ?? previous?.chip
         slot.widgetNode = widget ?? previous?.widgetNode
-        slot.configureNode = configure ?? previous?.configureNode
-        slot.isConfiguring = previous?.isConfiguring ?? false
         slot.isRaised = previous?.isRaised ?? false
         if let index = model.slots.firstIndex(where: { $0.id == key && $0.kind == .module }) {
             if model.slots[index] != slot {
@@ -479,27 +452,6 @@ final class ModuleHost {
             loaded[key]?.isRenderingWidget = false
             loaded[key]?.failure = result.failure
             publish(key, widget: result.node)
-        }
-    }
-
-    func renderConfigure(_ key: String, isPeek: Bool) {
-        guard let entry = loaded[key], entry.description?.hasConfigure == true, !entry.needsApproval else { return }
-        let current = entry.generation
-        Task {
-            let parsed: ParsedView
-            do {
-                parsed = ViewNode.parse(try await runner.renderConfigure(key: key))
-            } catch {
-                return
-            }
-            guard loaded[key]?.generation == current, let node = parsed.node else { return }
-            if isPeek {
-                guard var panel = model.panel, panel.slotID == key else { return }
-                panel.configureNode = node
-                if panel != model.panel { model.panel = panel }
-            } else {
-                publish(key, configure: node)
-            }
         }
     }
 
@@ -571,11 +523,10 @@ final class ModuleHost {
             if model.panel?.slotID == key { model.panel?.failure = ModuleFailure.describe(error) }
         }
         renderActiveSurface(key)
-        if model.slot(key)?.isConfiguring == true { renderConfigure(key, isPeek: false) }
         if model.panel?.slotID == key {
             renderPanel(key)
-            if model.panel?.isConfiguring == true { renderConfigure(key, isPeek: true) }
         }
+        onModuleAction(key)
         return outcome
     }
 
@@ -770,11 +721,28 @@ final class ModuleHost {
         services.clearLogs(for: id)
     }
 
+    func hasConfigure(of id: String) -> Bool {
+        loaded[id]?.description?.hasConfigure == true
+    }
+
     func previewPanel(of id: String) async -> (node: ViewNode?, failure: String?) {
         guard let entry = loaded[id], entry.description?.hasWidget == true, !entry.needsApproval else {
             return (nil, loaded[id]?.failure)
         }
         return await rendered(id, .panel)
+    }
+
+    func previewConfigure(of id: String) async -> (node: ViewNode?, failure: String?) {
+        guard let entry = loaded[id], entry.description?.hasConfigure == true, !entry.needsApproval else {
+            return (nil, nil)
+        }
+        do {
+            let parsed = ViewNode.parse(try await runner.renderConfigure(key: id))
+            if let failure = parsed.errors.first { return (nil, failure) }
+            return (parsed.node, parsed.node == nil ? "configure() returned nothing" : nil)
+        } catch {
+            return (nil, ModuleFailure.describe(error))
+        }
     }
 
     func reload(_ id: String) {
@@ -806,7 +774,7 @@ final class ModuleHost {
                 id: key, title: entry.description?.manifest.title ?? key, icon: model.slot(key)?.icon ?? "puzzlepiece.extension",
                 summary: entry.description?.manifest.summary ?? "", origin: entry.source.origin, isEnabled: true,
                 permissions: entry.description?.manifest.permissions ?? [], failure: entry.failure,
-                needsApproval: entry.needsApproval, file: entry.source.file
+                needsApproval: entry.needsApproval, hasConfigure: entry.description?.hasConfigure ?? false, file: entry.source.file
             ))
         }
         let dormant: [(URL, ModuleListing.Origin)] =
@@ -819,7 +787,8 @@ final class ModuleHost {
             listings.append(ModuleListing(
                 id: key, title: description.manifest.title, icon: Self.symbolExists(description.manifest.icon) ? description.manifest.icon : "puzzlepiece.extension",
                 summary: description.manifest.summary, origin: origin, isEnabled: false,
-                permissions: description.manifest.permissions, failure: nil, needsApproval: false, file: file
+                permissions: description.manifest.permissions, failure: nil, needsApproval: false,
+                hasConfigure: description.hasConfigure, file: file
             ))
         }
         return listings.sorted { ($0.origin.rawValue, $0.title) < ($1.origin.rawValue, $1.title) }

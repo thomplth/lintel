@@ -22,7 +22,7 @@ xcrun --sdk macosx swift build && .build/debug/Lintel
 xcrun --sdk macosx swift test
 ```
 
-Rest the pointer on the bar or press ⌃⌥⌘B to open Lintel's main window with the assistant. ⌃⌥⌘H hides or shows the bar. The bar auto-hides whenever a window enters full screen (press ⌃⌥⌘H or ⌃⌥⌘L to bring it back; Settings › General turns this off). All workspace views (Dashboard, Modules, Bar Layout), module inspectors (live preview, jobs, logs, code), settings, and the collapsible assistant live together in one main Lintel window, reachable from the gear or sparkle in any panel or via ⌘,.
+Rest the pointer on the bar or press ⌃⌥⌘B to open Lintel's main window with the assistant. ⌃⌥⌘H hides or shows the bar. The bar auto-hides whenever a window enters full screen (press ⌃⌥⌘H or ⌃⌥⌘L to bring it back; Settings › General turns this off). All workspace views (Dashboard, Modules, Bar Layout), module inspectors (configuration, live preview, jobs, logs, code), settings, and the collapsible assistant live together in one main Lintel window, reachable from the gear or sparkle in any panel or via ⌘,.
 Clicking Lintel's Dock icon opens the whole bar until you switch to another app; clicking it again while the bar is open
 opens Lintel's main window (and clicking it while the main window is already open brings it to the front). Settings › General › Show Lintel in the Dock takes the icon away.
 With the menu bar set to hide automatically, the top edge above the bar no longer brings the menu bar in; hold ⌥ there,
@@ -40,7 +40,7 @@ a chip into a freeform desktop widget of any width and height—from a slim top 
 spacious multi-column dashboard—or shrink it back into a chip. Double-click the resize handle to snap height tightly
 to content; widgets with finite content automatically clamp to their natural height so blank space never appears.
 Desktop widgets stay visible while idle, adapt every block natively without scrolling, and reveal a quiet utility pill
-(drag grip to reorder/stack vertically into columns or place side by side, Configure, Collapse, Open in Lintel, Settings) on
+(drag grip to reorder/stack vertically into columns or place side by side, Configure in Lintel, Collapse, Open in Lintel, Settings) on
 hover; you can also ⌘-drag any widget card to stack or move it. Clicking an always-on desktop widget expands it
 temporarily to max size until the pointer leaves and it returns to idle. Clicking a chip opens a transient peek widget
 whose resized dimensions are remembered for next time; click its pin icon to keep it on the desktop.
@@ -76,7 +76,7 @@ User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to 
 | `Sources/LintelCore` | The design system and all pure logic: components, theme, design rules, layout, placement, manifests. Unit-tested. |
 | `Sources/Lintel/Runtime` | Module helper process, its client and watchdog, host services, module discovery and scheduling. |
 | `Sources/Lintel/UI` | The renderer: one SwiftUI view per component, bar, panels, web clip and mini app stages. |
-| `Sources/Lintel/Window` | Unified main Lintel window: Dashboard, Modules catalog, Bar Layout, module inspector (live preview, jobs, logs, code editor), all Settings panes, and the collapsible Assistant inspector. |
+| `Sources/Lintel/Window` | Unified main Lintel window: Dashboard, Modules catalog, Bar Layout, module inspector (configuration, live preview, jobs, logs, code editor), all Settings panes, and the collapsible Assistant inspector. |
 | `Sources/Lintel/Chat` | Assistant engines and the authoring loop (trial run, design rules, repair). |
 | `Sources/Lintel/Resources/Modules` | Built-in modules. They double as the examples the assistant learns from. |
 | `Sources/Lintel/Resources/Library` | Optional modules, switched on in Modules or by asking the assistant. |

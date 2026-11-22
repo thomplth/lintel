@@ -83,8 +83,6 @@ struct BarView: View {
                             slot: entry.slot,
                             box: displayBox,
                             node: entry.slot.widgetNode,
-                            configureNode: entry.slot.configureNode,
-                            isConfiguring: entry.slot.isConfiguring,
                             isLoading: entry.slot.widgetNode == nil,
                             failure: entry.slot.failure,
                             theme: theme,
@@ -438,6 +436,9 @@ struct ChipView: View, Equatable {
             Button("Move Down a Row") { model.onSlotSecondaryAction(slot, "down") }
             Divider()
             if slot.kind == .module {
+                if slot.hasConfigure {
+                    Button("Configure \(slot.title)…") { model.onSlotSecondaryAction(slot, "configure") }
+                }
                 Button("Ask Assistant to Change This…") { model.onSlotSecondaryAction(slot, "change") }
             }
         }

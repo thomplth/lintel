@@ -79,6 +79,20 @@ public struct Theme: Equatable, Encodable, Sendable {
         idleMaterial == "adaptive" || activeMaterial == "adaptive" || panelMaterial == "adaptive"
     }
 
+    /// Standard native-sized theme used when rendering module `configure(host)` controls inside the Lintel main window.
+    public static func windowSettings(accentColor: String = "#0A84FF") -> Theme {
+        var theme = Theme()
+        theme.fontSize = 15
+        theme.fontWeight = "regular"
+        theme.fontDesign = "default"
+        theme.density = "regular"
+        theme.cornerStyle = "rounded"
+        theme.panelMaterial = "glass"
+        theme.colorScheme = "auto"
+        theme.accentColor = HexColor(accentColor) != nil ? accentColor : "#0A84FF"
+        return theme
+    }
+
     public static func preset(_ name: String) -> Theme? {
         var theme = Theme()
         theme.preset = name

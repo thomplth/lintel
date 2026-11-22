@@ -56,7 +56,7 @@ private func worldRows(_ context: JSContext) -> [String] {
 
 private func worldRowAccessories(_ context: JSContext) -> [String] {
     let script = """
-    (\(findSection("__module.widget(host)", "World")).children.find((view) => view.type === 'list') || { children: [] }).children
+    (\(findSection("__module.configure(host)", "World")).children.find((view) => view.type === 'list') || { children: [] }).children
       .map((row) => [row.accessoryIcon, row.accessoryAction, row.accessoryLabel, row.payload, row.action || 'no action'].join(' | '))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
@@ -64,10 +64,24 @@ private func worldRowAccessories(_ context: JSContext) -> [String] {
 
 private func worldControls(_ context: JSContext) -> [String] {
     let script = """
-    \(findSection("__module.widget(host)", "World")).children.filter((view) => view.type !== 'list')
+    \(findSection("__module.configure(host)", "World")).children.filter((view) => view.type !== 'list')
       .map((view) => [view.type, view.label || view.value || view.placeholder, view.action, view.suggest].filter(Boolean).join(' | '))
     """
     return context.evaluateScript(script).toArray() as? [String] ?? []
+}
+
+private func widgetWorldHasConfigControls(_ context: JSContext) -> Bool {
+    let script = """
+    (function () {
+      const world = \(findSection("__module.widget(host)", "World"));
+      if (!world) return false;
+      const hasField = (world.children || []).some((view) => view.type === 'field');
+      const list = (world.children || []).find((view) => view.type === 'list');
+      const hasAccessory = list ? (list.children || []).some((row) => !!row.accessoryAction) : false;
+      return hasField || hasAccessory;
+    })()
+    """
+    return context.evaluateScript(script).toBool()
 }
 
 private func storedZones(_ context: JSContext) -> [String] {
@@ -151,6 +165,12 @@ private func calendarCells(_ context: JSContext) -> [String] {
         #expect(worldRowAccessories(context) == ["minus.circle | removeZone | Remove Tokyo | Tokyo | no action"])
         perform(context, "removeZone", "'Tokyo'")
         #expect(worldRows(context).isEmpty)
+    }
+
+    @Test func widgetRendersWorldClocksReadOnlyWithoutInlineConfigControls() {
+        let context = clockContext(storage: "{ zones: ['Asia/Tokyo'] }")
+        #expect(worldRows(context) == ["Tokyo | 23:05 | Today · +9 h"])
+        #expect(!widgetWorldHasConfigControls(context))
     }
 
     @Test func theAddFieldSuggestsCitiesAsYouType() {

@@ -147,9 +147,18 @@ public enum ModuleInspectorTab: String, CaseIterable, Identifiable, Sendable {
 
     public var title: String {
         switch self {
-        case .overview: "Overview & Jobs"
+        case .overview: "Overview"
         case .logs: "Logs"
         case .code: "Code"
+        }
+    }
+
+    public static func fromRoute(_ raw: String) -> ModuleInspectorTab? {
+        switch raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "overview", "configure", "config", "settings": .overview
+        case "logs": .logs
+        case "code": .code
+        default: nil
         }
     }
 }
