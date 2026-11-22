@@ -184,6 +184,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     func refreshPreview(for id: String) {
         guard state.selection.moduleID == id else { return }
+        if app.model.layout.isWidget(id) || app.model.slot(id)?.chip == nil {
+            app.host.renderChip(id)
+        }
         state.previewIsLoading = true
         Task {
             let result = await app.host.previewPanel(of: id)

@@ -73,6 +73,7 @@ struct AppSettings: Codable, Equatable {
 /// Where the app keeps what the user can edit: theme, layout, settings, their modules and each module's storage.
 struct AppHome {
     let root: URL
+    var isReadOnly = false
 
     static var standard: AppHome {
         if let override = ProcessInfo.processInfo.environment["LINTEL_HOME"] {
@@ -80,6 +81,13 @@ struct AppHome {
         }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return AppHome(root: support.appending(path: "Lintel"))
+    }
+
+    /// A view over the same folder that reads existing settings, modules and storage without ever writing to disk.
+    var readOnly: AppHome {
+        var copy = self
+        copy.isReadOnly = true
+        return copy
     }
 
     var usesIsolatedStores: Bool { ProcessInfo.processInfo.environment["LINTEL_HOME"] != nil }
@@ -97,6 +105,7 @@ struct AppHome {
     var jobsFile: URL { root.appending(path: "jobs.json") }
 
     func prepare() {
+        guard !isReadOnly else { return }
         for directory in [root, modulesDirectory, storageDirectory, promptsDirectory] {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
@@ -108,6 +117,11 @@ struct AppHome {
     }
 
     func save<Value: Encodable>(_ value: Value, to file: URL) {
+        guard !isReadOnly else { return }
+        Self.writeJSON(value, to: file)
+    }
+
+    static func writeJSON<Value: Encodable>(_ value: Value, to file: URL) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(value) else { return }
@@ -122,6 +136,7 @@ struct AppHome {
 
     /// Every theme change keeps the one before it, so any edit, by hand or by chat, is one undo away.
     func saveTheme(_ theme: Theme, rememberingPrevious: Bool = true) {
+        guard !isReadOnly else { return }
         let current = loadTheme()
         guard theme != current || !FileManager.default.fileExists(atPath: themeFile.path) else { return }
         if rememberingPrevious {
@@ -133,6 +148,7 @@ struct AppHome {
     }
 
     func undoTheme() -> Bool {
+        guard !isReadOnly else { return false }
         var history = load([Theme].self, from: themeHistoryFile) ?? []
         guard let previous = history.popLast() else { return false }
         save(history, to: themeHistoryFile)
@@ -212,6 +228,7 @@ struct SecretStore {
     }
 
     func set(_ name: String, _ value: String?) {
+        guard !home.isReadOnly else { return }
         if home.usesIsolatedStores {
             var all = home.load([String: String].self, from: home.secretsFile) ?? [:]
             all[name] = value

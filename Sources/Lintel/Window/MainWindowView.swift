@@ -313,19 +313,46 @@ struct PaneHeader<Accessory: View>: View {
     }
 }
 
-struct WindowCard<Content: View>: View {
+struct WindowCard<Accessory: View, Content: View>: View {
     let title: String
     var subtitle: String?
+    var trailing: String?
     var footer: String?
+    @ViewBuilder var headerAccessory: Accessory
     @ViewBuilder var content: Content
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        trailing: String? = nil,
+        footer: String? = nil,
+        @ViewBuilder headerAccessory: () -> Accessory = { EmptyView() },
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+        self.footer = footer
+        self.headerAccessory = headerAccessory()
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline)
+                    if let subtitle {
+                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                Spacer(minLength: 8)
+                if let trailing, !trailing.isEmpty {
+                    Text(trailing)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                headerAccessory
             }
             VStack(alignment: .leading, spacing: 10) {
                 content
@@ -333,6 +360,10 @@ struct WindowCard<Content: View>: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(.primary.opacity(0.06), lineWidth: 1)
+            )
             if let footer {
                 Text(footer)
                     .font(.footnote)

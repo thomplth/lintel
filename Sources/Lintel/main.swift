@@ -58,7 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let app = AppController(home: .standard)
+        let isReadOnlyCommand = ["trial", "stage", "export", "items"].contains(arguments.first ?? "")
+        let app = AppController(home: isReadOnlyCommand ? AppHome.standard.readOnly : .standard)
         self.app = app
         switch arguments.first {
         case "trial":
@@ -85,10 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     emit("usage: Lintel export <module id> <file>")
                     exit(1)
                 }
-                app.home.save(ModuleBundle(
+                AppHome.writeJSON(ModuleBundle(
                     id: listing.id, title: listing.title, permissions: listing.permissions,
                     prompt: app.host.prompt(of: listing.id), source: source
                 ), to: URL(fileURLWithPath: arguments[2]))
+                // export writes only the requested output bundle, never touching AppHome.
                 emit(arguments[2])
                 exit(0)
             }
@@ -188,9 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             app.model.theme = parts.count == 2 ? (Theme.preset(parts[0]) ?? baseTheme) : baseTheme
             stage.updateAdaptiveBackdrop()
             app.host.closePanel()
-            for id in Array(app.model.layout.widgets.keys) {
-                app.host.setWidget(id, to: nil)
-            }
+            app.model.layout.widgets = [:]
+            app.model.layout.widgetColumns = []
             if state.hasPrefix("matrix:") {
                 let id = String(state.dropFirst(7))
                 app.host.renderWidget(id)
@@ -225,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     if !colIDs.isEmpty { layout.widgetColumns.append(colIDs) }
                 }
-                app.host.update(layout)
+                app.model.layout = layout
                 for id in layout.widgets.keys { app.host.renderWidget(id) }
                 app.model.isActive = false
             } else {

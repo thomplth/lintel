@@ -636,33 +636,42 @@ struct ModuleInspectorPane: View {
                     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
 
+                if listing.isEnabled && !needsApproval {
+                    ModulePreviewCard(app: app, controller: controller, model: model, state: state, listing: listing)
+                }
+
                 let hasConfigure = listing.hasConfigure || slot?.hasConfigure == true || app.host.hasConfigure(of: listing.id)
                 if hasConfigure {
                     if listing.isEnabled && !needsApproval {
-                        WindowCard(
-                            title: "Configuration",
-                            subtitle: "Settings for \(listing.title). Changes apply immediately."
-                        ) {
-                            if let configureNode = state.configureNode {
-                                let configureContext = makeConfigureContext(listing.id)
-                                let children = (configureNode.component == .column && configureNode.props.isEmpty) ? configureNode.children : [configureNode]
-                                VStack(alignment: .leading, spacing: configureContext.metrics.sectionSpacing) {
-                                    ForEach(Array(children.enumerated()), id: \.offset) { child in
-                                        NodeView(node: child.element, context: configureContext)
+                        if let configureNode = state.configureNode {
+                            ModuleConfigView(
+                                node: configureNode,
+                                perform: { action, payload in
+                                    Task {
+                                        await app.host.perform(listing.id, action: action, payload: payload)
+                                        controller.refreshModule(listing.id)
                                     }
+                                },
+                                performForResult: { action, payload in
+                                    await app.host.perform(listing.id, action: action, payload: payload)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            } else if let failure = state.configureFailure {
+                            )
+                        } else if let failure = state.configureFailure {
+                            WindowCard(title: "Configuration") {
                                 Text(failure)
                                     .font(.footnote.monospaced())
                                     .foregroundStyle(.red)
                                     .textSelection(.enabled)
-                            } else if state.configureIsLoading {
+                            }
+                        } else if state.configureIsLoading {
+                            WindowCard(title: "Configuration") {
                                 HStack(spacing: 8) {
                                     ProgressView().controlSize(.small)
                                     Text("Loading configuration…").font(.caption).foregroundStyle(.secondary)
                                 }
-                            } else {
+                            }
+                        } else {
+                            WindowCard(title: "Configuration") {
                                 HStack {
                                     Text("Configuration unavailable.").font(.footnote).foregroundStyle(.secondary)
                                     Spacer()
@@ -676,56 +685,6 @@ struct ModuleInspectorPane: View {
                             Text("Enable \(listing.title) above to configure its settings.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if listing.isEnabled && !needsApproval {
-                    WindowCard(title: "Live Preview", subtitle: "Real-time render of the bar chip and panel using your current theme.") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(spacing: 12) {
-                                Text("Bar Chip").font(.caption).foregroundStyle(.secondary).frame(width: 64, alignment: .leading)
-                                if let chip = slot?.chip {
-                                    let chipContext = RenderContext(theme: model.theme, surface: .chip, material: .glass, moduleID: listing.id, manifest: app.host.manifest(of: listing.id))
-                                    NodeView(node: chip, context: chipContext)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(.black.opacity(0.25), in: Capsule())
-                                } else {
-                                    Text("No chip rendered yet").font(.caption).foregroundStyle(.tertiary)
-                                }
-                                Spacer()
-                                Button {
-                                    app.host.renderChip(listing.id)
-                                    controller.refreshPreview(for: listing.id)
-                                } label: {
-                                    Label("Re-render", systemImage: "arrow.clockwise")
-                                }
-                                .controlSize(.small)
-                            }
-
-                            if let node = state.previewPanelNode {
-                                Divider()
-                                let panelContext = makePanelContext(listing.id)
-                                ScrollView(.vertical) {
-                                    VStack(alignment: .leading, spacing: panelContext.metrics.sectionSpacing) {
-                                        if node.component == .column, node.props.isEmpty {
-                                            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
-                                                NodeView(node: child.element, context: panelContext)
-                                            }
-                                        } else {
-                                            NodeView(node: node, context: panelContext)
-                                        }
-                                    }
-                                    .padding(14)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .frame(maxWidth: 460, maxHeight: 380, alignment: .leading)
-                                .background(.background.opacity(0.75), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.quaternary, lineWidth: 1))
-                            } else if state.previewIsLoading {
-                                HStack { ProgressView().controlSize(.small); Text("Rendering panel…").font(.caption).foregroundStyle(.secondary) }
-                            }
                         }
                     }
                 }
@@ -925,37 +884,6 @@ struct ModuleInspectorPane: View {
                 }
             }
         }
-    }
-
-    private func makePanelContext(_ id: String) -> RenderContext {
-        var ctx = RenderContext(theme: model.theme, surface: .panel, material: .glass, moduleID: id, manifest: app.host.manifest(of: id))
-        ctx.perform = { action, payload in
-            Task {
-                await app.host.perform(id, action: action, payload: payload)
-                controller.refreshModule(id)
-            }
-        }
-        ctx.performForResult = { action, payload in
-            let res = await app.host.perform(id, action: action, payload: payload)
-            controller.refreshPreview(for: id)
-            return res
-        }
-        return ctx
-    }
-
-    private func makeConfigureContext(_ id: String) -> RenderContext {
-        let settingsTheme = Theme.windowSettings(accentColor: model.theme.accentColor)
-        var ctx = RenderContext(theme: settingsTheme, surface: .panel, material: .glass, moduleID: id, manifest: app.host.manifest(of: id))
-        ctx.perform = { action, payload in
-            Task {
-                await app.host.perform(id, action: action, payload: payload)
-                controller.refreshModule(id)
-            }
-        }
-        ctx.performForResult = { action, payload in
-            await app.host.perform(id, action: action, payload: payload)
-        }
-        return ctx
     }
 }
 

@@ -52,6 +52,11 @@ worktree, quit the Lintel launched from it, rebuild in the primary checkout afte
 `build/Lintel.app` from there. A running Lintel whose bundle was deleted keeps its modules only until it restarts, and
 then comes back with none. `lsappinfo list | grep -A3 '"Lintel"'` shows which bundle is running.
 
+Never mutate the user's local app configuration (`~/Library/Application Support/Lintel`) during testing or verification.
+`Lintel stage`, `trial`, `items`, and `export` run with `AppHome.standard.readOnly` so they cannot write to disk; any
+other test or script that modifies layout, settings, theme, or storage must isolate itself with `LINTEL_HOME` pointing to
+a temporary folder.
+
 ## Performance
 
 Local and debug builds log metrics once a minute to `Metrics/metrics-<day>.jsonl` in the data folder, tagged with the
