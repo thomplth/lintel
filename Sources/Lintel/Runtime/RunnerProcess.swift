@@ -10,6 +10,8 @@ final class RunnerProcess {
     private var pendingCalls: [Int: (resolve: JSValue, reject: JSValue, module: String)] = [:]
     private var nextCall = 1
     private var dataJSON = "{}"
+    private var dataGeneration = 0
+    private var contextDataGeneration: [String: Int] = [:]
     private let output = FileHandle.standardOutput
     private let virtualMachine = JSVirtualMachine()!
 
@@ -45,6 +47,7 @@ final class RunnerProcess {
             load(module, source: message["source"] as? String ?? "", storage: message["storage"] ?? [String: Any](), request: request)
         case "unload":
             contexts[module] = nil
+            contextDataGeneration[module] = nil
             exceptions[module] = nil
             pendingCalls = pendingCalls.filter { $0.value.module != module }
         case "render":
@@ -59,10 +62,10 @@ final class RunnerProcess {
             let payload = Self.json(message["jobs"] ?? ["own": [], "all": []])
             entering(module) { context.objectForKeyedSubscript("__setJobs").call(withArguments: [payload]) }
         case "data":
+            // Sync data lazily into each JSContext on its next invocation instead of broadcasting
+            // JSON.parse and busy-timer IPC across every idle or hidden module on every tick.
             dataJSON = Self.json(message["data"] ?? [String: Any]())
-            for (key, context) in contexts {
-                entering(key) { context.objectForKeyedSubscript("__setData").call(withArguments: [dataJSON]) }
-            }
+            dataGeneration += 1
         case "reply":
             guard let call = message["call"] as? Int, let pending = pendingCalls.removeValue(forKey: call) else { return }
             entering(pending.module) {
@@ -115,6 +118,7 @@ final class RunnerProcess {
             return
         }
         contexts[module] = context
+        contextDataGeneration[module] = dataGeneration
         reply(request, ok: parsed)
     }
 
@@ -136,6 +140,10 @@ final class RunnerProcess {
         }
         exceptions[module] = nil
         entering(module) {
+            if contextDataGeneration[module] != dataGeneration {
+                context.objectForKeyedSubscript("__setData").call(withArguments: [dataJSON])
+                contextDataGeneration[module] = dataGeneration
+            }
             context.objectForKeyedSubscript(function).call(withArguments: arguments + [unsafeBitCast(done, to: AnyObject.self)])
         }
         if let failure = exceptions[module], !isFinished {

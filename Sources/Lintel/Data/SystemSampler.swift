@@ -10,36 +10,11 @@ import LintelCore
 /// queue, since IOKit, CoreAudio and CoreWLAN reads can take tens of milliseconds; anything that spawns a tool runs on
 /// a background queue and is merged into the next snapshot.
 final class SystemSampler {
-    struct Needs: Equatable {
-        var network = false
-        var disk = false
-        var processes = false
-        var audio = false
-        var bluetooth = false
-
-        init() {}
-
-        init(sources: [String]) {
-            let all = sources.joined(separator: "\n")
-            network = all.contains("host.network")
-            disk = all.contains("host.disk")
-            processes = all.contains("host.processes")
-            audio = all.contains("host.audio")
-            bluetooth = all.contains("host.bluetooth")
-        }
+    var demand: SamplerDemand {
+        get { lock.withLock { currentDemand } }
+        set { lock.withLock { currentDemand = newValue } }
     }
-
-    var needs: Needs {
-        get { lock.withLock { wanted } }
-        set { lock.withLock { wanted = newValue } }
-    }
-    /// The process list costs a `ps` run, so it is only kept fresh while a panel is there to show it.
-    var isPanelOpen: Bool {
-        get { lock.withLock { isPanelShown } }
-        set { lock.withLock { isPanelShown = newValue } }
-    }
-    private var wanted = Needs()
-    private var isPanelShown = false
+    private var currentDemand = SamplerDemand()
     private let sampling = DispatchQueue(label: "lintel.sampler.snapshot", qos: .userInitiated)
 
     private var previousTicks: [(busy: UInt64, total: UInt64)] = []
@@ -47,13 +22,36 @@ final class SystemSampler {
     private var previousDisk: (at: TimeInterval, read: UInt64, written: UInt64)?
     private var volumes: (at: TimeInterval, value: JSONValue)?
     private var wifi: (at: TimeInterval, value: JSONValue)?
+    private var cachedBattery: (at: TimeInterval, value: JSONValue)?
+    private var cachedBatteryDetail: (at: TimeInterval, cycles: Int?, health: Double?)?
     private let background = DispatchQueue(label: "lintel.sampler", qos: .utility)
     private let lock = NSLock()
     private var processes: JSONValue = .array([])
     private var bluetooth: JSONValue = ["on": false, "devices": []]
     private var isSamplingProcesses = false
+    private var lastProcessesSample: TimeInterval = -.infinity
     private var lastBluetoothSample: TimeInterval = -.infinity
-    private var tick = 0
+    private var cachedIsDark: Bool
+    private var themeObserver: NSObjectProtocol?
+
+    init() {
+        cachedIsDark = Self.readIsDark()
+        themeObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let dark = Self.readIsDark()
+            self.lock.withLock { self.cachedIsDark = dark }
+        }
+    }
+
+    deinit {
+        if let themeObserver {
+            DistributedNotificationCenter.default().removeObserver(themeObserver)
+        }
+    }
 
     func snapshot() -> JSONValue {
         sampling.sync { takeSnapshot() }
@@ -67,19 +65,26 @@ final class SystemSampler {
     }
 
     private func takeSnapshot() -> JSONValue {
-        let needs = needs
-        let isPanelOpen = isPanelOpen
+        let demand = demand
         let now = ProcessInfo.processInfo.systemUptime
-        tick += 1
-        var data: [String: JSONValue] = ["system": system(), "appearance": ["dark": .bool(Self.isDark)]]
-        if needs.network { data["network"] = network(now: now) }
-        if needs.disk { data["disk"] = disk(now: now) }
-        if needs.audio { data["audio"] = Self.audio() }
-        if needs.processes {
-            if isPanelOpen, tick % 2 == 0 { sampleProcesses() }
+        let dark = lock.withLock { cachedIsDark }
+        var data: [String: JSONValue] = ["appearance": ["dark": .bool(dark)]]
+        if demand.systemMetrics {
+            data["system"] = system(now: now)
+        } else if demand.battery {
+            data["system"] = ["battery": battery(now: now)]
+        }
+        if demand.network { data["network"] = network(now: now) }
+        if demand.disk { data["disk"] = disk(now: now) }
+        if demand.audio { data["audio"] = Self.audio() }
+        if demand.processes {
+            if now - lastProcessesSample >= 1.8 {
+                lastProcessesSample = now
+                sampleProcesses()
+            }
             data["processes"] = lock.withLock { processes }
         }
-        if needs.bluetooth {
+        if demand.bluetooth {
             if now - lastBluetoothSample > 30 {
                 lastBluetoothSample = now
                 sampleBluetooth()
@@ -89,13 +94,13 @@ final class SystemSampler {
         return .object(data)
     }
 
-    private static var isDark: Bool {
+    private static func readIsDark() -> Bool {
         UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleInterfaceStyle"] as? String == "Dark"
     }
 
     // MARK: System
 
-    private func system() -> JSONValue {
+    private func system(now: TimeInterval) -> JSONValue {
         let cores = coreLoads()
         let total = cores.isEmpty ? 0 : cores.reduce(0, +) / Double(cores.count)
         var averages = [Double](repeating: 0, count: 3)
@@ -112,7 +117,7 @@ final class SystemSampler {
             "gpu": gpuLoad().map(JSONValue.number) ?? .null,
             "uptime": .number(ProcessInfo.processInfo.systemUptime.rounded()),
             "thermal": .string(thermalName),
-            "battery": battery(),
+            "battery": battery(now: now),
         ]
     }
 
@@ -194,7 +199,16 @@ final class SystemSampler {
         return load
     }
 
-    private func battery() -> JSONValue {
+    private func battery(now: TimeInterval) -> JSONValue {
+        if let cached = cachedBattery, now - cached.at < 14 {
+            return cached.value
+        }
+        let value = readBattery(now: now)
+        cachedBattery = (now, value)
+        return value
+    }
+
+    private func readBattery(now: TimeInterval) -> JSONValue {
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
         else { return .null }
@@ -206,7 +220,7 @@ final class SystemSampler {
             let isCharging = description[kIOPSIsChargingKey] as? Bool ?? false
             let isPlugged = description[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue
             let minutes = description[isCharging ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey] as? Int ?? -1
-            let detail = batteryDetail()
+            let detail = batteryDetail(now: now)
             return [
                 "percent": .number(Double(percent)),
                 "charging": .bool(isCharging),
@@ -219,7 +233,11 @@ final class SystemSampler {
         return .null
     }
 
-    private func batteryDetail() -> (cycles: Int?, health: Double?) {
+    private func batteryDetail(now: TimeInterval) -> (cycles: Int?, health: Double?) {
+        // Cycle count and max capacity barely change across hours; avoid hitting IOKit AppleSmartBattery every tick.
+        if let cached = cachedBatteryDetail, now - cached.at < 600 {
+            return (cached.cycles, cached.health)
+        }
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
         guard service != 0 else { return (nil, nil) }
         defer { IOObjectRelease(service) }
@@ -231,7 +249,9 @@ final class SystemSampler {
         } else {
             nil
         }
-        return (property("CycleCount"), health)
+        let result = (cycles: property("CycleCount"), health: health)
+        cachedBatteryDetail = (now, result.cycles, result.health)
+        return result
     }
 
     // MARK: Network
@@ -259,7 +279,7 @@ final class SystemSampler {
             }
         }
         var down = 0.0, up = 0.0
-        if let previous = previousNetwork, now > previous.at {
+        if let previous = previousNetwork, now > previous.at, now - previous.at <= 10 {
             // The kernel's per-interface byte counters are 32-bit and wrap; a wrapped interval reads as zero.
             if received >= previous.received { down = Double(received - previous.received) / (now - previous.at) }
             if sent >= previous.sent { up = Double(sent - previous.sent) / (now - previous.at) }
@@ -316,7 +336,7 @@ final class SystemSampler {
             }
         }
         var readRate = 0.0, writeRate = 0.0
-        if let previous = previousDisk, now > previous.at {
+        if let previous = previousDisk, now > previous.at, now - previous.at <= 10 {
             if read >= previous.read { readRate = Double(read - previous.read) / (now - previous.at) }
             if written >= previous.written { writeRate = Double(written - previous.written) / (now - previous.at) }
         }
@@ -327,7 +347,7 @@ final class SystemSampler {
     // MARK: Processes
 
     func refreshProcesses(then completion: @escaping @MainActor () -> Void) {
-        guard needs.processes else { return }
+        guard demand.processes else { return }
         sampleProcesses { DispatchQueue.main.async { MainActor.assumeIsolated(completion) } }
     }
 

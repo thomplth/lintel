@@ -147,6 +147,7 @@ final class RunnerClient {
     }
 
     func setData(_ data: JSONValue) {
+        guard data != latestData else { return }
         latestData = data
         send(["op": "data", "data": data.any])
     }

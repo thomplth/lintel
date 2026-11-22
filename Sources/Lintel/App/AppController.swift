@@ -120,12 +120,21 @@ final class AppController {
             self.backdropSampler?.requestSample(after: 0.15)
         }
         bar.onActiveChanged = { [weak self] isActive in
+            self?.host.setBarActive(isActive)
             if isActive {
                 self?.adoption.scanIfNeeded(force: false)
             } else {
                 self?.closePanel(releasing: false)
             }
         }
+        bar.onHiddenChanged = { [weak self] isHidden in
+            self?.host.setBarHidden(isHidden)
+        }
+        bar.onFirstRowInMenuBarChanged = { [weak self] inMenuBar in
+            self?.host.setFirstRowInMenuBar(inMenuBar)
+        }
+        host.setBarHidden(model.isHidden)
+        host.setFirstRowInMenuBar(model.isFirstRowInMenuBar)
         bar.onSystemMenuBarRevealed = { [weak self] in self?.adoption.systemMenuBarRevealed() }
         bar.onGuardedTopEdgeChanged = { [weak self] span in self?.pointerTap.guardSpan(span) }
         bar.onMenuBarRowFrameChanged = { [weak self] frame in

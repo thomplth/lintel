@@ -46,10 +46,14 @@ final class ModuleHost {
     private struct Loaded {
         var source: Source
         var text: String
+        var usesAttention: Bool
         var description: ModuleDescription?
+        var backgroundActivity: ModuleBackgroundActivity?
         var failure: String?
         var needsApproval = false
         var timer: Timer?
+        var scheduledInterval: TimeInterval?
+        var hasRenderedInitialSurface = false
         var isRenderingChip = false
         var isRenderingWidget = false
         var isRenderingPanel = false
@@ -70,7 +74,13 @@ final class ModuleHost {
     private var trialCount = 0
     private var watcher: Timer?
     private var dataTimer: Timer?
+    private var dataTimerInterval: TimeInterval?
     private var panelTimer: Timer?
+    private var isBarActive = false
+    private var isBarHidden = false
+    private var inspectedModuleID: String?
+    private var bundledBuiltInCache: [Source]?
+    private var bundledLibraryCache: [String: Source]?
     private var libraryCache: [String: (stamp: Date, description: ModuleDescription)] = [:]
     var onSettingsChanged: () -> Void = {}
     var onModulesChanged: () -> Void = {}
@@ -101,6 +111,7 @@ final class ModuleHost {
                   self.model.slots[index].isRaised != isRaised
             else { return }
             self.model.slots[index].isRaised = isRaised
+            self.refreshSchedulingAndSampling(revealNewSurfaces: isRaised)
         }
         services.onJobRun = { [weak self] caller, name in
             guard let self, let target = self.jobs.resolve(callerModule: caller, identifier: name) else {
@@ -148,27 +159,53 @@ final class ModuleHost {
 
     func start(watching: Bool = true) {
         runner.start()
+        sampler.demand = .all
         runner.setData(sampler.snapshot())
         jobs.start()
         sync()
-        dataTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.pushData() }
-        }
+        refreshSchedulingAndSampling()
         guard watching else { return }
-        watcher = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.sync() }
         }
+        timer.tolerance = 0.5
+        watcher = timer
     }
 
     /// For one-off runs that load no modules: start the helper and give it one full reading.
     func primeData() {
         runner.start()
-        sampler.needs = SystemSampler.Needs(sources: ["host.network host.disk host.processes host.audio host.bluetooth"])
+        sampler.demand = .all
         runner.setData(sampler.snapshot())
     }
 
-    private func pushData() {
-        sampler.snapshot { [weak self] data in self?.runner.setData(data) }
+    func setBarActive(_ active: Bool) {
+        guard isBarActive != active else { return }
+        isBarActive = active
+        refreshSchedulingAndSampling(revealNewSurfaces: active)
+    }
+
+    func setBarHidden(_ hidden: Bool) {
+        guard isBarHidden != hidden else { return }
+        isBarHidden = hidden
+        refreshSchedulingAndSampling(revealNewSurfaces: !hidden)
+    }
+
+    func setInspectedModule(_ id: String?) {
+        guard inspectedModuleID != id else { return }
+        inspectedModuleID = id
+        refreshSchedulingAndSampling(revealNewSurfaces: id != nil)
+    }
+
+    func setFirstRowInMenuBar(_ inMenuBar: Bool) {
+        refreshSchedulingAndSampling(revealNewSurfaces: inMenuBar)
+    }
+
+    private func pushData(then after: (() -> Void)? = nil) {
+        sampler.snapshot { [weak self] data in
+            self?.runner.setData(data)
+            after?()
+        }
     }
 
     // MARK: Discovery
@@ -196,15 +233,8 @@ final class ModuleHost {
         if changed(home.layoutFile) {
             let layout = home.loadLayout()
             if layout != model.layout {
-                let oldWidgets = Set(model.layout.widgets.keys)
-                let newWidgets = Set(layout.widgets.keys)
                 model.layout = layout
-                if oldWidgets != newWidgets {
-                    for key in oldWidgets.symmetricDifference(newWidgets) where loaded[key] != nil {
-                        schedule(key)
-                    }
-                }
-                updateSamplerDemand()
+                refreshSchedulingAndSampling(revealNewSurfaces: true)
             }
         }
         if changed(home.approvalsFile) { approvals = home.loadApprovals() }
@@ -220,17 +250,43 @@ final class ModuleHost {
 
     private func discover() -> [String: Source] {
         var sources: [String: Source] = [:]
-        func add(_ files: [URL], _ origin: ModuleListing.Origin, only: Set<String>? = nil) {
-            for file in files {
+        // Bundled built-in and library modules never change at runtime; cache their metadata once.
+        let builtIn: [Source]
+        if let cached = bundledBuiltInCache {
+            builtIn = cached
+        } else {
+            let scanned = Resources.files(in: "Modules", extension: "js").compactMap { file -> Source? in
                 let key = file.deletingPathExtension().lastPathComponent
-                if let only, !only.contains(key) { continue }
-                guard let stamp = Resources.bundled(file)?.modified ?? AppHome.modificationDate(of: file) else { continue }
-                sources[key] = Source(key: key, file: file, origin: origin, stamp: stamp)
+                guard let stamp = Resources.bundled(file)?.modified ?? AppHome.modificationDate(of: file) else { return nil }
+                return Source(key: key, file: file, origin: .builtIn, stamp: stamp)
             }
+            bundledBuiltInCache = scanned
+            builtIn = scanned
         }
-        add(Resources.files(in: "Modules", extension: "js"), .builtIn)
-        add(Resources.files(in: "Library", extension: "js"), .library, only: Set(model.settings.enabledLibrary))
-        add(userModuleFiles(), .user)
+        for source in builtIn { sources[source.key] = source }
+
+        let library: [String: Source]
+        if let cached = bundledLibraryCache {
+            library = cached
+        } else {
+            var scanned: [String: Source] = [:]
+            for file in Resources.files(in: "Library", extension: "js") {
+                let key = file.deletingPathExtension().lastPathComponent
+                guard let stamp = Resources.bundled(file)?.modified ?? AppHome.modificationDate(of: file) else { continue }
+                scanned[key] = Source(key: key, file: file, origin: .library, stamp: stamp)
+            }
+            bundledLibraryCache = scanned
+            library = scanned
+        }
+        for key in model.settings.enabledLibrary {
+            if let source = library[key] { sources[key] = source }
+        }
+
+        for file in userModuleFiles() {
+            let key = file.deletingPathExtension().lastPathComponent
+            guard let stamp = AppHome.modificationDate(of: file) else { continue }
+            sources[key] = Source(key: key, file: file, origin: .user, stamp: stamp)
+        }
         for key in model.settings.disabledModules { sources[key] = nil }
         return sources
     }
@@ -246,9 +302,13 @@ final class ModuleHost {
         generation += 1
         let current = generation
         let text = Resources.source(of: source.file) ?? ""
-        loaded[source.key] = Loaded(source: source, text: text, generation: current)
+        loaded[source.key] = Loaded(
+            source: source,
+            text: text,
+            usesAttention: ModuleRenderPolicy.usesAttention(source: text),
+            generation: current
+        )
         publish(source.key)
-        updateNeeds()
         Task {
             do {
                 let description = try await runner.load(key: source.key, source: text, storage: .object(services.storage(for: source.key)))
@@ -257,6 +317,9 @@ final class ModuleHost {
                     throw ModuleFailure("meta.id is '\(description.manifest.id)' but the file is named \(source.key).js; they must match")
                 }
                 loaded[source.key]?.description = description
+                loaded[source.key]?.backgroundActivity = ModuleBackgroundActivity.analyze(
+                    manifest: description.manifest, jobs: description.jobs, source: text
+                )
                 let isApproved = source.origin != .user || description.manifest.permissions.isEmpty
                     || approvals[source.key]?.covers(description.manifest) == true
                 loaded[source.key]?.needsApproval = !isApproved
@@ -265,7 +328,7 @@ final class ModuleHost {
                 if isApproved {
                     jobs.register(moduleID: source.key, moduleTitle: description.manifest.title, jobs: description.jobs)
                     jobs.pushSnapshotsToModule(source.key, allowsAllJobs: description.manifest.allows(.jobs))
-                    schedule(source.key)
+                    refreshSchedulingAndSampling(revealNewSurfaces: true)
                 }
                 onModulesChanged()
             } catch {
@@ -285,30 +348,112 @@ final class ModuleHost {
         services.grants[key] = nil
         model.slots.removeAll { $0.id == key && $0.kind == .module }
         if model.panel?.slotID == key, model.panel?.content == .module { closePanel() }
-        updateNeeds()
+        refreshSchedulingAndSampling()
         onModulesChanged()
     }
 
-    private func updateNeeds() {
-        sampler.needs = SystemSampler.Needs(sources: loaded.values.map(\.text))
-    }
+    /// Reconciles per-module render timers and demand-driven `SystemSampler` polling against what is
+    /// currently visible (or attention-capable). Hidden modules and idle unpinned non-attention modules
+    /// pause their timers and sampler subsystems until revealed.
+    private func refreshSchedulingAndSampling(revealNewSurfaces: Bool = false) {
+        let raised = Set(model.slots.filter(\.isRaised).map(\.id))
+        let idleRows = model.layout.arranged(
+            model.layoutItems, isActive: false, raised: raised, keepsFirstRow: model.isFirstRowInMenuBar
+        )
+        let visibleIdleKeys = Set(idleRows.joined())
 
-    private func schedule(_ key: String) {
-        guard let manifest = loaded[key]?.description?.manifest else { return }
-        loaded[key]?.timer?.invalidate()
-        let isWidget = model.layout.isWidget(key)
-        let interval = isWidget ? manifest.panelRefreshSeconds : manifest.refreshSeconds
-        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.renderActiveSurface(key) }
+        var activeModules: [SamplerDemand.ActiveModule] = []
+        var wokenKeys: [String] = []
+        var initialKeys: [String] = []
+
+        for key in loaded.keys {
+            guard let entry = loaded[key], let desc = entry.description, !entry.needsApproval else { continue }
+            let isHidden = model.layout.isHidden(key)
+            let isWidget = model.layout.isWidget(key)
+            let target = ModuleRenderPolicy.Target(
+                isHiddenInLayout: isHidden,
+                isWidget: isWidget,
+                isVisibleWhileIdle: visibleIdleKeys.contains(key),
+                usesAttention: entry.usesAttention,
+                isBarActive: isBarActive,
+                isBarHidden: isBarHidden
+            )
+            let shouldRun = ModuleRenderPolicy.shouldRenderPeriodically(target)
+            if shouldRun {
+                let interval = isWidget ? desc.manifest.panelRefreshSeconds : desc.manifest.refreshSeconds
+                if entry.timer == nil || entry.scheduledInterval != interval {
+                    let wasPaused = entry.timer == nil
+                    entry.timer?.invalidate()
+                    let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+                        MainActor.assumeIsolated { self?.renderActiveSurface(key) }
+                    }
+                    timer.tolerance = min(max(interval * 0.15, 0.1), 5)
+                    loaded[key]?.timer = timer
+                    loaded[key]?.scheduledInterval = interval
+                    if wasPaused && (revealNewSurfaces || !entry.hasRenderedInitialSurface) {
+                        wokenKeys.append(key)
+                    }
+                }
+                activeModules.append(SamplerDemand.ActiveModule(
+                    source: entry.text,
+                    refreshSeconds: interval,
+                    hasExpandedSurface: isWidget
+                ))
+            } else {
+                if entry.timer != nil {
+                    entry.timer?.invalidate()
+                    loaded[key]?.timer = nil
+                    loaded[key]?.scheduledInterval = nil
+                }
+                if !entry.hasRenderedInitialSurface, !isHidden {
+                    initialKeys.append(key)
+                }
+            }
         }
-        timer.tolerance = min(interval / 10, 5)
-        loaded[key]?.timer = timer
-        updateSamplerDemand()
-        renderActiveSurface(key)
-    }
 
-    private func updateSamplerDemand() {
-        sampler.isPanelOpen = model.panel != nil || !model.visibleWidgets.isEmpty
+        // Open click-to-peek panel and visible MainWindow inspector also drive sampler demand (including processes).
+        for expandedKey in [model.panel?.content == .module ? model.panel?.slotID : nil, inspectedModuleID].compactMap({ $0 }) {
+            guard let entry = loaded[expandedKey], let desc = entry.description, !entry.needsApproval else { continue }
+            activeModules.append(SamplerDemand.ActiveModule(
+                source: entry.text,
+                refreshSeconds: desc.manifest.panelRefreshSeconds,
+                hasExpandedSurface: true
+            ))
+        }
+
+        let demand = SamplerDemand.resolve(modules: activeModules)
+        let hadDemand = !sampler.demand.isEmpty
+        sampler.demand = demand
+
+        if dataTimerInterval != demand.recommendedInterval {
+            dataTimer?.invalidate()
+            dataTimer = nil
+            dataTimerInterval = demand.recommendedInterval
+            if let interval = demand.recommendedInterval {
+                let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.pushData() }
+                }
+                timer.tolerance = min(interval * 0.2, 3)
+                dataTimer = timer
+            }
+        }
+
+        for key in initialKeys {
+            loaded[key]?.hasRenderedInitialSurface = true
+            renderActiveSurface(key)
+        }
+        if !wokenKeys.isEmpty {
+            for key in wokenKeys { loaded[key]?.hasRenderedInitialSurface = true }
+            if revealNewSurfaces, !demand.isEmpty {
+                pushData { [weak self] in
+                    for key in wokenKeys { self?.renderActiveSurface(key) }
+                }
+            } else {
+                for key in wokenKeys { renderActiveSurface(key) }
+            }
+        } else if revealNewSurfaces, !demand.isEmpty, !hadDemand {
+            pushData()
+        }
     }
 
     func renderActiveSurface(_ key: String) {
@@ -320,26 +465,18 @@ final class ModuleHost {
     }
 
     func setWidget(_ key: String, to box: WidgetBox?) {
-        let wasWidget = model.layout.isWidget(key)
         var layout = model.layout
         layout.setWidget(box, for: key)
         update(layout)
-        if wasWidget != (box != nil) {
-            schedule(key)
-        }
         if box != nil, model.panel?.slotID == key {
             closePanel()
         }
     }
 
     func moveWidget(_ key: String, to drop: WidgetShelfDrop) {
-        let wasWidget = model.layout.isWidget(key)
         var layout = model.layout
         layout.moveWidget(key, to: drop)
         update(layout)
-        if wasWidget != layout.isWidget(key) {
-            schedule(key)
-        }
     }
 
     func ensureWidgetRendered(_ key: String) {
@@ -471,24 +608,25 @@ final class ModuleHost {
         }
         let resolvedCorner = corner ?? WidgetResize.corner(for: model.settings.anchor)
         model.panel = PanelState(slotID: key, content: .module, widgetBox: box, resizeCorner: resolvedCorner, isLoading: true)
-        updateSamplerDemand()
+        refreshSchedulingAndSampling(revealNewSurfaces: true)
         sampler.refreshProcesses { [weak self] in
-            self?.pushData()
-            self?.renderPanel(key)
+            self?.pushData { self?.renderPanel(key) }
         }
         renderPanel(key)
         panelTimer?.invalidate()
         let interval = loaded[key]?.description?.manifest.panelRefreshSeconds ?? 5
-        panelTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.renderPanel(key) }
         }
+        timer.tolerance = min(max(interval * 0.15, 0.1), 5)
+        panelTimer = timer
     }
 
     func closePanel() {
         panelTimer?.invalidate()
         panelTimer = nil
         if model.panel != nil { model.panel = nil }
-        updateSamplerDemand()
+        refreshSchedulingAndSampling()
     }
 
     func renderPanel(_ key: String) {
@@ -620,7 +758,7 @@ final class ModuleHost {
         publish(id)
         jobs.register(moduleID: id, moduleTitle: manifest.title, jobs: description.jobs)
         jobs.pushSnapshotsToModule(id, allowsAllJobs: manifest.allows(.jobs))
-        schedule(id)
+        refreshSchedulingAndSampling(revealNewSurfaces: true)
         if model.panel?.slotID == id { openPanel(id) }
         onModulesChanged()
     }
@@ -680,6 +818,7 @@ final class ModuleHost {
         model.layout = layout
         home.save(layout, to: home.layoutFile)
         stamps[home.layoutFile] = AppHome.modificationDate(of: home.layoutFile)
+        refreshSchedulingAndSampling(revealNewSurfaces: true)
     }
 
     func update(_ theme: Theme) {
@@ -709,8 +848,12 @@ final class ModuleHost {
     }
 
     func backgroundActivity(of id: String) -> ModuleBackgroundActivity? {
-        guard let entry = loaded[id], let description = entry.description else { return nil }
-        return ModuleBackgroundActivity.analyze(manifest: description.manifest, jobs: description.jobs, source: entry.text)
+        guard let entry = loaded[id] else { return nil }
+        if let cached = entry.backgroundActivity { return cached }
+        guard let description = entry.description else { return nil }
+        let analyzed = ModuleBackgroundActivity.analyze(manifest: description.manifest, jobs: description.jobs, source: entry.text)
+        loaded[id]?.backgroundActivity = analyzed
+        return analyzed
     }
 
     func logs(of id: String) -> [String] {

@@ -81,8 +81,10 @@ final class BarWindowController {
     private var widgetExpansion = WidgetExpansion()
     private var contentSize = CGSize(width: 1, height: 1)
     private var pointerTimer: Timer?
+    private var pointerPollingMode: PointerPollingMode?
     private var hotkeys: [Hotkey] = []
     private var hasSteppedAside = false
+    private var cachedMenuBarAutoHides = false
     /// The stretch of the top edge kept from revealing the system menu bar.
     private(set) var guardedTopEdge: ClosedRange<CGFloat>? {
         didSet { if guardedTopEdge != oldValue { onGuardedTopEdgeChanged(guardedTopEdge) } }
@@ -100,6 +102,8 @@ final class BarWindowController {
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
     var onActiveChanged: (Bool) -> Void = { _ in }
+    var onHiddenChanged: (Bool) -> Void = { _ in }
+    var onFirstRowInMenuBarChanged: (Bool) -> Void = { _ in }
     var onAnchorChanged: (BarAnchor) -> Void = { _ in }
     var onHideToggled: () -> Void = {}
     var onWillHide: () -> Void = {}
@@ -111,7 +115,7 @@ final class BarWindowController {
         self.model = model
         panel = makeFloatingPanel(level: .statusBar)
         panel.ignoresMouseEvents = true
-        panel.acceptsMouseMovedEvents = true
+        panel.acceptsMouseMovedEvents = false
         let hostingView = FirstClickHostingView(rootView: BarView(model: model))
         // Left on, the hosting view resizes the window itself and moves it off the top edge.
         hostingView.sizingOptions = []
@@ -125,11 +129,18 @@ final class BarWindowController {
             self?.menuBarRowSize = CGSize(width: ceil(size.width), height: ceil(size.height))
             self?.place()
         }
+        cachedMenuBarAutoHides = Self.readMenuBarAutoHides()
         model.onDragChanged = { [weak self] translation in self?.drag(translation) }
         model.onDragEnded = { [weak self] _ in self?.endDrag() }
-        model.onRearrangingChanged = { [weak self] in self?.showCarrier() }
-        model.onResizingChanged = { [weak self] in self?.updateMouseCapture() }
-        let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.updateMouseCapture() } }
+        model.onRearrangingChanged = { [weak self] in
+            self?.showCarrier()
+            self?.syncPointerPollingMode()
+        }
+        model.onResizingChanged = { [weak self] in
+            self?.updateMouseCapture()
+            self?.syncPointerPollingMode()
+        }
+        let follow: (NSEvent) -> Void = { [weak self] _ in MainActor.assumeIsolated { self?.handlePointerEvent() } }
         let outsideClick: (NSEvent) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.handleGlobalClickOutsideWidget() }
         }
@@ -142,6 +153,7 @@ final class BarWindowController {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated {
+            self?.refreshMenuBarAutoHides()
             self?.place()
             self?.updateFullScreenState()
         } }
@@ -149,6 +161,7 @@ final class BarWindowController {
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification, NSWorkspace.activeSpaceDidChangeNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
+                    self?.refreshMenuBarAutoHides()
                     self?.place()
                     self?.updateFullScreenState()
                 }
@@ -157,15 +170,26 @@ final class BarWindowController {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.updateFullScreenState() } }
+        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.menuBarRow != nil else { return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                        self?.measureMenuBarRowBudget()
+                    }
+                }
+            }
+        }
         for name in ["com.apple.screenIsUnlocked", "AppleInterfaceMenuBarHidingChangedNotification"] {
             DistributedNotificationCenter.default().addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.place() }
+                MainActor.assumeIsolated {
+                    self?.refreshMenuBarAutoHides()
+                    self?.place()
+                }
             }
         }
 
-        pointerTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.trackPointer() }
-        }
+        setPointerPollingMode(.idle)
         applySettings()
         updateFullScreenState()
         place()
@@ -197,6 +221,7 @@ final class BarWindowController {
     func hold() {
         activation.hold()
         applyActivation()
+        syncPointerPollingMode()
     }
 
     func release() {
@@ -204,6 +229,7 @@ final class BarWindowController {
         collapseTemporaryWidget()
         applyActivation()
         if panel.isKeyWindow { panel.resignKey() }
+        syncPointerPollingMode()
     }
 
     func expandWidgetTemporarily(_ id: String) {
@@ -220,6 +246,7 @@ final class BarWindowController {
             model.temporaryExpandedWidget = TemporaryWidgetExpansion(slotID: id, box: expandedBox)
         }
         updateMouseCapture()
+        syncPointerPollingMode()
     }
 
     func collapseTemporaryWidget() {
@@ -229,6 +256,7 @@ final class BarWindowController {
             model.temporaryExpandedWidget = nil
         }
         updateMouseCapture()
+        syncPointerPollingMode()
     }
 
     private func handleGlobalClickOutsideWidget() {
@@ -280,9 +308,11 @@ final class BarWindowController {
         if isHidden { release() }
         panel.animator().alphaValue = isHidden || hasSteppedAside ? 0 : 1
         updateMouseCapture()
+        onHiddenChanged(isHidden)
     }
 
     private func updateFullScreenState() {
+        guard model.settings.autoHideInFullScreen else { return }
         var visibility = model.visibility
         visibility.setFullScreen(detectFullScreen())
         applyVisibility(visibility)
@@ -361,11 +391,18 @@ final class BarWindowController {
         release()
     }
 
-    private var menuBarAutoHides: Bool {
+    private static func readMenuBarAutoHides() -> Bool {
         UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["_HIHideMenuBar"] as? Bool ?? false
     }
 
+    private func refreshMenuBarAutoHides() {
+        cachedMenuBarAutoHides = Self.readMenuBarAutoHides()
+    }
+
+    private var menuBarAutoHides: Bool { cachedMenuBarAutoHides }
+
     private func stepAsideForSystemMenuBar() {
+        guard menuBarAutoHides || hasSteppedAside else { return }
         let isRevealed = menuBarAutoHides && MenuBarItems.isSystemMenuBarRevealed()
         defer { updateGuardedTopEdge() }
         guard isRevealed != hasSteppedAside else { return }
@@ -386,24 +423,98 @@ final class BarWindowController {
         )
     }
 
-    private var pointerTicks = 0
+    private var lastFullScreenCheck: TimeInterval = -.infinity
+    private var lastMenuBarStepAsideCheck: TimeInterval = -.infinity
+    private var lastMenuBarBudgetCheck: TimeInterval = -.infinity
+
+    private func setPointerPollingMode(_ mode: PointerPollingMode) {
+        guard pointerPollingMode != mode else { return }
+        pointerPollingMode = mode
+        pointerTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: mode.interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.trackPointer() }
+        }
+        timer.tolerance = mode.tolerance
+        pointerTimer = timer
+    }
+
+    private func isPointerInHotZone(
+        pointer: CGPoint,
+        isOverChip: Bool,
+        isOverWidget: Bool
+    ) -> Bool {
+        if isOverChip || isOverWidget { return true }
+        if let menuBarRowFrame, menuBarRowFrame.contains(pointer) { return true }
+        if menuBarAutoHides, pointer.y > (screen?.frame.maxY ?? 0) - 48 { return true }
+        return false
+    }
+
+    private func syncPointerPollingMode(isPointerInHotZone: Bool? = nil) {
+        let hotZone: Bool
+        if let isPointerInHotZone {
+            hotZone = isPointerInHotZone
+        } else {
+            let pointer = NSEvent.mouseLocation
+            let inBarCoords = barPoint(pointer)
+            hotZone = self.isPointerInHotZone(
+                pointer: pointer,
+                isOverChip: model.isPointInBarChip(inBarCoords),
+                isOverWidget: model.isPointInWidget(inBarCoords)
+            )
+        }
+        let mode = PointerPollingMode.resolve(
+            isActivationBusy: activation.state != .idle,
+            hasTemporaryExpandedWidget: widgetExpansion.slotID != nil,
+            hasSteppedAside: hasSteppedAside,
+            isPointerInHotZone: hotZone,
+            isDraggingOrResizing: dragOrigin != nil || model.rearrangement != nil || model.resizingSlotID != nil || model.draggingWidgetID != nil
+        )
+        setPointerPollingMode(mode)
+    }
+
+    private func handlePointerEvent() {
+        let pointer = NSEvent.mouseLocation
+        let inBarCoords = barPoint(pointer)
+        let isOverWidget = model.isPointInWidget(inBarCoords)
+        let isOverChip = model.isPointInBarChip(inBarCoords)
+        updateMouseCapture(pointer: pointer, isOverWidget: isOverWidget, isOverChip: isOverChip)
+        let hotZone = isPointerInHotZone(pointer: pointer, isOverChip: isOverChip, isOverWidget: isOverWidget)
+        if hotZone && pointerPollingMode != .fast {
+            trackPointer()
+        } else {
+            syncPointerPollingMode(isPointerInHotZone: hotZone)
+        }
+    }
 
     private func trackPointer() {
-        pointerTicks += 1
+        let now = ProcessInfo.processInfo.systemUptime
+        let pointer = NSEvent.mouseLocation
         // Listing every window is the costly part of each tick, and the menu bar only slides in while the pointer
         // is at the top edge; elsewhere an occasional look is enough to notice it leaving.
-        let isNearTop = NSEvent.mouseLocation.y > (screen?.frame.maxY ?? 0) - 48
-        if isNearTop || hasSteppedAside || pointerTicks % 20 == 0 { stepAsideForSystemMenuBar() }
-        if pointerTicks % 10 == 0 { updateFullScreenState() }
+        let isNearTop = menuBarAutoHides && pointer.y > (screen?.frame.maxY ?? 0) - 48
+        if isNearTop || hasSteppedAside || (menuBarAutoHides && now - lastMenuBarStepAsideCheck >= 3.0) {
+            lastMenuBarStepAsideCheck = now
+            stepAsideForSystemMenuBar()
+        }
+        if model.settings.autoHideInFullScreen, now - lastFullScreenCheck >= 3.0 {
+            lastFullScreenCheck = now
+            updateFullScreenState()
+        }
         // Other apps' items come and go beside the menu bar row and push it along.
         if let menuBarRow, menuBarRow.screenFrame != menuBarRowFrame { place() }
-        if menuBarRow != nil, pointerTicks % 50 == 1 { measureMenuBarRowBudget() }
-        guard !hasSteppedAside, !model.isHidden, dragOrigin == nil, model.rearrangement == nil, model.resizingSlotID == nil, model.draggingWidgetID == nil else { return }
-        let pointer = NSEvent.mouseLocation
+        if menuBarRow != nil, now - lastMenuBarBudgetCheck >= 15.0 {
+            lastMenuBarBudgetCheck = now
+            measureMenuBarRowBudget()
+        }
+        let isDraggingOrResizing = dragOrigin != nil || model.rearrangement != nil || model.resizingSlotID != nil || model.draggingWidgetID != nil
+        guard !hasSteppedAside, !model.isHidden, !isDraggingOrResizing else {
+            syncPointerPollingMode(isPointerInHotZone: isNearTop)
+            return
+        }
         let inBarCoords = barPoint(pointer)
         if let expandedID = widgetExpansion.slotID {
             let keepOpen = model.isPointInWidget(inBarCoords, slotID: expandedID)
-            widgetExpansion.pointer(inside: keepOpen, at: ProcessInfo.processInfo.systemUptime)
+            widgetExpansion.pointer(inside: keepOpen, at: now)
             if widgetExpansion.slotID == nil {
                 collapseTemporaryWidget()
             }
@@ -416,15 +527,18 @@ final class BarWindowController {
         if !model.settings.hoverActivates, activation.state == .idle { isInside = false }
         // A pressed mouse button means a drag or selection is passing over the bar, not a visit to it.
         if activation.state == .idle, NSEvent.pressedMouseButtons != 0 { isInside = false }
+        let hotZone = isPointerInHotZone(pointer: pointer, isOverChip: isOverChip, isOverWidget: isOverWidget)
         // Hovering a desktop widget directly should let the user interact immediately without expanding the unpinned chip bar,
         // while hovering the chip strip still triggers normal dwell activation.
         if isOverWidget && !isOverChip && activation.state == .idle {
-            updateMouseCapture()
+            updateMouseCapture(pointer: pointer, isOverWidget: isOverWidget, isOverChip: isOverChip)
+            syncPointerPollingMode(isPointerInHotZone: hotZone)
             return
         }
-        activation.pointer(inside: isInside, at: ProcessInfo.processInfo.systemUptime)
+        activation.pointer(inside: isInside, at: now)
         applyActivation()
-        updateMouseCapture()
+        updateMouseCapture(pointer: pointer, isOverWidget: isOverWidget, isOverChip: isOverChip)
+        syncPointerPollingMode(isPointerInHotZone: hotZone)
     }
 
     private func applyActivation() {
@@ -448,14 +562,15 @@ final class BarWindowController {
 
     /// The canvas would swallow clicks meant for the windows under it; it takes the pointer only over an actual
     /// chip (when active), an actual desktop widget (even while idle!), or while a drag/resize press is held.
-    private func updateMouseCapture() {
-        let pointer = NSEvent.mouseLocation
-        let inBarCoords = barPoint(pointer)
+    private func updateMouseCapture(pointer: CGPoint? = nil, isOverWidget: Bool? = nil, isOverChip: Bool? = nil) {
+        let pointer = pointer ?? NSEvent.mouseLocation
+        let inBarCoords = (isOverWidget == nil || isOverChip == nil) ? barPoint(pointer) : .zero
+        let overWidget = isOverWidget ?? model.isPointInWidget(inBarCoords)
+        let overChip = isOverChip ?? model.isPointInBarChip(inBarCoords)
         let isPressing = !panel.ignoresMouseEvents && NSEvent.pressedMouseButtons != 0
-        let isOverWidget = model.isPointInWidget(inBarCoords)
-        let isOverBarChip = model.isPointInBarChip(inBarCoords) || contentFrame.insetBy(dx: -2, dy: -2).contains(pointer) && model.visibleWidgets.isEmpty
+        let isOverBarChip = overChip || (!model.hasVisibleWidgets && contentFrame.insetBy(dx: -2, dy: -2).contains(pointer))
         let captures = !model.isHidden && (
-            isOverWidget
+            overWidget
             || (activation.isActive && isOverBarChip)
             || isPressing
             || dragOrigin != nil
@@ -464,12 +579,13 @@ final class BarWindowController {
             || model.draggingWidgetID != nil
         )
         if panel.ignoresMouseEvents == captures { panel.ignoresMouseEvents = !captures }
-        updatePinDividers(isOverBar: isOverBarChip)
+        if panel.acceptsMouseMovedEvents != captures { panel.acceptsMouseMovedEvents = captures }
+        updatePinDividers(isOverBar: isOverBarChip, pointer: pointer)
     }
 
     /// ⌘ over the open bar shows each row's pin divider, ready to be ⌘-dragged, and keeps it while a drag goes on.
-    private func updatePinDividers(isOverBar: Bool) {
-        let isOverMenuBarRow = menuBarRowFrame?.contains(NSEvent.mouseLocation) ?? false
+    private func updatePinDividers(isOverBar: Bool, pointer: CGPoint) {
+        let isOverMenuBarRow = menuBarRowFrame?.contains(pointer) ?? false
         let shows = activation.isActive && !model.isHidden && (isOverBar || isOverMenuBarRow)
             && NSEvent.modifierFlags.contains(.command)
         guard shows != model.showsPinDividers else { return }
@@ -535,7 +651,10 @@ final class BarWindowController {
             menuBarRow = nil
             menuBarRowFrame = nil
         }
-        if model.isFirstRowInMenuBar != wanted { model.isFirstRowInMenuBar = wanted }
+        if model.isFirstRowInMenuBar != wanted {
+            model.isFirstRowInMenuBar = wanted
+            onFirstRowInMenuBarChanged(wanted)
+        }
     }
 
     /// The menu bar row may use the space between the notch, or the middle of a screen without one, and the
@@ -622,14 +741,20 @@ final class BarWindowController {
     private lazy var carrier: FloatingPanel = {
         let carrier = makeFloatingPanel(level: NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2))
         carrier.ignoresMouseEvents = true
-        let hostingView = NSHostingView(rootView: CarrierView(model: model))
-        hostingView.sizingOptions = []
-        carrier.contentView = hostingView
         return carrier
     }()
 
     private func showCarrier() {
-        guard model.rearrangement != nil, let screen else { return carrier.orderOut(nil) }
+        guard model.rearrangement != nil, let screen else {
+            carrier.orderOut(nil)
+            carrier.contentView = nil
+            return
+        }
+        if carrier.contentView == nil {
+            let hostingView = NSHostingView(rootView: CarrierView(model: model))
+            hostingView.sizingOptions = []
+            carrier.contentView = hostingView
+        }
         model.barWindowFrame = panel.frame
         model.carrierWindowFrame = screen.frame
         carrier.setFrame(screen.frame, display: false)
@@ -675,13 +800,6 @@ final class PanelWindowController {
         self.model = model
         self.bar = bar
         panel = makeFloatingPanel(level: NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1))
-        let maxHeight = (bar.screen?.visibleFrame.height ?? 800) * 0.78
-        let hostingView = FirstClickHostingView(rootView: PanelView(model: model, maxHeight: maxHeight) { [weak self] size in
-            self?.contentSize = size
-            self?.place()
-        })
-        hostingView.sizingOptions = []
-        panel.contentView = hostingView
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.model.panel != nil else { return }
@@ -689,6 +807,16 @@ final class PanelWindowController {
                 if !self.visibleFrame.contains(pointer), !self.bar.contentFrame.contains(pointer) { self.onClickOutside() }
             }
         }
+    }
+
+    private func makeContentView() -> NSView {
+        let maxHeight = (bar.screen?.visibleFrame.height ?? 800) * 0.78
+        let hostingView = FirstClickHostingView(rootView: PanelView(model: model, maxHeight: maxHeight) { [weak self] size in
+            self?.contentSize = size
+            self?.place()
+        })
+        hostingView.sizingOptions = []
+        return hostingView
     }
 
     /// The window is larger than the panel by a margin that leaves room for its shadow.
@@ -699,6 +827,9 @@ final class PanelWindowController {
     var isVisible: Bool { panel.isVisible }
 
     func show(focus: Bool) {
+        if panel.contentView == nil {
+            panel.contentView = makeContentView()
+        }
         place()
         panel.orderFrontRegardless()
         if focus { panel.makeKeyAndOrderFront(nil) }
@@ -707,6 +838,8 @@ final class PanelWindowController {
     func hide() {
         if panel.isKeyWindow { panel.resignKey() }
         panel.orderOut(nil)
+        // Release the SwiftUI hosting tree while closed so idle BarModel ticks never touch PanelView.
+        panel.contentView = nil
     }
 
     func place() {

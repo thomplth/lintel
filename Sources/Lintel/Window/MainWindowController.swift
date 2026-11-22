@@ -48,9 +48,10 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             .removeDuplicates()
             .sink { [weak self] selection in
                 guard let self else { return }
-                self.app.model.studioFocusedModuleID = selection.moduleID
+                self.app.model.studioFocusedModuleID = self.isVisible ? selection.moduleID : nil
+                self.app.host.setInspectedModule(self.isActivelyVisible ? selection.moduleID : nil)
                 self.app.adoption.wantsListing = self.isVisible && selection.wantsMenuBarListing
-                if selection.wantsMenuBarListing {
+                if self.isVisible, selection.wantsMenuBarListing {
                     self.refreshMenuBarItems()
                 }
                 if let id = selection.moduleID {
@@ -59,11 +60,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     self.state.configureNode = nil
                     self.state.configureFailure = nil
                     self.state.configureIsLoading = false
-                    self.loadCodeIfNeeded(for: id, force: false)
-                    // @Published emits in willSet before `state.selection` updates; pass allowPendingSelection
-                    // so the async fetch runs instead of returning early against the previous selection.
-                    self.refreshPreview(for: id, allowPendingSelection: true)
-                    self.refreshConfigure(for: id, allowPendingSelection: true)
+                    if self.isVisible {
+                        self.loadCodeIfNeeded(for: id, force: false)
+                        // @Published emits in willSet before `state.selection` updates; pass allowPendingSelection
+                        // so the async fetch runs instead of returning early against the previous selection.
+                        self.refreshPreview(for: id, allowPendingSelection: true)
+                        self.refreshConfigure(for: id, allowPendingSelection: true)
+                    }
                 } else {
                     self.state.previewPanelNode = nil
                     self.state.previewPanelFailure = nil
@@ -76,6 +79,18 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     }
 
     var isVisible: Bool { window?.isVisible == true }
+
+    /// True only when the main window is on screen, unminiaturized, and not completely occluded by other windows.
+    var isActivelyVisible: Bool {
+        guard let window else { return false }
+        return window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+    }
+
+    private func makeContentView() -> NSView {
+        NSHostingView(
+            rootView: MainWindowView(app: app, controller: self, model: app.model, jobs: app.host.jobs, state: state)
+        )
+    }
 
     func show(
         _ destination: MainWindowSection? = nil,
@@ -117,9 +132,7 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             window.collectionBehavior.insert(.fullScreenPrimary)
             window.delegate = self
-            window.contentView = NSHostingView(
-                rootView: MainWindowView(app: app, controller: self, model: app.model, jobs: app.host.jobs, state: state)
-            )
+            window.contentView = makeContentView()
             if !window.setFrameUsingName("LintelMain") {
                 if !window.setFrameUsingName("LintelStudio") {
                     window.center()
@@ -127,13 +140,17 @@ final class MainWindowController: NSObject, NSWindowDelegate {
             }
             window.setFrameAutosaveName("LintelMain")
             self.window = window
+        } else if window?.contentView == nil {
+            window?.contentView = makeContentView()
         }
 
+        app.model.studioFocusedModuleID = state.selection.moduleID
         app.adoption.wantsListing = state.selection.wantsMenuBarListing
-        refresh()
-        syncTimer()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        app.host.setInspectedModule(state.selection.moduleID)
+        refresh()
+        syncTimer()
         if focusChat || draft != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
                 self?.app.model.chatFocusRequests += 1
@@ -191,13 +208,15 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         if app.model.layout.isWidget(id) || app.model.slot(id)?.chip == nil {
             app.host.renderChip(id)
         }
-        state.previewIsLoading = true
+        if state.previewPanelNode == nil {
+            state.previewIsLoading = true
+        }
         Task {
             let result = await app.host.previewPanel(of: id)
             guard state.selection.moduleID == id else { return }
-            state.previewIsLoading = false
-            state.previewPanelNode = result.node
-            state.previewPanelFailure = result.failure
+            if state.previewIsLoading { state.previewIsLoading = false }
+            if state.previewPanelNode != result.node { state.previewPanelNode = result.node }
+            if state.previewPanelFailure != result.failure { state.previewPanelFailure = result.failure }
         }
     }
 
@@ -272,12 +291,12 @@ final class MainWindowController: NSObject, NSWindowDelegate {
 
     private func syncTimer(for selection: MainWindowSection? = nil) {
         let activeSelection = selection ?? state.selection
-        let shouldRun = isVisible && activeSelection.wantsLivePreviewTimer
+        let shouldRun = isActivelyVisible && activeSelection.wantsLivePreviewTimer
         if shouldRun {
             guard refreshTimer == nil else { return }
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            let timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, self.isVisible, self.state.selection.wantsLivePreviewTimer else {
+                    guard let self, self.isActivelyVisible, self.state.selection.wantsLivePreviewTimer else {
                         self?.stopTimer()
                         return
                     }
@@ -290,6 +309,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
                     }
                 }
             }
+            timer.tolerance = 1
+            refreshTimer = timer
         } else {
             stopTimer()
         }
@@ -300,9 +321,29 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         refreshTimer = nil
     }
 
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        let active = isActivelyVisible
+        app.host.setInspectedModule(active ? state.selection.moduleID : nil)
+        syncTimer()
+    }
+
+    func windowDidMiniaturize(_ notification: Notification) {
+        app.host.setInspectedModule(nil)
+        stopTimer()
+    }
+
+    func windowDidDeminiaturize(_ notification: Notification) {
+        app.host.setInspectedModule(state.selection.moduleID)
+        syncTimer()
+    }
+
     func windowWillClose(_ notification: Notification) {
         app.adoption.wantsListing = false
+        app.model.studioFocusedModuleID = nil
+        app.host.setInspectedModule(nil)
         stopTimer()
+        // Tear down the SwiftUI hosting tree while closed so BarModel ticks never redraw a hidden window.
+        window?.contentView = nil
     }
 }
 

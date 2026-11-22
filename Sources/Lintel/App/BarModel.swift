@@ -181,18 +181,32 @@ final class CarriedPointer: ObservableObject {
 
 @MainActor
 final class BarModel: ObservableObject {
-    @Published var theme = Theme()
-    @Published var layout = BarLayout()
-    @Published var settings = AppSettings()
-    @Published var slots: [Slot] = []
-    @Published var isActive = false
+    @Published var theme = Theme() {
+        didSet { invalidateHitTestCache() }
+    }
+    @Published var layout = BarLayout() {
+        didSet { invalidateHitTestCache() }
+    }
+    @Published var settings = AppSettings() {
+        didSet { invalidateHitTestCache() }
+    }
+    @Published var slots: [Slot] = [] {
+        didSet { invalidateHitTestCache() }
+    }
+    @Published var isActive = false {
+        didSet { invalidateHitTestCache() }
+    }
     @Published var visibility = BarVisibility()
     var isHidden: Bool { visibility.isHidden }
     @Published var topRowMinHeight: CGFloat = 0
     /// The first row lives in a system menu bar item instead of the bar's window.
-    @Published var isFirstRowInMenuBar = false
+    @Published var isFirstRowInMenuBar = false {
+        didSet { invalidateHitTestCache() }
+    }
     /// The width free for the menu bar row beside other apps' items.
-    @Published var menuBarRowBudget = CGFloat.greatestFiniteMagnitude
+    @Published var menuBarRowBudget = CGFloat.greatestFiniteMagnitude {
+        didSet { invalidateHitTestCache() }
+    }
     @Published var maxBarWidth: CGFloat = 1200
     @Published var panel: PanelState?
     @Published var chat: [ChatMessage] = []
@@ -203,7 +217,10 @@ final class BarModel: ObservableObject {
     @Published var engineName = ""
     @Published var studioFocusedModuleID: String?
     @Published var rearrangement: Rearrangement? {
-        didSet { if (oldValue == nil) != (rearrangement == nil) { onRearrangingChanged() } }
+        didSet {
+            invalidateHitTestCache()
+            if (oldValue == nil) != (rearrangement == nil) { onRearrangingChanged() }
+        }
     }
     /// Kept outside the model's own changes: the pointer moves every frame of a drag, and every view observing the
     /// model would otherwise be rebuilt each time.
@@ -223,7 +240,9 @@ final class BarModel: ObservableObject {
         didSet { if oldValue != temporaryExpandedWidget { onResizingChanged() } }
     }
     /// ⌘ is held over the open bar: every row shows the divider that splits its pinned modules from the rest.
-    @Published var showsPinDividers = false
+    @Published var showsPinDividers = false {
+        didSet { invalidateHitTestCache() }
+    }
     /// The bar was opened with the keyboard shortcut, so its keys move `keyboardSelection` and act on that module.
     var isDrivenByKeyboard = false {
         didSet { if !isDrivenByKeyboard { keyboardSelection = nil } }
@@ -259,8 +278,33 @@ final class BarModel: ObservableObject {
 
     private var reportedFrames: [String: (frame: CGRect, isInMenuBar: Bool)] = [:]
     private var reportedWidgetFrames: [String: CGRect] = [:]
+    private var cachedVisibleChipIDs: Set<String>?
+    private var cachedVisibleWidgetIDs: Set<String>?
     /// Per-widget finite natural max height (nil or non-finite when the widget contains an unbounded flexible view like chart/app/web).
     private var reportedMaxContentHeights: [String: CGFloat] = [:]
+
+    private func invalidateHitTestCache() {
+        cachedVisibleChipIDs = nil
+        cachedVisibleWidgetIDs = nil
+    }
+
+    private func currentVisibleChipIDs() -> Set<String> {
+        if let cached = cachedVisibleChipIDs { return cached }
+        let ids = Set(visibleRows.joined().map(\.id))
+        cachedVisibleChipIDs = ids
+        return ids
+    }
+
+    private func currentVisibleWidgetIDs() -> Set<String> {
+        if let cached = cachedVisibleWidgetIDs { return cached }
+        let ids = Set(visibleWidgets.map(\.slot.id))
+        cachedVisibleWidgetIDs = ids
+        return ids
+    }
+
+    var hasVisibleWidgets: Bool {
+        !currentVisibleWidgetIDs().isEmpty
+    }
     /// The top Y of the widget shelf in `barSpace`, used to convert drag points and detect collapse-to-chip drops.
     var shelfOriginInBarSpace: CGPoint = .zero
     /// Screen size for capping freeform widget growth.
@@ -282,7 +326,12 @@ final class BarModel: ObservableObject {
     }
 
     func report(frame: CGRect, of id: String, isInMenuBar: Bool) {
+        let old = reportedFrames[id]
+        if old?.frame == frame && old?.isInMenuBar == isInMenuBar { return }
         reportedFrames[id] = (frame, isInMenuBar)
+        if isInMenuBar || old?.isInMenuBar == true, old?.frame.width != frame.width {
+            cachedVisibleChipIDs = nil
+        }
     }
 
     func reportWidget(frame: CGRect, of id: String) {
@@ -318,8 +367,8 @@ final class BarModel: ObservableObject {
 
     /// True if `barPoint` (in bar window top-left coordinates) hits a visible desktop widget.
     func isPointInWidget(_ barPoint: CGPoint) -> Bool {
-        for entry in visibleWidgets {
-            if let rect = reportedWidgetFrames[entry.slot.id], rect.insetBy(dx: -6, dy: -6).contains(barPoint) {
+        for id in currentVisibleWidgetIDs() {
+            if let rect = reportedWidgetFrames[id], rect.insetBy(dx: -6, dy: -6).contains(barPoint) {
                 return true
             }
         }
@@ -334,7 +383,7 @@ final class BarModel: ObservableObject {
 
     /// True if `barPoint` (in bar window top-left coordinates) hits a visible chip in the bar window.
     func isPointInBarChip(_ barPoint: CGPoint) -> Bool {
-        let chipKeys = Set(visibleRows.joined().map(\.id))
+        let chipKeys = currentVisibleChipIDs()
         for (id, entry) in reportedFrames where !entry.isInMenuBar && chipKeys.contains(id) {
             if entry.frame.insetBy(dx: -4, dy: -4).contains(barPoint) {
                 return true

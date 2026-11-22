@@ -101,9 +101,11 @@ final class PerfRecorder {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         prune()
         _ = cpuPercent(of: getpid())
-        timer = Timer.scheduledTimer(withTimeInterval: Self.interval, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.write() }
         }
+        timer.tolerance = 5
+        self.timer = timer
         watchForStalls()
     }
 
@@ -176,7 +178,7 @@ final class PerfRecorder {
     }
 
     private nonisolated static func pingMain(from queue: DispatchQueue) {
-        queue.asyncAfter(deadline: .now() + 0.1) {
+        queue.asyncAfter(deadline: .now() + 0.5) {
             let posted = DispatchTime.now().uptimeNanoseconds
             DispatchQueue.main.async {
                 let delay = Double(DispatchTime.now().uptimeNanoseconds - posted) / 1e9

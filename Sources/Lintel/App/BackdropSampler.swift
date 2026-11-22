@@ -29,8 +29,7 @@ final class BackdropSampler {
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.requestSample(after: 0)
-                self?.requestSample(after: 0.3)
+                self?.requestSample(after: 0.25)
             }
         })
         for name in [
@@ -105,12 +104,24 @@ final class BackdropSampler {
             }
             return
         }
-        if timer == nil {
-            timer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.triggerCapture() }
+        // Native CABackdropLayer luma sensors handle real-time brightness tracking without Screen Recording.
+        // Only run a low-frequency hue-tint fallback timer when Screen Recording is actually granted.
+        if CGPreflightScreenCaptureAccess() {
+            if timer == nil {
+                let fallback = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.triggerCapture() }
+                }
+                fallback.tolerance = 5.0
+                timer = fallback
+            }
+            requestSample(after: 0.05)
+        } else {
+            timer?.invalidate()
+            timer = nil
+            if !model.adaptiveBackdrop.isEmpty {
+                model.adaptiveBackdrop = AdaptiveBackdropState()
             }
         }
-        requestSample(after: 0.05)
     }
 
     private func triggerCapture() {

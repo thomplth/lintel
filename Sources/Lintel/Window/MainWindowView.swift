@@ -184,8 +184,20 @@ private struct MainWindowSidebar: View {
                 if !sidebarListings.isEmpty {
                     Section("Active Modules") {
                         ForEach(sidebarListings) { listing in
-                            SidebarModuleRow(app: app, model: model, jobs: jobs, listing: listing)
-                                .tag(MainWindowSection.module(listing.id))
+                            let liveSlot = model.slot(listing.id)
+                            let moduleJobs = jobs.snapshots(for: listing.id)
+                            SidebarModuleRow(
+                                listing: listing,
+                                liveNeedsApproval: liveSlot?.needsApproval ?? listing.needsApproval,
+                                liveFailure: liveSlot?.failure ?? listing.failure,
+                                isHiddenFromBar: listing.isEnabled && model.layout.isHidden(listing.id),
+                                jobCount: moduleJobs.count,
+                                hasFailedJob: moduleJobs.contains { $0.effectiveStatus == .failed },
+                                hasRunningJob: moduleJobs.contains { $0.effectiveStatus == .running },
+                                refreshSeconds: app.host.manifest(of: listing.id)?.refreshSeconds
+                            )
+                            .equatable()
+                            .tag(MainWindowSection.module(listing.id))
                         }
                     }
                 }
@@ -230,32 +242,31 @@ private struct MainWindowSidebar: View {
     }
 }
 
-private struct SidebarModuleRow: View {
-    let app: AppController
-    @ObservedObject var model: BarModel
-    @ObservedObject var jobs: JobHost
+private struct SidebarModuleRow: View, Equatable {
     let listing: ModuleListing
-
-    private var moduleJobs: [JobSnapshot] { jobs.snapshots(for: listing.id) }
-    private var liveNeedsApproval: Bool { model.slot(listing.id)?.needsApproval ?? listing.needsApproval }
-    private var liveFailure: String? { model.slot(listing.id)?.failure ?? listing.failure }
-    private var isHiddenFromBar: Bool { listing.isEnabled && model.layout.isHidden(listing.id) }
+    let liveNeedsApproval: Bool
+    let liveFailure: String?
+    let isHiddenFromBar: Bool
+    let jobCount: Int
+    let hasFailedJob: Bool
+    let hasRunningJob: Bool
+    let refreshSeconds: Double?
 
     private var statusColor: Color {
-        if liveFailure != nil || moduleJobs.contains(where: { $0.effectiveStatus == .failed }) { return .red }
+        if liveFailure != nil || hasFailedJob { return .red }
         if liveNeedsApproval { return .orange }
         if isHiddenFromBar { return .secondary }
-        if moduleJobs.contains(where: { $0.effectiveStatus == .running }) { return .blue }
+        if hasRunningJob { return .blue }
         return listing.isEnabled ? .green : .secondary.opacity(0.45)
     }
 
     private var trailingText: String {
         if isHiddenFromBar { return "hidden" }
-        if !moduleJobs.isEmpty {
-            return moduleJobs.count == 1 ? "1 job" : "\(moduleJobs.count) jobs"
+        if jobCount > 0 {
+            return jobCount == 1 ? "1 job" : "\(jobCount) jobs"
         }
-        if let manifest = app.host.manifest(of: listing.id) {
-            let s = Int(manifest.refreshSeconds)
+        if let refreshSeconds {
+            let s = Int(refreshSeconds)
             return s >= 60 && s % 60 == 0 ? "\(s / 60)m" : "\(s)s"
         }
         return listing.isEnabled ? "" : "off"

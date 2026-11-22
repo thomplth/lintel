@@ -258,7 +258,11 @@ final class MenuBarAdoption {
     private var isScanning = false
     private var isRevealing = false
     /// Settings and chat need the full list even when nothing is adopted yet.
-    var wantsListing = false
+    var wantsListing = false {
+        didSet {
+            if wantsListing != oldValue { syncTimer() }
+        }
+    }
 
     private var knownFile: URL { home.root.appending(path: "menu-bar-items.json") }
     private var picturesFolder: URL { home.root.appending(path: "MenuBarPictures") }
@@ -278,11 +282,24 @@ final class MenuBarAdoption {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.scanIfNeeded(force: false) }
             }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.scanIfNeeded(force: false) }
-        }
         refreshSlots()
+        syncTimer()
         scanIfNeeded(force: false)
+    }
+
+    private func syncTimer() {
+        let needsPolling = wantsListing || !adoptedKeys.isEmpty
+        if needsPolling {
+            guard timer == nil else { return }
+            let scheduled = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scanIfNeeded(force: false) }
+            }
+            scheduled.tolerance = 3
+            timer = scheduled
+        } else {
+            timer?.invalidate()
+            timer = nil
+        }
     }
 
     var adoptedKeys: [String] {
@@ -348,6 +365,7 @@ final class MenuBarAdoption {
             slots.append(slot)
         }
         if slots != model.slots { model.slots = slots }
+        syncTimer()
     }
 
     /// Adopted items show their pictures from the system menu bar, which change as the items do: a clock ticks, a

@@ -467,21 +467,24 @@ struct WidgetCardView: View, Equatable {
                     }
                 }
                 .background {
-                    // Measure true finite natural height at the current width so ResizeDrag can rubber-band cleanly at zero-void ceiling.
+                    // Measure true finite natural height only while interactive (hovered, resizing, or peek)
+                    // so idle desktop widgets do not duplicate their entire NodeView subtree on every update.
                     if !hasUnbounded {
-                        AdaptiveStackLayout(spacing: gap, alignment: .leading) {
-                            ForEach(Array(children.enumerated()), id: \.offset) { child in
-                                NodeView(node: child.element, context: context)
-                                    .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
-                                    .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
+                        if isHovered || isResizingThis || isPeek {
+                            AdaptiveStackLayout(spacing: gap, alignment: .leading) {
+                                ForEach(Array(children.enumerated()), id: \.offset) { child in
+                                    NodeView(node: child.element, context: context)
+                                        .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
+                                        .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
+                                }
                             }
-                        }
-                        .frame(width: innerWidth)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .hidden()
-                        .allowsHitTesting(false)
-                        .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
-                            model.reportWidgetMaxContentHeight(ceil(h + pad * 2), of: slot.id)
+                            .frame(width: innerWidth)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .hidden()
+                            .allowsHitTesting(false)
+                            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { h in
+                                model.reportWidgetMaxContentHeight(ceil(h + pad * 2), of: slot.id)
+                            }
                         }
                     } else {
                         Color.clear.onAppear { model.reportWidgetMaxContentHeight(nil, of: slot.id) }
