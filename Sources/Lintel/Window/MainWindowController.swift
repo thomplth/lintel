@@ -44,31 +44,35 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     init(app: AppController) {
         self.app = app
         super.init()
-        selectionCancellable = state.$selection.sink { [weak self] selection in
-            guard let self else { return }
-            self.app.model.studioFocusedModuleID = selection.moduleID
-            self.app.adoption.wantsListing = self.isVisible && selection.wantsMenuBarListing
-            if selection.wantsMenuBarListing {
-                self.refreshMenuBarItems()
+        selectionCancellable = state.$selection
+            .removeDuplicates()
+            .sink { [weak self] selection in
+                guard let self else { return }
+                self.app.model.studioFocusedModuleID = selection.moduleID
+                self.app.adoption.wantsListing = self.isVisible && selection.wantsMenuBarListing
+                if selection.wantsMenuBarListing {
+                    self.refreshMenuBarItems()
+                }
+                if let id = selection.moduleID {
+                    self.state.previewPanelNode = nil
+                    self.state.previewPanelFailure = nil
+                    self.state.configureNode = nil
+                    self.state.configureFailure = nil
+                    self.state.configureIsLoading = false
+                    self.loadCodeIfNeeded(for: id, force: false)
+                    // @Published emits in willSet before `state.selection` updates; pass allowPendingSelection
+                    // so the async fetch runs instead of returning early against the previous selection.
+                    self.refreshPreview(for: id, allowPendingSelection: true)
+                    self.refreshConfigure(for: id, allowPendingSelection: true)
+                } else {
+                    self.state.previewPanelNode = nil
+                    self.state.previewPanelFailure = nil
+                    self.state.configureNode = nil
+                    self.state.configureFailure = nil
+                    self.state.configureIsLoading = false
+                }
+                self.syncTimer(for: selection)
             }
-            if let id = selection.moduleID {
-                self.state.previewPanelNode = nil
-                self.state.previewPanelFailure = nil
-                self.state.configureNode = nil
-                self.state.configureFailure = nil
-                self.state.configureIsLoading = false
-                self.loadCodeIfNeeded(for: id, force: false)
-                self.refreshPreview(for: id)
-                self.refreshConfigure(for: id)
-            } else {
-                self.state.previewPanelNode = nil
-                self.state.previewPanelFailure = nil
-                self.state.configureNode = nil
-                self.state.configureFailure = nil
-                self.state.configureIsLoading = false
-            }
-            self.syncTimer()
-        }
     }
 
     var isVisible: Bool { window?.isVisible == true }
@@ -182,8 +186,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    func refreshPreview(for id: String) {
-        guard state.selection.moduleID == id else { return }
+    func refreshPreview(for id: String, allowPendingSelection: Bool = false) {
+        guard allowPendingSelection || state.selection.moduleID == id else { return }
         if app.model.layout.isWidget(id) || app.model.slot(id)?.chip == nil {
             app.host.renderChip(id)
         }
@@ -197,8 +201,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    func refreshConfigure(for id: String) {
-        guard state.selection.moduleID == id else { return }
+    func refreshConfigure(for id: String, allowPendingSelection: Bool = false) {
+        guard allowPendingSelection || state.selection.moduleID == id else { return }
         guard app.host.hasConfigure(of: id) else {
             state.configureIsLoading = false
             state.configureNode = nil
@@ -266,8 +270,9 @@ final class MainWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func syncTimer() {
-        let shouldRun = isVisible && state.selection.wantsLivePreviewTimer
+    private func syncTimer(for selection: MainWindowSection? = nil) {
+        let activeSelection = selection ?? state.selection
+        let shouldRun = isVisible && activeSelection.wantsLivePreviewTimer
         if shouldRun {
             guard refreshTimer == nil else { return }
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in

@@ -497,6 +497,14 @@ struct ModuleInspectorPane: View {
             }
         }
         .navigationTitle(listing?.title ?? moduleID)
+        .task(id: moduleID) {
+            if state.configureNode == nil, state.configureFailure == nil, !state.configureIsLoading, app.host.hasConfigure(of: moduleID) {
+                controller.refreshConfigure(for: moduleID)
+            }
+            if state.previewPanelNode == nil, state.previewPanelFailure == nil, !state.previewIsLoading {
+                controller.refreshPreview(for: moduleID)
+            }
+        }
     }
 
     private func inspectorHeader(_ listing: ModuleListing) -> some View {
