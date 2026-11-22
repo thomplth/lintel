@@ -20,6 +20,7 @@ final class AppController {
     private(set) var bar: BarWindowController?
     private(set) var panelWindow: PanelWindowController?
     private(set) var mainWindow: MainWindowController?
+    private var backdropSampler: BackdropSampler?
     private var control: ControlChannel?
     let pointerTap = PointerTap()
     private(set) lazy var perf = PerfRecorder(home: home, runnerPID: { [runner] in runner.processIdentifier })
@@ -115,6 +116,7 @@ final class AppController {
             var settings = self.model.settings
             settings.anchor = anchor
             self.host.update(settings)
+            self.backdropSampler?.requestSample(after: 0.15)
         }
         bar.onActiveChanged = { [weak self] isActive in
             if isActive {
@@ -136,6 +138,9 @@ final class AppController {
         installEscapeHandling()
         installBarKeys()
         adoption.start()
+        let sampler = BackdropSampler(model: model, bar: bar, panelWindow: panelWindow)
+        sampler.start()
+        backdropSampler = sampler
         control = ControlChannel(app: self)
         perf.start()
         if Perf.isEnabled { modelChanges = model.objectWillChange.sink { Perf.count("model.change") } }

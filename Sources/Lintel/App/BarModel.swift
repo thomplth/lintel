@@ -75,6 +75,21 @@ struct TemporaryWidgetExpansion: Equatable {
     var box: WidgetBox
 }
 
+/// Sampled desktop backdrop surfaces for the `adaptive` Liquid Glass material.
+struct AdaptiveBackdropState: Equatable {
+    var defaultSurface: AdaptiveSurface?
+    var slotSurfaces: [String: AdaptiveSurface] = [:]
+    var panelSurface: AdaptiveSurface?
+
+    var isEmpty: Bool {
+        defaultSurface == nil && slotSurfaces.isEmpty && panelSurface == nil
+    }
+
+    func surface(for slotID: String) -> AdaptiveSurface? {
+        slotSurfaces[slotID] ?? defaultSurface
+    }
+}
+
 /// Live freeform resize state kept outside BarModel so 120Hz drag ticks never redraw unrelated chips or widgets.
 @MainActor
 final class ResizeDragState: ObservableObject {
@@ -225,6 +240,8 @@ final class BarModel: ObservableObject {
     private static let rememberedSelectionKey = "keyboardSelection"
     /// Counts each step that tried to leave the top or bottom row, so the selection ring can nudge that way.
     @Published private(set) var selectionBump = SelectionBump(direction: .down, count: 0)
+    /// Live sampled backdrop tones/tints used only when the theme employs the `adaptive` glass material.
+    @Published var adaptiveBackdrop = AdaptiveBackdropState()
     let panelFocus = PanelFocusMemory()
 
     var animatesSelection: Bool {
@@ -475,7 +492,7 @@ final class BarModel: ObservableObject {
     var menuBarFit: MenuBarFit {
         guard isFirstRowInMenuBar, let first = arrangedRows.first else { return MenuBarFit() }
         let frames = slotFrames
-        let hasCapsules = [SurfaceMaterial.glass, .solid].contains(SurfaceMaterial(active: theme.activeMaterial))
+        let hasCapsules = SurfaceMaterial(active: theme.activeMaterial).hasCapsule
         let spacing = hasCapsules ? max(theme.moduleSpacing * 0.5, 4) : theme.moduleSpacing
         let padding: CGFloat = 8
         return MenuBarFit(

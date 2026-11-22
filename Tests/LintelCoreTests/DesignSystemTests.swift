@@ -188,10 +188,22 @@ private func evaluate(_ script: String) -> JSValue {
     }
 
     @Test func onlyTheHaloPresetTakesMeridiansLargerRegularText() {
-        for name in ["glass", "ink", "paper"] {
+        for name in ["glass", "adaptive", "ink", "paper"] {
             #expect(Theme.preset(name)?.fontSize == 14)
             #expect(Theme.preset(name)?.fontWeight == "medium")
         }
+    }
+
+    @Test func adaptivePresetUsesAdaptiveMaterialsAndCapsules() throws {
+        let theme = try #require(Theme.preset("adaptive"))
+        #expect(theme.idleMaterial == "adaptive")
+        #expect(theme.activeMaterial == "adaptive")
+        #expect(theme.panelMaterial == "adaptive")
+        #expect(theme.cornerStyle == "capsule")
+        #expect(theme.colorScheme == "auto")
+        #expect(theme.usesAdaptiveBackdrop)
+        #expect(!Theme.preset("glass")!.usesAdaptiveBackdrop)
+        #expect(try JSONDecoder().decode(Theme.self, from: JSONEncoder().encode(theme)) == theme)
     }
 
     @Test func theHaloShadowRadiusIsHalfTheBlurSoItMatchesAnAppKitShadowOfThatBlur() {

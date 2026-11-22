@@ -544,6 +544,7 @@ struct PresetPicker: View {
     static let blurbs = [
         "halo": "Plain text with a shadow; glass on hover",
         "glass": "Liquid Glass capsules, always",
+        "adaptive": "Liquid Glass that blends with the desktop behind it",
         "ink": "Solid dark capsules and panels",
         "paper": "Solid light, serif",
         "terminal": "Monospaced green on black",
@@ -558,22 +559,53 @@ struct PresetPicker: View {
                     app.host.update(theme)
                 } label: {
                     VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "cpu")
-                            Text("12%  09:41")
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
+                        if name == "adaptive" {
+                            HStack(spacing: 6) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "cpu")
+                                    Text("12%")
+                                }
+                                .font(context.font())
+                                .foregroundStyle(Color.black.opacity(0.85))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(.white.opacity(0.62), in: Capsule())
+                                .overlay(Capsule().stroke(.black.opacity(0.08), lineWidth: 0.5))
+
+                                Text("09:41")
+                                    .font(context.font())
+                                    .foregroundStyle(Color.white.opacity(0.92))
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(.black.opacity(0.45), in: Capsule())
+                                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                            }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background {
+                                HStack(spacing: 0) {
+                                    Color(white: 0.96)
+                                    Color(white: 0.10)
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        } else {
+                            HStack(spacing: 5) {
+                                Image(systemName: "cpu")
+                                Text("12%  09:41")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            .font(context.font())
+                            .foregroundStyle(theme.idleMaterial == "glass" ? Color.white : context.primary)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(
+                                theme.idleMaterial == "solid" ? AnyShapeStyle(context.surfaceFill)
+                                    : theme.idleMaterial == "glass" ? AnyShapeStyle(.white.opacity(0.25)) : AnyShapeStyle(.clear),
+                                in: context.chipShape
+                            )
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(LinearGradient(colors: [.orange, .pink, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 8))
                         }
-                        .font(context.font())
-                        .foregroundStyle(theme.idleMaterial == "glass" ? Color.white : context.primary)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(
-                            theme.idleMaterial == "solid" ? AnyShapeStyle(context.surfaceFill)
-                                : theme.idleMaterial == "glass" ? AnyShapeStyle(.white.opacity(0.25)) : AnyShapeStyle(.clear),
-                            in: context.chipShape
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(LinearGradient(colors: [.orange, .pink, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 8))
                         Text(name.capitalized).fontWeight(.medium)
                         Text(Self.blurbs[name] ?? "").font(.footnote).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
                     }
@@ -597,7 +629,23 @@ struct AppearanceSettingsPane: View {
             VStack(alignment: .leading, spacing: 18) {
                 PaneHeader("Appearance", subtitle: "Pick a preset or fine-tune typography, materials, spacing, and colors across every module.")
 
-                WindowCard(title: "Design language") { PresetPicker(app: app, model: model) }
+                WindowCard(title: "Design language") {
+                    PresetPicker(app: app, model: model)
+                    if model.theme.usesAdaptiveBackdrop && !CGPreflightScreenCaptureAccess() {
+                        Divider()
+                        HStack(spacing: 10) {
+                            Image(systemName: "rectangle.dashed.badge.record")
+                                .foregroundStyle(.secondary)
+                            Text("Grant Screen Recording so Adaptive Glass can sample the windows behind the bar. Without it, capsules follow macOS light or dark mode.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Allow…") { _ = CGRequestScreenCaptureAccess() }
+                                .controlSize(.small)
+                        }
+                    }
+                }
 
                 WindowCard(
                     title: "Details",

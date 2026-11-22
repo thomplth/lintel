@@ -3,16 +3,23 @@ import LintelCore
 import ScreenCaptureKit
 import SwiftUI
 
+private final class ActiveStageWindow: NSWindow {
+    @objc var _hasActiveAppearance: Bool { true }
+    @objc var _hasActiveAppearanceIgnoringKeyFocus: Bool { true }
+}
+
 /// A stand-in desktop for looking at the bar and a panel over busy content without touching the real desktop.
 /// The window sits below ordinary windows and is photographed on its own, so nothing on screen is disturbed or captured.
 @MainActor
 final class Stage {
     private let window: NSWindow
     private let model: BarModel
+    private let backdrop: Backdrop.Style
 
     init(model: BarModel, size: CGSize, backdrop: Backdrop.Style, matrixSlotID: String? = nil) {
         self.model = model
-        window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        self.backdrop = backdrop
+        window = ActiveStageWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         window.isReleasedWhenClosed = false
         window.hasShadow = false
@@ -52,6 +59,17 @@ final class Stage {
 
     func close() {
         window.orderOut(nil)
+    }
+
+    /// Populates `model.adaptiveBackdrop` from the stand-in backdrop so staged `adaptive/*` shots match live sampling.
+    func updateAdaptiveBackdrop() {
+        guard model.theme.usesAdaptiveBackdrop else {
+            if !model.adaptiveBackdrop.isEmpty { model.adaptiveBackdrop = AdaptiveBackdropState() }
+            return
+        }
+        let sample = backdrop.representativeSample(anchor: model.settings.anchor)
+        let surface = AdaptiveBackdrop.surface(for: sample)
+        model.adaptiveBackdrop = AdaptiveBackdropState(defaultSurface: surface, slotSurfaces: [:], panelSurface: surface)
     }
 }
 
@@ -128,6 +146,7 @@ private struct MatrixStageView: View {
                 isSelected: false,
                 isResizingThis: false,
                 isDraggingThis: false,
+                adaptiveSurface: model.theme.panelMaterial == "adaptive" ? model.adaptiveBackdrop.defaultSurface : nil,
                 columnCount: 1,
                 stackCount: 1,
                 model: model
@@ -140,6 +159,20 @@ private struct MatrixStageView: View {
 struct Backdrop: View {
     enum Style: String {
         case photo, light, dark, document
+
+        func representativeSample(anchor: BarAnchor) -> BackdropSample {
+            switch self {
+            case .light: BackdropSample(red: 0.96, green: 0.96, blue: 0.96)
+            case .document: BackdropSample(red: 1.0, green: 1.0, blue: 1.0)
+            case .dark: BackdropSample(red: 0.08, green: 0.08, blue: 0.08)
+            case .photo:
+                switch anchor {
+                case .left: BackdropSample(red: 0.95, green: 0.56, blue: 0.34)
+                case .center: BackdropSample(red: 0.55, green: 0.24, blue: 0.50)
+                case .right: BackdropSample(red: 0.14, green: 0.15, blue: 0.42)
+                }
+            }
+        }
     }
 
     let style: Style

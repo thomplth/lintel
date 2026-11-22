@@ -82,7 +82,9 @@ public struct ToneChoice: Equatable, Sendable {
 }
 
 extension Theme {
-    public var idleLook: Look { Look(rawValue: idleMaterial) ?? .halo }
+    public var idleLook: Look {
+        idleMaterial == "adaptive" ? .glass : (Look(rawValue: idleMaterial) ?? .halo)
+    }
 
     public var activeLook: Look {
         switch activeMaterial {

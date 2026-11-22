@@ -44,6 +44,9 @@ final class Hotkey {
 
 final class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+    /// Keep Apple's Liquid Glass in its focused, translucent appearance even while Lintel runs in the background.
+    @objc var _hasActiveAppearance: Bool { true }
+    @objc var _hasActiveAppearanceIgnoringKeyFocus: Bool { true }
 }
 
 final class FirstClickHostingView<Content: View>: NSHostingView<Content> {

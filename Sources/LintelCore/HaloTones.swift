@@ -19,13 +19,29 @@ extension HexColor {
     public func lifted(toLightness floor: Double) -> HexColor {
         let color = OKLCh(self)
         guard color.lightness < floor else { return self }
-        var inGamut = 0.0, outOfGamut = color.chroma
-        if let full = OKLCh(lightness: floor, chroma: outOfGamut, hue: color.hue).displayable { return full }
+        return Self.displayableOKLCh(lightness: floor, chroma: color.chroma, hue: color.hue) ?? self
+    }
+
+    /// Keeps this colour's hue while clamping its perceptual lightness and chroma into displayable sRGB.
+    public func adapted(lightnessRange: ClosedRange<Double>, maxChroma: Double) -> HexColor {
+        let color = OKLCh(self)
+        let clampedLightness = min(max(color.lightness, lightnessRange.lowerBound), lightnessRange.upperBound)
+        let clampedChroma = min(color.chroma, max(0, maxChroma))
+        return Self.displayableOKLCh(lightness: clampedLightness, chroma: clampedChroma, hue: color.hue) ?? self
+    }
+
+    private static func displayableOKLCh(lightness: Double, chroma: Double, hue: Double) -> HexColor? {
+        if let full = OKLCh(lightness: lightness, chroma: chroma, hue: hue).displayable { return full }
+        var inGamut = 0.0, outOfGamut = chroma
         for _ in 0..<24 {
-            let chroma = (inGamut + outOfGamut) / 2
-            if OKLCh(lightness: floor, chroma: chroma, hue: color.hue).displayable != nil { inGamut = chroma } else { outOfGamut = chroma }
+            let candidate = (inGamut + outOfGamut) / 2
+            if OKLCh(lightness: lightness, chroma: candidate, hue: hue).displayable != nil {
+                inGamut = candidate
+            } else {
+                outOfGamut = candidate
+            }
         }
-        return OKLCh(lightness: floor, chroma: inGamut, hue: color.hue).displayable ?? self
+        return OKLCh(lightness: lightness, chroma: inGamut, hue: hue).displayable
     }
 }
 

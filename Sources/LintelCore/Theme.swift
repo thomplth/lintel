@@ -59,9 +59,9 @@ public struct Theme: Equatable, Encodable, Sendable {
         Field(name: "density", kind: .choice(["compact", "regular", "roomy"], \.density), doc: "Padding inside chips and panels. Tighter is compact; airier is roomy."),
         Field(name: "moduleSpacing", kind: .number(0...40, \.moduleSpacing), doc: "Gap between neighbouring items in a row. Tighter is a smaller number."),
         Field(name: "rowSpacing", kind: .number(0...40, \.rowSpacing), doc: "Gap between rows of the bar."),
-        Field(name: "idleMaterial", kind: .choice(["halo", "glass", "solid", "none"], \.idleMaterial), doc: "Look while idle: halo is plain text with a shadow; glass and solid give every item a capsule; none is bare text."),
-        Field(name: "activeMaterial", kind: .choice(["glass", "solid", "plain"], \.activeMaterial), doc: "Look while the pointer is on the bar."),
-        Field(name: "panelMaterial", kind: .choice(["glass", "solid"], \.panelMaterial), doc: "Background of panels."),
+        Field(name: "idleMaterial", kind: .choice(["halo", "glass", "adaptive", "solid", "none"], \.idleMaterial), doc: "Look while idle: halo is plain text with a shadow; glass, adaptive, and solid give every item a capsule; adaptive matches light or dark backgrounds; none is bare text."),
+        Field(name: "activeMaterial", kind: .choice(["glass", "adaptive", "solid", "plain"], \.activeMaterial), doc: "Look while the pointer is on the bar."),
+        Field(name: "panelMaterial", kind: .choice(["glass", "adaptive", "solid"], \.panelMaterial), doc: "Background of panels."),
         Field(name: "surfaceColor", kind: .color(\.surfaceColor), doc: "Fill of the solid material."),
         Field(name: "surfaceOpacity", kind: .number(0.3...1, \.surfaceOpacity), doc: "Opacity of the solid material."),
         Field(name: "cornerStyle", kind: .choice(["capsule", "rounded", "square"], \.cornerStyle), doc: "Corner shape of chips, tiles and panels."),
@@ -73,7 +73,11 @@ public struct Theme: Equatable, Encodable, Sendable {
         Field(name: "motion", kind: .choice(["full", "reduced"], \.motion), doc: "Animated number changes and transitions, or none."),
     ]
 
-    public static let presetNames = ["halo", "glass", "ink", "paper", "terminal"]
+    public static let presetNames = ["halo", "glass", "adaptive", "ink", "paper", "terminal"]
+
+    public var usesAdaptiveBackdrop: Bool {
+        idleMaterial == "adaptive" || activeMaterial == "adaptive" || panelMaterial == "adaptive"
+    }
 
     public static func preset(_ name: String) -> Theme? {
         var theme = Theme()
@@ -85,6 +89,15 @@ public struct Theme: Equatable, Encodable, Sendable {
             theme.fontSize = 14
             theme.fontWeight = "medium"
             theme.idleMaterial = "glass"
+            theme.moduleSpacing = 8
+        case "adaptive":
+            theme.fontSize = 14
+            theme.fontWeight = "medium"
+            theme.idleMaterial = "adaptive"
+            theme.activeMaterial = "adaptive"
+            theme.panelMaterial = "adaptive"
+            theme.cornerStyle = "capsule"
+            theme.colorScheme = "auto"
             theme.moduleSpacing = 8
         case "ink":
             theme.fontSize = 14

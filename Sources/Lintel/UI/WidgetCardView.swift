@@ -234,6 +234,7 @@ struct WidgetCardView: View, Equatable {
     let isDraggingThis: Bool
     var isTemporarilyExpanded: Bool = false
     var cornerOverride: ResizeCorner? = nil
+    var adaptiveSurface: AdaptiveSurface? = nil
     let columnCount: Int
     let stackCount: Int
     let model: BarModel
@@ -261,13 +262,14 @@ struct WidgetCardView: View, Equatable {
                 && lhs.isDraggingThis == rhs.isDraggingThis
                 && lhs.isTemporarilyExpanded == rhs.isTemporarilyExpanded
                 && lhs.cornerOverride == rhs.cornerOverride
+                && lhs.adaptiveSurface == rhs.adaptiveSurface
                 && lhs.columnCount == rhs.columnCount
                 && lhs.stackCount == rhs.stackCount
         }
     }
 
     private var material: SurfaceMaterial {
-        theme.panelMaterial == "solid" ? .solid : .glass
+        SurfaceMaterial(panel: theme.panelMaterial)
     }
 
     private var corner: ResizeCorner {
@@ -293,7 +295,8 @@ struct WidgetCardView: View, Equatable {
             material: material,
             moduleID: slot.id,
             manifest: model.manifestFor(slot.id),
-            widgetBounds: forConfig ? nil : bounds
+            widgetBounds: forConfig ? nil : bounds,
+            adaptiveSurface: material == .adaptive ? adaptiveSurface : nil
         )
         let model = model
         context.panelFocus = model.panelFocus
@@ -418,6 +421,7 @@ struct WidgetCardView: View, Equatable {
         .animation(theme.motion == "full" ? .spring(response: 0.28, dampingFraction: 0.84) : nil, value: isConfiguring)
         .animation(theme.motion == "full" ? .spring(response: 0.22, dampingFraction: 0.82) : nil, value: collapsing)
         .animation(theme.motion == "full" ? .easeOut(duration: 0.16) : nil, value: isHovered)
+        .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)
         .environment(\.colorScheme, context.colorScheme ?? systemScheme)
         .onHover { hovering in
             isHovered = hovering

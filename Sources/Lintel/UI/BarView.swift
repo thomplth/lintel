@@ -42,7 +42,7 @@ struct BarView: View {
         let theme = model.theme
         let metrics = Metrics(theme)
         let material = material
-        let hasCapsules = material == .glass || material == .solid
+        let hasCapsules = material.hasCapsule
         let isInMenuBar = host == .menuBar
         let spacing = max(theme.rowSpacing, hasCapsules ? 3 : 0)
         let hasChips = rows.contains { !$0.isEmpty }
@@ -94,6 +94,7 @@ struct BarView: View {
                             isResizingThis: model.resizingSlotID == entry.slot.id,
                             isDraggingThis: model.draggingWidgetID == entry.slot.id,
                             isTemporarilyExpanded: isExpanded,
+                            adaptiveSurface: theme.panelMaterial == "adaptive" ? model.adaptiveBackdrop.surface(for: entry.slot.id) : nil,
                             columnCount: widgetColumns.count,
                             stackCount: entry.stackCount,
                             model: model
@@ -215,6 +216,7 @@ struct ChipView: View, Equatable {
     let model: BarModel
     let theme: Theme
     let material: SurfaceMaterial
+    let adaptiveSurface: AdaptiveSurface?
     let isActive: Bool
     let isPanelOpen: Bool
     let isLeftForTheCarrier: Bool
@@ -225,6 +227,7 @@ struct ChipView: View, Equatable {
     let isSelected: Bool
     let isResizingThis: Bool
     @Environment(\.isInMenuBar) private var isInMenuBar
+    @Environment(\.colorScheme) private var systemScheme
     @State private var isHovered = false
 
     init(slot: Slot, model: BarModel, material: SurfaceMaterial, isCarried: Bool = false) {
@@ -233,6 +236,7 @@ struct ChipView: View, Equatable {
         self.material = material
         self.isCarried = isCarried
         theme = model.theme
+        adaptiveSurface = material == .adaptive ? model.adaptiveBackdrop.surface(for: slot.id) : nil
         isActive = model.isActive
         isPanelOpen = model.panel?.slotID == slot.id
         isLeftForTheCarrier = !isCarried && model.rearrangement?.key == slot.id
@@ -246,6 +250,7 @@ struct ChipView: View, Equatable {
     nonisolated static func == (lhs: ChipView, rhs: ChipView) -> Bool {
         MainActor.assumeIsolated {
             lhs.model === rhs.model && lhs.slot == rhs.slot && lhs.theme == rhs.theme && lhs.material == rhs.material
+                && lhs.adaptiveSurface == rhs.adaptiveSurface
                 && lhs.isActive == rhs.isActive && lhs.isPanelOpen == rhs.isPanelOpen
                 && lhs.isLeftForTheCarrier == rhs.isLeftForTheCarrier && lhs.isPinned == rhs.isPinned
                 && lhs.pinsOnTheLeft == rhs.pinsOnTheLeft && lhs.anchor == rhs.anchor && lhs.isCarried == rhs.isCarried
@@ -285,8 +290,10 @@ struct ChipView: View, Equatable {
     }
 
     private var chip: some View {
-        let context = RenderContext(theme: theme, surface: .chip, material: material, moduleID: slot.id)
-        let hasCapsule = material == .glass || material == .solid
+        let context = RenderContext(
+            theme: theme, surface: .chip, material: material, moduleID: slot.id, adaptiveSurface: adaptiveSurface
+        )
+        let hasCapsule = material.hasCapsule
         let isOpen = isActive || isInMenuBar
         let isClickable = isOpen && slot.isClickable
         return content(context)
@@ -300,6 +307,8 @@ struct ChipView: View, Equatable {
             }
             .modifier(SurfaceBackground(context: context, material: material, shape: context.chipShape, isInteractive: isClickable))
             .glassEffectTransition(.identity)
+            .environment(\.colorScheme, context.colorScheme ?? systemScheme)
+            .animation(theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)
             .overlay {
                 if hasCapsule, isPanelOpen {
                     context.chipShape.stroke(context.accent.opacity(0.9), lineWidth: 1.5)

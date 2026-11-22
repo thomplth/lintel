@@ -187,7 +187,7 @@ struct SubscriptionCLI {
 
 @Generable
 struct GeneratedThemePatch {
-    @Guide(description: "A whole design language to switch to: halo, glass, ink, paper or terminal. Null unless the user names one or asks for a wholly different look.")
+    @Guide(description: "A whole design language to switch to: halo, glass, adaptive, ink, paper or terminal. Null unless the user names one or asks for a wholly different look.")
     var preset: String?
     @Guide(description: "Text size in points, 9 to 32. Bigger text is a larger number. Null to keep.")
     var fontSize: Double?
@@ -209,7 +209,7 @@ struct GeneratedThemePatch {
     var shadowBlur: Double?
     @Guide(description: "Opacity of the bar while idle, 0.2 to 1. Subtler or fainter is smaller. Null to keep.")
     var idleOpacity: Double?
-    @Guide(description: "Look while the pointer is on the bar: glass, solid or plain. Null to keep.")
+    @Guide(description: "Look while the pointer is on the bar: glass, adaptive, solid or plain. Null to keep.")
     var activeMaterial: String?
 
     var patch: [String: JSONValue] {

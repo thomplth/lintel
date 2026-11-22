@@ -186,6 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let parts = shot.split(separator: "/", maxSplits: 1).map(String.init)
             let state = parts.last ?? "idle"
             app.model.theme = parts.count == 2 ? (Theme.preset(parts[0]) ?? baseTheme) : baseTheme
+            stage.updateAdaptiveBackdrop()
             app.host.closePanel()
             for id in Array(app.model.layout.widgets.keys) {
                 app.host.setWidget(id, to: nil)

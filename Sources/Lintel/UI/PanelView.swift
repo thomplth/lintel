@@ -15,8 +15,9 @@ struct PanelView: View {
     var body: some View {
         if let panel = model.panel {
             let slot = model.slot(panel.slotID)
-            let material: SurfaceMaterial = model.theme.panelMaterial == "solid" ? .solid : .glass
-            let context = makeContext(panel, material: material)
+            let material = SurfaceMaterial(panel: model.theme.panelMaterial)
+            let adaptiveSurface = material == .adaptive ? (model.adaptiveBackdrop.panelSurface ?? model.adaptiveBackdrop.defaultSurface) : nil
+            let context = makeContext(panel, material: material, adaptiveSurface: adaptiveSurface)
             let usesUnifiedWidget = panel.content == .module && slot != nil && slot?.needsApproval == false && (panel.node != nil || panel.isLoading || panel.failure == nil)
             let panelAlignment: Alignment = usesUnifiedWidget
                 ? Alignment(horizontal: panel.resizeCorner == .bottomLeft ? .trailing : .leading, vertical: .top)
@@ -40,6 +41,7 @@ struct PanelView: View {
                         isDraggingThis: false,
                         isTemporarilyExpanded: false,
                         cornerOverride: panel.resizeCorner,
+                        adaptiveSurface: adaptiveSurface,
                         columnCount: 1,
                         stackCount: 1,
                         model: model
@@ -74,6 +76,7 @@ struct PanelView: View {
                     .clipShape(context.panelShape)
                     .shadow(color: .black.opacity(material == .solid ? 0.3 : 0.12), radius: 14, y: 6)
                     .environment(\.colorScheme, context.colorScheme ?? systemScheme)
+                    .animation(model.theme.motion == "full" ? .easeInOut(duration: 0.25) : nil, value: adaptiveSurface)
                     .onGeometryChange(for: CGSize.self, of: { $0.size }, action: onSize)
                 }
             }
@@ -83,10 +86,10 @@ struct PanelView: View {
         }
     }
 
-    private func makeContext(_ panel: PanelState, material: SurfaceMaterial) -> RenderContext {
+    private func makeContext(_ panel: PanelState, material: SurfaceMaterial, adaptiveSurface: AdaptiveSurface?) -> RenderContext {
         var context = RenderContext(
             theme: model.theme, surface: .panel, material: material, moduleID: panel.slotID,
-            manifest: model.manifestFor(panel.slotID)
+            manifest: model.manifestFor(panel.slotID), adaptiveSurface: adaptiveSurface
         )
         let model = model
         context.panelFocus = model.panelFocus

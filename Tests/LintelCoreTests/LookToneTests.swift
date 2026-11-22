@@ -65,6 +65,13 @@ private func parse(tone: JSONValue) -> ParsedView {
 
     @Test func theAssistantHearsNothingAboutTheHaloWhenTheThemeNeverUsesIt() {
         #expect(DesignGuide.lookNote(for: Theme.preset("ink")!) == nil)
+        #expect(DesignGuide.lookNote(for: Theme.preset("adaptive")!) == nil)
+    }
+
+    @Test func adaptiveMaterialMapsToTheGlassLook() {
+        let theme = Theme.preset("adaptive")!
+        #expect(theme.idleLook == .glass)
+        #expect(theme.activeLook == .glass)
     }
 
     @Test func theFixedGuideNoLongerAssumesTheHalo() {

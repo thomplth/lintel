@@ -5,12 +5,17 @@ import SwiftUI
 enum SurfaceMaterial: Equatable {
     case halo
     case glass
+    case adaptive
     case solid
     case bare
+
+    var isGlass: Bool { self == .glass || self == .adaptive }
+    var hasCapsule: Bool { self == .glass || self == .adaptive || self == .solid }
 
     init(idle name: String) {
         switch name {
         case "glass": self = .glass
+        case "adaptive": self = .adaptive
         case "solid": self = .solid
         case "none": self = .bare
         default: self = .halo
@@ -19,8 +24,17 @@ enum SurfaceMaterial: Equatable {
 
     init(active name: String) {
         switch name {
+        case "adaptive": self = .adaptive
         case "solid": self = .solid
         case "plain": self = .halo
+        default: self = .glass
+        }
+    }
+
+    init(panel name: String) {
+        switch name {
+        case "adaptive": self = .adaptive
+        case "solid": self = .solid
         default: self = .glass
         }
     }
@@ -32,6 +46,7 @@ struct RenderContext {
     var metrics: Metrics
     var surface: Surface
     var material: SurfaceMaterial
+    var adaptiveSurface: AdaptiveSurface?
     var moduleID: String
     var manifest: ModuleManifest?
     /// Current widget outer dimensions when rendering inside a freeform desktop/peek widget; nil for bar chips or configure views.
@@ -42,12 +57,13 @@ struct RenderContext {
 
     init(
         theme: Theme, surface: Surface, material: SurfaceMaterial, moduleID: String = "",
-        manifest: ModuleManifest? = nil, widgetBounds: CGSize? = nil
+        manifest: ModuleManifest? = nil, widgetBounds: CGSize? = nil, adaptiveSurface: AdaptiveSurface? = nil
     ) {
         self.theme = theme
         metrics = Metrics(theme)
         self.surface = surface
         self.material = material
+        self.adaptiveSurface = adaptiveSurface
         self.moduleID = moduleID
         self.manifest = manifest
         self.widgetBounds = widgetBounds
@@ -69,10 +85,10 @@ struct RenderContext {
     }
 
     var primary: Color {
-        material == .glass ? .primary : Self.color(hex: theme.textColor)
+        material.isGlass ? .primary : Self.color(hex: theme.textColor)
     }
 
-    var secondary: Color { primary.opacity(surface == .chip && material != .glass ? 0.78 : 0.62) }
+    var secondary: Color { primary.opacity(surface == .chip && !material.isGlass ? 0.78 : 0.62) }
     var tertiary: Color { primary.opacity(0.4) }
     var accent: Color { Self.color(hex: theme.accentColor) }
     var fill: Color { primary.opacity(0.08) }
@@ -88,7 +104,7 @@ struct RenderContext {
         switch tone {
         case nil, .accent: return onAccent
         case .primary:
-            if material == .glass { return Color(nsColor: .windowBackgroundColor) }
+            if material.isGlass { return Color(nsColor: .windowBackgroundColor) }
             return (HexColor(theme.textColor)?.luminance ?? 1) > 0.5 ? .black : .white
         case .yellow, .mint, .cyan: return .black
         default: return .white
@@ -98,7 +114,7 @@ struct RenderContext {
     var look: Look {
         switch material {
         case .halo: .halo
-        case .glass: .glass
+        case .glass, .adaptive: .glass
         case .solid: .solid
         case .bare: .none
         }
@@ -226,8 +242,26 @@ struct RenderContext {
         switch theme.colorScheme {
         case "light": return .light
         case "dark": return .dark
-        default: return nil
+        default:
+            if material == .adaptive, let adaptiveSurface {
+                return adaptiveSurface.tone == .light ? .light : .dark
+            }
+            return nil
         }
+    }
+
+    func adaptiveTintColor(system: ColorScheme) -> Color {
+        if theme.colorScheme == "light" {
+            return Color.white.opacity(AdaptiveBackdrop.defaultTintOpacity)
+        }
+        if theme.colorScheme == "dark" {
+            return Color.black.opacity(AdaptiveBackdrop.defaultTintOpacity)
+        }
+        if let adaptiveSurface {
+            return Color(red: adaptiveSurface.tint.red, green: adaptiveSurface.tint.green, blue: adaptiveSurface.tint.blue)
+                .opacity(adaptiveSurface.tintOpacity)
+        }
+        return (system == .dark ? Color.black : Color.white).opacity(AdaptiveBackdrop.defaultTintOpacity)
     }
 
     static func symbol(_ name: String) -> String {
@@ -240,6 +274,19 @@ struct SurfaceBackground<Outline: Shape>: ViewModifier {
     let material: SurfaceMaterial
     let shape: Outline
     var isInteractive = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var glassStyle: Glass {
+        switch material {
+        case .glass:
+            return isInteractive ? .regular.interactive() : .regular
+        case .adaptive:
+            let tinted = Glass.regular.tint(context.adaptiveTintColor(system: colorScheme))
+            return isInteractive ? tinted.interactive() : tinted
+        case .halo, .solid, .bare:
+            return .identity
+        }
+    }
 
     // One chain for every material rather than a switch: a switch gives each material its own view, so a chip whose
     // material changes as the bar opens or closes would be replaced where it stands instead of moving with the bar.
@@ -248,6 +295,6 @@ struct SurfaceBackground<Outline: Shape>: ViewModifier {
             .shadow(color: .black.opacity(material == .halo ? context.theme.shadowOpacity : 0), radius: material == .halo ? Metrics(context.theme).haloShadowRadius : 0)
             .background(material == .solid ? AnyShapeStyle(context.surfaceFill) : AnyShapeStyle(.clear), in: shape)
             .overlay(shape.stroke(context.primary.opacity(material == .solid ? 0.1 : 0), lineWidth: 0.5))
-            .glassEffect(material == .glass ? isInteractive ? .regular.interactive() : .regular : .identity, in: shape)
+            .glassEffect(glassStyle, in: shape)
     }
 }
