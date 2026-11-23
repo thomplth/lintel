@@ -45,7 +45,7 @@ open build/Lintel.app
 Quit any running instance first (`build/Lintel.app/Contents/MacOS/Lintel ctl '{"cmd":"quit"}'`). A bundle opened with `open` has
 Accessibility only if the user granted it to that build, and without it the top-edge event tap and menu bar scans
 stay off; to check those on the desktop, run `build/Lintel.app/Contents/MacOS/Lintel` from the terminal so it inherits
-the terminal's grant. Do not copy the app elsewhere or replace an installed copy unless the user supplies the command.
+the terminal's grant.
 
 The user keeps using whichever Lintel you launched last, so never leave it running from a worktree. Before removing a
 worktree, quit the Lintel launched from it, rebuild in the primary checkout after integrating into `main`, and launch
@@ -66,6 +66,10 @@ could cost CPU. Views in the bar must not observe `BarModel` per chip: `ChipView
 Never mutate `@State` or `@Published` from `Layout` (`sizeThatFits`/`placeSubviews`), `.onGeometryChange`, or
 `.onPreferenceChange` inside widget primitives to toggle subviews or labels; compute overflow and visibility purely in
 a single `Layout` pass backed by idempotent `LintelCore` math (guarded in `WidgetSystemTests`).
+
+Module view children render through `ViewNode.keyed` so a refresh that adds or drops a row moves it instead of
+rewriting every row below; never key a `ForEach` over nodes by offset. Motion is driven by `motionSignature` (structure
+and tones only), which `Slot` caches per chip and widget, so a ticking value never starts an animation.
 
 ## Testing in the VM
 
