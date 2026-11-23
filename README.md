@@ -78,7 +78,7 @@ User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to 
 | `Sources/Lintel/UI` | The renderer: one SwiftUI view per component, bar, panels, web clip and mini app stages. |
 | `Sources/Lintel/Window` | Unified main Lintel window: Dashboard, Modules catalog, Bar Layout, module inspector (live idle & expanded preview with in-window placement/size controls, native macOS module configuration cards, jobs, logs, code editor), all Settings panes, and the collapsible Assistant inspector. |
 | `Sources/Lintel/Chat` | Assistant engines and the authoring loop (trial run, design rules, repair). |
-| `Sources/Lintel/Resources/Modules` | Built-in modules. They double as the examples the assistant learns from. |
+| `Sources/Lintel/Resources/Modules` | Built-in modules. They double as the examples the assistant learns from. Includes PR Reviews and My PRs. |
 | `Sources/Lintel/Resources/Library` | Optional modules, switched on in Modules or by asking the assistant. |
 
 ## Command line

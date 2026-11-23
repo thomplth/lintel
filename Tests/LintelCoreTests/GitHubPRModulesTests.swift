@@ -9,7 +9,7 @@ private let worktreeRoot = URL(filePath: #filePath)
     .deletingLastPathComponent()
 
 private func loadModuleSource(_ name: String) -> String? {
-    try? String(contentsOf: worktreeRoot.appending(path: "Sources/Lintel/Resources/Library/\(name).js"), encoding: .utf8)
+    try? String(contentsOf: worktreeRoot.appending(path: "Sources/Lintel/Resources/Modules/\(name).js"), encoding: .utf8)
 }
 
 private final class MockModuleHarness {
@@ -473,8 +473,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
 }
 
 @Suite struct GitHubPRModules {
-    @Test func legacyMonolithicModuleIsReplacedByTwoFocusedLibraryModules() {
-        #expect(loadModuleSource("github-prs") == nil)
+    @Test func bothPullRequestModulesAreBuiltIn() {
         #expect(loadModuleSource("github-reviews") != nil)
         #expect(loadModuleSource("github-my-prs") != nil)
     }

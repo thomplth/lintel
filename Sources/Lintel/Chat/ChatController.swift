@@ -186,8 +186,9 @@ final class ChatController {
                 result.canUndoTheme = true
             }
         }
+        let libraryIDs = Set(Resources.files(in: "Library", extension: "js").map { $0.deletingPathExtension().lastPathComponent })
         for id in reply.add {
-            let isLibrary = Resources.files(in: "Library", extension: "js").contains { $0.deletingPathExtension().lastPathComponent == id }
+            let isLibrary = libraryIDs.contains(id)
             app.host.setEnabled(id, true, origin: isLibrary ? .library : .builtIn)
             if result.moduleID == nil { result.moduleID = id }
         }
@@ -195,7 +196,7 @@ final class ChatController {
             if FileManager.default.fileExists(atPath: app.home.moduleFile(id: id).path) {
                 app.host.remove(id)
             } else {
-                let isLibrary = app.model.settings.enabledLibrary.contains(id)
+                let isLibrary = libraryIDs.contains(id)
                 app.host.setEnabled(id, false, origin: isLibrary ? .library : .builtIn)
             }
         }
