@@ -101,6 +101,10 @@ final class BarWindowController {
     private var mouseMonitors: [Any] = []
     private let notificationBanners = NotificationBanners()
     private(set) var banners: [CGRect] = []
+    /// Where the window's content sits with no drop. Chip and widget frames are no substitute: they include the drop
+    /// only after SwiftUI lays out again, so reading them right after a drop measures the content a drop too high and
+    /// the drop chases itself.
+    private var undroppedContent: CGRect?
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
     var onActiveChanged: (Bool) -> Void = { _ in }
@@ -638,6 +642,7 @@ final class BarWindowController {
                 contentSize: contentSize, on: geometry, anchor: model.settings.anchor, edgeInset: model.settings.edgeInset
             )
             if model.topRowMinHeight != placement.topRowMinHeight { model.topRowMinHeight = placement.topRowMinHeight }
+            undroppedContent = placement.frame
             let canvas = canvas(around: placement.frame)
             if panel.frame != canvas { panel.setFrame(canvas, display: true) }
             model.barWindowFrame = canvas
@@ -647,15 +652,8 @@ final class BarWindowController {
     }
 
     private func clearNotificationBanners() {
-        guard let screen else { return }
-        // Chip and widget frames already include the current drop; measuring from where the content sits undropped
-        // keeps the drop from feeding back into itself.
-        let windowRows = model.isFirstRowInMenuBar ? Array(model.visibleRows.dropFirst()) : model.visibleRows
-        let windowSlotIDs = windowRows.joined().map(\.id) + model.visibleWidgets.map(\.slot.id)
-        let undropped = windowSlotIDs.compactMap(screenFrame(ofSlot:))
-            .reduce(CGRect.null) { $0.union($1) }
-            .offsetBy(dx: 0, dy: model.notificationDrop)
-        let drop = undropped.isNull ? 0 : NotificationClearance.drop(content: undropped, banners: banners, screen: screen.frame)
+        guard let screen, let undroppedContent else { return }
+        let drop = NotificationClearance.drop(content: undroppedContent, banners: banners, screen: screen.frame)
         guard drop != model.notificationDrop else { return }
         let grows = drop > model.notificationDrop
         withAnimation(model.theme.motion == "full" ? BarModel.reflow : nil) { model.notificationDrop = drop }
@@ -716,7 +714,9 @@ final class BarWindowController {
             x: geometry.frame.maxX - menuBarRowSize.width, y: geometry.visibleFrame.maxY, width: menuBarRowSize.width, height: menuBarHeight
         )
         let size = CGSize(width: max(contentSize.width, 1), height: max(contentSize.height, 1))
-        let frame = canvas(around: Placement.rows(contentSize: size, under: item, on: geometry, anchor: model.settings.anchor))
+        let rows = Placement.rows(contentSize: size, under: item, on: geometry, anchor: model.settings.anchor)
+        undroppedContent = rows
+        let frame = canvas(around: rows)
         if model.topRowMinHeight != 0 { model.topRowMinHeight = 0 }
         if panel.frame != frame { panel.setFrame(frame, display: true) }
         model.barWindowFrame = frame
