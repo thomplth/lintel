@@ -103,6 +103,9 @@ public enum DesignGuide {
            - Put settings (formats, toggles, pickers) in `configure(host)`; Lintel shows them in the module's page in the Lintel window.
            - Finite widgets automatically clamp their height to their natural content height so dragging taller never
              creates empty blank space.
+           - Rows animate in, out and into new places on their own. Lintel tells siblings apart by `key`, then `url`,
+             `payload`, `title` or `label`; give repeated entries that share those a `{ key: 'stable-id' }` (any
+             component accepts it) so a refresh that drops one slides the rest up instead of rewriting each row.
         3. Widgets can be stacked vertically in columns or placed side-by-side on the shelf by dragging their grip handle
            (or ⌘-dragging). Double-clicking the resize handle snaps height tightly to content.
 

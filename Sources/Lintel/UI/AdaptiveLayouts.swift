@@ -491,7 +491,7 @@ struct AdaptiveCollectionView: View {
     var body: some View {
         let footerLabels = AdaptiveOverflowFit.footerLabels(itemCount: nodes.count)
         ElasticItemsLayout(itemCount: nodes.count, spacing: spacing, footerHeight: footerHeight) {
-            ForEach(Array(nodes.enumerated()), id: \.offset) { entry in
+            ForEach(nodes.keyed) { entry in
                 NodeView(node: entry.element, context: context)
             }
             ForEach(Array(footerLabels.enumerated()), id: \.offset) { entry in
@@ -661,7 +661,7 @@ struct AdaptiveListView: View {
         VStack(spacing: 0) {
             ListCardHeader(node: node, context: context, isCompact: isCompact)
             AdaptiveListLayout(itemCount: items.count, showsFooter: showsSummary && !footerLabels.isEmpty, footerHeight: footerHeight) {
-                ForEach(Array(items.enumerated()), id: \.offset) { entry in
+                ForEach(items.keyed) { entry in
                     AdaptiveItemRow(
                         node: entry.element,
                         context: context,
@@ -703,6 +703,7 @@ private struct AdaptiveItemRow: View {
 
     var body: some View {
         ItemRow(node: compact ? strippedSubtitle : node, context: context, compactOverride: compact, rail: rail)
+            .transition(context.nodeTransition)
     }
 
     private var strippedSubtitle: ViewNode {

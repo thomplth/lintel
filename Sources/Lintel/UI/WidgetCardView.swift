@@ -459,7 +459,7 @@ struct WidgetCardView: View, Equatable {
             if let node {
                 let children = (node.component == .column && node.props.isEmpty) ? node.children : [node]
                 AdaptiveStackLayout(spacing: gap, alignment: .leading) {
-                    ForEach(Array(children.enumerated()), id: \.offset) { child in
+                    ForEach(children.keyed) { child in
                         NodeView(node: child.element, context: context)
                             .clipped()
                             .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
@@ -472,7 +472,7 @@ struct WidgetCardView: View, Equatable {
                     if !hasUnbounded {
                         if isHovered || isResizingThis || isPeek {
                             AdaptiveStackLayout(spacing: gap, alignment: .leading) {
-                                ForEach(Array(children.enumerated()), id: \.offset) { child in
+                                ForEach(children.keyed) { child in
                                     NodeView(node: child.element, context: context)
                                         .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
                                         .layoutValue(key: BlockFlexKey.self, value: child.element.layoutFlex)
@@ -501,6 +501,7 @@ struct WidgetCardView: View, Equatable {
                 ProgressView()
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
             } else {
                 NodeView(node: ViewNode(.empty, [
                     "icon": .string(slot.icon),

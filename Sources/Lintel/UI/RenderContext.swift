@@ -209,6 +209,10 @@ struct RenderContext {
     }
 
     var animates: Bool { theme.motion == "full" }
+    /// How a node enters and leaves when a module's view gains or loses it, such as a merged pull request's row.
+    var nodeTransition: AnyTransition {
+        animates ? .opacity.combined(with: .scale(scale: 0.96, anchor: .top)) : .identity
+    }
 
     var tileShape: RoundedRectangle {
         RoundedRectangle(cornerRadius: metrics.tileCornerRadius, style: .continuous)

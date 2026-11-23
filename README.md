@@ -66,7 +66,12 @@ the standard keys; Settings › Keyboard changes any of them except Esc and 1–
 
 In a panel, Tab moves through its controls, Space or Return uses one, and ← → step a slider or segmented choice. A panel
 opened from the keyboard focuses the control you last used in it, or its first one. Clicking a module while using the
-keyboard moves the selection there.
+keyboard moves the selection there. The focus ring shows only while the keyboard moves focus; a click focuses a control
+without it, and the next Tab brings it back.
+
+When a macOS notification banner covers the bar's rows or widgets, they slide down just below it and return once it
+goes. With Accessibility, Lintel measures the real banners, so a stack of them moves it further; without, it assumes
+one banner in the top-right corner.
 User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to use another folder.
 
 ## Layout of the code

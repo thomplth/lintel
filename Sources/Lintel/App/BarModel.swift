@@ -17,14 +17,21 @@ struct Slot: Identifiable, Equatable {
     var isPinned = false
     var order = 50
     var isOptIn = false
-    var chip: ViewNode?
+    var chip: ViewNode? {
+        didSet { chipMotion = chip?.motionSignature }
+    }
+    private(set) var chipMotion: [String]?
     var image: NSImage?
     var failure: String?
     var needsApproval = false
     var hasWidget = false
     var hasConfigure = false
     var defaultShape: WidgetShape = .card
-    var widgetNode: ViewNode?
+    var widgetNode: ViewNode? {
+        didSet { widgetMotion = widgetNode?.motionSignature }
+    }
+    /// Kept beside the node so the bar compares it on every update without walking each widget's tree again.
+    private(set) var widgetMotion: [String]?
     var permissions: [String] = []
     var isUserModule = false
     var isRaised = false
@@ -393,6 +400,8 @@ final class BarModel: ObservableObject {
     }
 
     var barWindowFrame = CGRect.zero
+    /// How far the bar window's content sits below its place, to clear macOS notification banners covering it.
+    @Published var notificationDrop: CGFloat = 0
     var carrierWindowFrame = CGRect.zero
 
     func barToCarrier(_ point: CGPoint) -> CGPoint {

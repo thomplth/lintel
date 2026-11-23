@@ -175,13 +175,14 @@ struct PanelView: View {
                     NodeView(node: ViewNode(.note, ["value": .string(failure), "tone": "bad", "icon": "exclamationmark.triangle.fill"]), context: context)
                 }
                 if node.component == .column, node.props.isEmpty {
-                    ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                    ForEach(node.children.keyed) { child in
                         NodeView(node: child.element, context: context)
                     }
                 } else {
                     NodeView(node: node, context: context)
                 }
             }
+            .animation(context.animates ? BarModel.reflow : nil, value: node.motionSignature)
         } else if let failure = panel.failure ?? slot?.failure {
             VStack(spacing: context.metrics.unit * 3) {
                 NodeView(node: ViewNode(.empty, [
@@ -295,6 +296,7 @@ struct ChatView: View {
                         if model.chat.isEmpty { welcome }
                         ForEach(model.chat) { message in
                             bubble(message).id(message.id)
+                                .transition(context.nodeTransition)
                         }
                         if model.isChatBusy {
                             HStack(spacing: context.metrics.unit * 2) {
@@ -307,6 +309,8 @@ struct ChatView: View {
                     }
                     .padding(context.metrics.panelPadding)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(context.animates ? BarModel.reflow : nil, value: model.chat.map(\.id))
+                    .animation(context.animates ? BarModel.reflow : nil, value: model.isChatBusy)
                 }
                 .onChange(of: model.chat.count) { scroll(proxy) }
                 .onChange(of: model.isChatBusy) { scroll(proxy) }

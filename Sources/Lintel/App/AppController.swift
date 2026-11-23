@@ -223,6 +223,7 @@ final class AppController {
         if model.isHidden { bar?.revealIfHidden() }
         closePanel(releasing: false)
         bar?.takeKeyboardFocus()
+        FocusRingModality.shared.record(.keyboardNavigation)
         model.isDrivenByKeyboard = true
         let remembered = model.rememberedSelection
         let initial = BarSelection.resume(remembered, in: model.selectableRows)

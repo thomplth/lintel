@@ -9,6 +9,10 @@ struct NodeView: View {
 
     var body: some View {
         let _ = Perf.count("view.node")
+        component.transition(context.nodeTransition)
+    }
+
+    @ViewBuilder private var component: some View {
         switch node.component {
         case .text: textView
         case .icon: iconView(node.string("name") ?? "", tone: node.tone(), size: node.string("size"))
@@ -52,7 +56,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var children: some View {
-        ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+        ForEach(node.children.keyed) { child in
             NodeView(node: child.element, context: context)
         }
     }
@@ -192,7 +196,7 @@ struct NodeView: View {
             alignment: vAlign,
             stackThreshold: context.metrics.splitStackThreshold
         ) {
-            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+            ForEach(node.children.keyed) { child in
                 NodeView(node: child.element, context: context)
                     .clipped()
                     .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
@@ -204,7 +208,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private func adaptiveChildren(_ nodes: [ViewNode]) -> some View {
-        ForEach(Array(nodes.enumerated()), id: \.offset) { child in
+        ForEach(nodes.keyed) { child in
             NodeView(node: child.element, context: context)
                 .clipped()
                 .layoutValue(key: BlockPriorityKey.self, value: child.element.layoutPriority)
@@ -263,7 +267,7 @@ struct NodeView: View {
             CGFloat((96 * context.metrics.widgetScale).rounded())
         }
         return AdaptiveGridLayout(maxColumns: maxCols, minCellWidth: minCellW, spacing: gap, centerCells: allSmallAtoms) {
-            ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+            ForEach(node.children.keyed) { child in
                 NodeView(node: child.element, context: context)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: allSmallAtoms ? .center : .topLeading)
             }
@@ -351,7 +355,7 @@ struct NodeView: View {
             let sepLead = hasRail ? padH + 15 : padH
             VStack(spacing: 0) {
                 ListCardHeader(node: node, context: context, isCompact: false)
-                ForEach(Array(node.children.enumerated()), id: \.offset) { child in
+                ForEach(node.children.keyed) { child in
                     let railPos: RailPosition = if !hasRail {
                         .none
                     } else if node.children.count <= 1 {

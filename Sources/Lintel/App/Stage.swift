@@ -314,7 +314,7 @@ final class ControlChannel {
                  "frame": app.bar?.screenFrame(ofSlot: slot.id).map { [.number($0.minX), .number($0.minY), .number($0.width), .number($0.height)] } ?? .null]
             }
             let state: JSONValue = [
-                "active": .bool(app.model.isActive), "panel": app.model.panel.map { .string($0.slotID) } ?? .null,
+                "active": .bool(app.model.isActive), "notificationDrop": .number(app.model.notificationDrop), "panel": app.model.panel.map { .string($0.slotID) } ?? .null,
                 "panelBox": app.model.panel.map { ["width": .number($0.widgetBox.width), "height": .number($0.widgetBox.height)] } ?? .null,
                 "panelFailure": app.model.panel?.failure.map(JSONValue.string) ?? .null,
                 "temporarilyExpandedWidget": app.model.temporaryExpandedWidget.map {

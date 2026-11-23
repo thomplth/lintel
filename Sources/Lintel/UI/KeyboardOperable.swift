@@ -1,3 +1,4 @@
+import AppKit
 import LintelCore
 import SwiftUI
 
@@ -11,10 +12,12 @@ struct KeyboardOperable<Ring: Shape>: ViewModifier {
     let activate: (() -> Void)?
     let adjust: ((Int) -> Void)?
     @FocusState private var isFocused: Bool
+    @ObservedObject private var modality = FocusRingModality.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         let animates = context.animates && !reduceMotion
+        let showsRing = isFocused && modality.visibility.showsRing
         content
             // `.activate` controls are skipped by Tab unless Keyboard Navigation is on in System Settings, which most
             // people leave off; `.edit` ones are always reachable, like text fields.
@@ -23,9 +26,9 @@ struct KeyboardOperable<Ring: Shape>: ViewModifier {
             .focusEffectDisabled()
             .overlay {
                 ring.stroke(context.accent, lineWidth: 2)
-                    .opacity(isFocused ? 1 : 0)
-                    .scaleEffect(isFocused || !animates ? 1 : 1.06)
-                    .animation(animates ? .spring(duration: 0.2, bounce: 0.2) : nil, value: isFocused)
+                    .opacity(showsRing ? 1 : 0)
+                    .scaleEffect(showsRing || !animates ? 1 : 1.06)
+                    .animation(animates ? .spring(duration: 0.2, bounce: 0.2) : nil, value: showsRing)
                     .allowsHitTesting(false)
             }
             .onKeyPress(keys: [.space, .return]) { _ in
@@ -46,6 +49,29 @@ struct KeyboardOperable<Ring: Shape>: ViewModifier {
             .onChange(of: isFocused) {
                 if isFocused { context.panelFocus?.focused(focusKey, in: context.moduleID) }
             }
+    }
+}
+
+/// Tracks whether the last input was keyboard navigation or a click, for every window Lintel owns.
+@MainActor
+final class FocusRingModality: ObservableObject {
+    static let shared = FocusRingModality()
+    @Published private(set) var visibility = FocusVisibility()
+    private var monitor: Any?
+
+    private init() {
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown]) { event in
+            MainActor.assumeIsolated {
+                FocusRingModality.shared.record(event.type == .keyDown ? .init(keyCode: event.keyCode) : .pointer)
+            }
+            return event
+        }
+    }
+
+    func record(_ input: FocusVisibility.Input) {
+        var next = visibility
+        next.record(input)
+        if next != visibility { visibility = next }
     }
 }
 

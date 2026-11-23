@@ -69,6 +69,8 @@ struct BarView: View {
                     }
                 }
                 .opacity(looksActive ? 1 : theme.idleOpacity)
+                // A menu bar item that resizes mid-animation flickers while macOS lays the menu bar out again.
+                .animation(theme.motion == "full" && !isInMenuBar ? BarModel.reflow : nil, value: rows.map { $0.map(\.chipMotion) })
             }
 
             if !flatWidgets.isEmpty {
@@ -111,6 +113,8 @@ struct BarView: View {
                 })
                 .animation(theme.motion == "full" ? BarModel.reflow : nil, value: widgetColumns.map { $0.map(\.slot.id) })
                 .animation(theme.motion == "full" ? BarModel.reflow : nil, value: model.temporaryExpandedWidget)
+                .animation(theme.motion == "full" ? BarModel.reflow : nil, value: flatWidgets.map(\.box))
+                .animation(theme.motion == "full" ? BarModel.reflow : nil, value: flatWidgets.map(\.slot.widgetMotion))
             }
         }
         .overlayPreferenceValue(SelectionMark.Key.self) { mark in
@@ -130,6 +134,7 @@ struct BarView: View {
                 .onEnded(dragEnded)
         )
         .fixedSize()
+        .offset(y: isInMenuBar ? 0 : model.notificationDrop)
         .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { size in
             if isInMenuBar { model.onMenuBarRowContentSize(size) } else { model.onContentSize(size) }
         })

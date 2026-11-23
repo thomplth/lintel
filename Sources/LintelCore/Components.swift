@@ -68,7 +68,7 @@ public struct ComponentSpec: Sendable {
     public let doc: String
 
     public func prop(_ name: String) -> PropSpec? {
-        props.first { $0.name == name }
+        props.first { $0.name == name } ?? (name == Catalog.keyProp.name ? Catalog.keyProp : nil)
     }
 }
 
@@ -79,6 +79,8 @@ public enum Catalog {
     public static let weights = ["light", "regular", "medium", "semibold", "bold"]
     public static let heights = ["small", "medium", "large"]
     public static let priorityTokens = ["essential", "supporting", "detail"]
+    /// Accepted by every component: names what a node stands for, so it animates in, out and between places as one view.
+    public static let keyProp = PropSpec("key", .string)
 
     public static func spec(_ component: Component) -> ComponentSpec {
         byComponent[component]!

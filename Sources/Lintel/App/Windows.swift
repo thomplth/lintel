@@ -99,6 +99,8 @@ final class BarWindowController {
     private var menuBarRowPress: Timer?
     private var dragOrigin: CGPoint?
     private var mouseMonitors: [Any] = []
+    private let notificationBanners = NotificationBanners()
+    private var banners: [CGRect] = []
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
     var onActiveChanged: (Bool) -> Void = { _ in }
@@ -189,6 +191,10 @@ final class BarWindowController {
             }
         }
 
+        notificationBanners.onChange = { [weak self] banners in
+            self?.banners = banners
+            self?.clearNotificationBanners()
+        }
         setPointerPollingMode(.idle)
         applySettings()
         updateFullScreenState()
@@ -637,6 +643,21 @@ final class BarWindowController {
             model.barWindowFrame = canvas
         }
         updateGuardedTopEdge()
+        clearNotificationBanners()
+    }
+
+    private func clearNotificationBanners() {
+        guard let screen else { return }
+        // Chip and widget frames already include the current drop; measuring from where the content sits undropped
+        // keeps the drop from feeding back into itself.
+        let windowRows = model.isFirstRowInMenuBar ? Array(model.visibleRows.dropFirst()) : model.visibleRows
+        let windowSlotIDs = windowRows.joined().map(\.id) + model.visibleWidgets.map(\.slot.id)
+        let undropped = windowSlotIDs.compactMap(screenFrame(ofSlot:))
+            .reduce(CGRect.null) { $0.union($1) }
+            .offsetBy(dx: 0, dy: model.notificationDrop)
+        let drop = undropped.isNull ? 0 : NotificationClearance.drop(content: undropped, banners: banners, screen: screen.frame)
+        guard drop != model.notificationDrop else { return }
+        withAnimation(model.theme.motion == "full" ? BarModel.reflow : nil) { model.notificationDrop = drop }
     }
 
     private func updateMenuBarRow(wanted: Bool) {
