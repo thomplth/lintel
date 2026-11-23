@@ -319,8 +319,16 @@ struct WidgetCardView: View, Equatable {
 
     var body: some View {
         LiveResizeDriver(baseBox: box, isResizingThis: isResizingThis, isPeek: isPeek, drag: model.resizeDrag) { activeSize, collapsing in
-            cardBody(activeSize: activeSize, collapsing: collapsing)
+            cardBody(activeSize: followingContent(activeSize), collapsing: collapsing)
         }
+    }
+
+    /// Lets `ZeroVoidCardLayout` shrink a content-following card to its content from the screen cap,
+    /// so new items grow it without anyone writing a new height.
+    private func followingContent(_ activeSize: CGSize) -> CGSize {
+        guard box.followsContent, !isResizingThis, !(node?.hasUnboundedFlex ?? true) else { return activeSize }
+        let maxSize = Metrics(theme).maxWidgetSize(in: model.maxWidgetScreenSize)
+        return CGSize(width: activeSize.width, height: box.requestedHeight(maxSize: maxSize))
     }
 
     private func cardBody(activeSize: CGSize, collapsing: Bool) -> some View {

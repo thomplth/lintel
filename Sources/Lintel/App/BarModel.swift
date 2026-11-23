@@ -627,7 +627,9 @@ final class BarModel: ObservableObject {
         let maxSize = metrics.maxWidgetSize(in: maxWidgetScreenSize)
         let peers = visibleWidgets.filter { $0.slot.id != id }
         let snapWidths = peers.map { CGFloat($0.box.width) }
-        let snapHeights = peers.map { CGFloat($0.box.height) }
+        let snapHeights = peers.map { peer in
+            peer.box.followsContent ? reportedWidgetFrames[peer.slot.id]?.height ?? CGFloat(peer.box.height) : CGFloat(peer.box.height)
+        }
         let maxContentH = resizeDrag.fromChip ? nil : reportedMaxContentHeights[id]
 
         let resolved = WidgetResize.resolve(
@@ -668,17 +670,24 @@ final class BarModel: ObservableObject {
         let collapses = resizeDrag.collapsesToChip
         let committed = resizeDrag.committedSize
         let isPeek = resizeDrag.isPeek
+        let box = WidgetResize.committedBox(
+            committed,
+            handle: resizeDrag.handle,
+            previous: isPeek ? panel?.widgetBox : layout.widgetBox(of: id),
+            maxContentHeight: resizeDrag.fromChip ? nil : reportedMaxContentHeights[id],
+            maxSize: Metrics(theme).maxWidgetSize(in: maxWidgetScreenSize)
+        )
         resizeDrag.reset()
         resizingSlotID = nil
 
         if isPeek {
             if committed.width > 1 && committed.height > 1 {
-                onResizePeek(id, WidgetBox(committed))
+                onResizePeek(id, box)
             }
         } else if collapses {
             onResizeWidget(id, nil)
         } else {
-            onResizeWidget(id, WidgetBox(committed))
+            onResizeWidget(id, box)
         }
     }
 
@@ -687,9 +696,9 @@ final class BarModel: ObservableObject {
         guard let contentH = reportedMaxContentHeights[id] else { return }
         let clampedH = max(contentH.rounded(), metrics.minWidgetSize.height)
         if isPeek, let current = panel?.widgetBox {
-            onResizePeek(id, WidgetBox(width: current.width, height: Double(clampedH)))
+            onResizePeek(id, WidgetBox(width: current.width, height: Double(clampedH), followsContent: true))
         } else if let current = layout.widgetBox(of: id) {
-            onResizeWidget(id, WidgetBox(width: current.width, height: Double(clampedH)))
+            onResizeWidget(id, WidgetBox(width: current.width, height: Double(clampedH), followsContent: true))
         }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }

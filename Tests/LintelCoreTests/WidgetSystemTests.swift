@@ -195,6 +195,69 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(kept.height == 800)
     }
 
+    @Test func resizeEndingAtTheContentCeilingFollowsContent() {
+        let maxS = CGSize(width: 600, height: 500)
+        let box = WidgetResize.committedBox(
+            CGSize(width: 300, height: 320), handle: .bottom, previous: nil, maxContentHeight: 320, maxSize: maxS
+        )
+        #expect(box == WidgetBox(width: 300, height: 320, followsContent: true))
+    }
+
+    @Test func resizeEndingBelowTheContentCeilingKeepsAFixedHeight() {
+        let maxS = CGSize(width: 600, height: 500)
+        let box = WidgetResize.committedBox(
+            CGSize(width: 300, height: 240), handle: .corner(.bottomRight), previous: nil, maxContentHeight: 320, maxSize: maxS
+        )
+        #expect(!box.followsContent)
+    }
+
+    @Test func resizeOfContentTallerThanTheScreenCapFollowsContentAtTheCap() {
+        let maxS = CGSize(width: 600, height: 500)
+        let box = WidgetResize.committedBox(
+            CGSize(width: 300, height: 500), handle: .bottom, previous: nil, maxContentHeight: 900, maxSize: maxS
+        )
+        #expect(box.followsContent)
+    }
+
+    @Test func resizeWithoutAMeasuredContentHeightKeepsAFixedHeight() {
+        let box = WidgetResize.committedBox(
+            CGSize(width: 300, height: 320), handle: .bottom, previous: nil, maxContentHeight: nil, maxSize: CGSize(width: 600, height: 500)
+        )
+        #expect(!box.followsContent)
+    }
+
+    @Test func widthOnlyResizeKeepsWhetherTheHeightFollowsContent() {
+        let maxS = CGSize(width: 600, height: 500)
+        let following = WidgetBox(width: 300, height: 320, followsContent: true)
+        let widened = WidgetResize.committedBox(
+            CGSize(width: 400, height: 320), handle: .side(.bottomRight), previous: following, maxContentHeight: 280, maxSize: maxS
+        )
+        #expect(widened == WidgetBox(width: 400, height: 320, followsContent: true))
+    }
+
+    @Test func followingWidgetRequestsTheScreenCapSoItGrowsWithItsContent() {
+        let maxS = CGSize(width: 600, height: 500)
+        #expect(WidgetBox(width: 300, height: 320, followsContent: true).requestedHeight(maxSize: maxS) == 500)
+        #expect(WidgetBox(width: 300, height: 320).requestedHeight(maxSize: maxS) == 320)
+    }
+
+    @Test func clampingKeepsWhetherTheHeightFollowsContent() {
+        let clamped = WidgetResize.clampedBox(
+            WidgetBox(width: 900, height: 800, followsContent: true), metrics: metrics, maxSize: CGSize(width: 600, height: 500)
+        )
+        #expect(clamped == WidgetBox(width: 600, height: 500, followsContent: true))
+    }
+
+    @Test func widgetBoxStoresFollowsContentOnlyWhenSet() throws {
+        let fixed = try JSONEncoder().encode(WidgetBox(width: 300, height: 200))
+        #expect(String(decoding: fixed, as: UTF8.self).contains("followsContent") == false)
+        let following = WidgetBox(width: 300, height: 200, followsContent: true)
+        let decoded = try JSONDecoder().decode(WidgetBox.self, from: JSONEncoder().encode(following))
+        #expect(decoded == following)
+        let legacy = try JSONDecoder().decode(WidgetBox.self, from: Data(#"{"width":300,"height":200}"#.utf8))
+        #expect(legacy == WidgetBox(width: 300, height: 200))
+    }
+
     @Test func clampedBoxRespectsMinAndMaxWidgetBounds() {
         let maxS = CGSize(width: 600, height: 500)
         let tooLarge = WidgetResize.clampedBox(WidgetBox(width: 900, height: 800), metrics: metrics, maxSize: maxS)

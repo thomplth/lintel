@@ -243,7 +243,7 @@ final class ControlChannel {
                 if command["collapse"].bool == true {
                     app.host.setWidget(slot, to: nil)
                 } else if let w = command["width"].number, let h = command["height"].number {
-                    app.host.setWidget(slot, to: WidgetBox(width: w, height: h))
+                    app.host.setWidget(slot, to: WidgetBox(width: w, height: h, followsContent: command["followsContent"].bool == true))
                 } else {
                     let shape = app.model.slot(slot)?.defaultShape ?? .card
                     app.host.setWidget(slot, to: Metrics(app.model.theme).defaultWidgetBox(for: shape))

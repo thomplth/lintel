@@ -15,18 +15,48 @@ public enum WidgetShape: String, CaseIterable, Codable, Hashable, Sendable {
 public struct WidgetBox: Equatable, Codable, Hashable, Sendable {
     public var width: Double
     public var height: Double
+    /// The user sized this widget to show all of its content, so it grows and shrinks with that content
+    /// up to the screen cap instead of holding `height`.
+    public var followsContent: Bool
 
-    public init(width: Double, height: Double) {
+    public init(width: Double, height: Double, followsContent: Bool = false) {
         self.width = max(width.rounded(), 1)
         self.height = max(height.rounded(), 1)
+        self.followsContent = followsContent
     }
 
-    public init(_ size: CGSize) {
-        self.init(width: Double(size.width), height: Double(size.height))
+    public init(_ size: CGSize, followsContent: Bool = false) {
+        self.init(width: Double(size.width), height: Double(size.height), followsContent: followsContent)
     }
 
     public var cgSize: CGSize {
         CGSize(width: width, height: height)
+    }
+
+    public func requestedHeight(maxSize: CGSize) -> CGFloat {
+        followsContent ? max(CGFloat(height), maxSize.height) : CGFloat(height)
+    }
+
+    private enum Key: String, CodingKey {
+        case width, height, followsContent
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: Key.self)
+        self.init(
+            width: try container.decode(Double.self, forKey: .width),
+            height: try container.decode(Double.self, forKey: .height),
+            followsContent: try container.decodeIfPresent(Bool.self, forKey: .followsContent) ?? false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        try container.encode(width, forKey: .width)
+        try container.encode(height, forKey: .height)
+        if followsContent {
+            try container.encode(true, forKey: .followsContent)
+        }
     }
 }
 
@@ -110,7 +140,26 @@ public enum WidgetResize {
         let maxH = max(maxSize.height, minS.height)
         let w = min(max(CGFloat(box.width), minS.width), maxW)
         let h = min(max(CGFloat(box.height), minS.height), maxH)
-        return WidgetBox(width: Double(w.rounded()), height: Double(h.rounded()))
+        return WidgetBox(width: Double(w.rounded()), height: Double(h.rounded()), followsContent: box.followsContent)
+    }
+
+    /// The box a finished resize stores: it follows its content when the height reached the content ceiling,
+    /// while a width-only drag keeps whatever the height did before.
+    public static func committedBox(
+        _ size: CGSize,
+        handle: ResizeHandle,
+        previous: WidgetBox?,
+        maxContentHeight: CGFloat?,
+        maxSize: CGSize
+    ) -> WidgetBox {
+        let follows: Bool = if case .side = handle {
+            previous?.followsContent ?? false
+        } else if let maxContentHeight {
+            size.height >= min(maxContentHeight, maxSize.height).rounded() - 0.5
+        } else {
+            false
+        }
+        return WidgetBox(size, followsContent: follows)
     }
 
     /// Computes the temporary max-size box when clicking an always-on desktop widget, capped to the visible screen

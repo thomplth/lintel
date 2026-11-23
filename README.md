@@ -39,6 +39,9 @@ bottom-right when left-anchored), plus invisible side and bottom edge grips. Dra
 a chip into a freeform desktop widget of any width and height—from a slim top ribbon or narrow vertical sidebar to a
 spacious multi-column dashboard—or shrink it back into a chip. Double-click the resize handle to snap height tightly
 to content; widgets with finite content automatically clamp to their natural height so blank space never appears.
+A widget sized to show all of its content (dragged to that height or snapped by double-click) keeps following it: new
+items grow it up to the screen's widget height cap and removed items shrink it, while a widget sized shorter than its
+content holds its height and shows `+N more`.
 Desktop widgets stay visible while idle, adapt every block natively without scrolling, and reveal a quiet utility pill
 (drag grip to reorder/stack vertically into columns or place side by side, Configure in Lintel, Collapse, Open in Lintel, Settings) on
 hover; you can also ⌘-drag any widget card to stack or move it. Clicking an always-on desktop widget expands it
