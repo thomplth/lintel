@@ -100,7 +100,7 @@ final class BarWindowController {
     private var dragOrigin: CGPoint?
     private var mouseMonitors: [Any] = []
     private let notificationBanners = NotificationBanners()
-    private var banners: [CGRect] = []
+    private(set) var banners: [CGRect] = []
     var isPanelOpen: () -> Bool = { false }
     var panelFrame: () -> CGRect? = { nil }
     var onActiveChanged: (Bool) -> Void = { _ in }
@@ -606,7 +606,7 @@ final class BarWindowController {
         return Placement.canvas(
             around: content,
             width: max(model.maxBarWidth + Placement.barSidePadding * 2, min(screenWidth * 0.72, 920), content.width + 32),
-            height: max(520, screenHeight * 0.82, content.height + 40),
+            height: max(520, screenHeight * 0.82, content.height + 40) + model.notificationDrop,
             anchor: model.settings.anchor
         )
     }
@@ -657,7 +657,15 @@ final class BarWindowController {
             .offsetBy(dx: 0, dy: model.notificationDrop)
         let drop = undropped.isNull ? 0 : NotificationClearance.drop(content: undropped, banners: banners, screen: screen.frame)
         guard drop != model.notificationDrop else { return }
+        let grows = drop > model.notificationDrop
         withAnimation(model.theme.motion == "full" ? BarModel.reflow : nil) { model.notificationDrop = drop }
+        // The window grows with the drop at once so the moving content is never clipped; it shrinks only once the
+        // content has slid back up, or the bottom of the content would be cut off mid-slide.
+        if grows {
+            place()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.place() }
+        }
     }
 
     private func updateMenuBarRow(wanted: Bool) {

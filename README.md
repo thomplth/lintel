@@ -70,7 +70,7 @@ keyboard moves the selection there. The focus ring shows only while the keyboard
 without it, and the next Tab brings it back.
 
 When a macOS notification banner covers the bar's rows or widgets, they slide down just below it and return once it
-goes. With Accessibility, Lintel measures the real banners, so a stack of them moves it further; without, it assumes
+goes. With Notification Center open they slide below everything it shows, off the bottom of the screen when it is full. With Accessibility, Lintel measures the real banners, so a stack of them moves it further; without, it assumes
 one banner in the top-right corner.
 User data lives in `~/Library/Application Support/Lintel`; set `LINTEL_HOME` to use another folder.
 

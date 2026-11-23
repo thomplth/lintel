@@ -5,15 +5,21 @@ import CoreGraphics
 public enum NotificationClearance {
     public static let gap: CGFloat = 8
 
-    /// `content` is where the content sits before any drop, so moving it never changes the answer.
-    public static func drop(content: CGRect, banners: [CGRect], screen: CGRect) -> CGFloat {
-        let covering = banners.filter { banner in
-            banner.height < screen.height * 0.5
-                && banner.minX < content.maxX && banner.maxX > content.minX
-                && banner.minY < content.maxY && banner.maxY > content.minY
+    /// `content` is where the content sits before any drop, so moving it never changes the answer. `notifications`
+    /// are banners, or everything shown in the open Notification Center; the content moves below all it would
+    /// overlap, off the bottom of the screen if Notification Center is full.
+    public static func drop(content: CGRect, banners notifications: [CGRect], screen: CGRect) -> CGFloat {
+        let inColumn = notifications
+            .filter { $0.height < screen.height * 0.9 && $0.minX < content.maxX && $0.maxX > content.minX }
+            .sorted { $0.maxY > $1.maxY }
+        var drop: CGFloat = 0
+        for notification in inColumn {
+            let dropped = content.offsetBy(dx: 0, dy: -drop)
+            if notification.minY < dropped.maxY + gap, notification.maxY > dropped.minY - gap {
+                drop = max(drop, content.maxY - notification.minY + gap)
+            }
         }
-        guard let lowest = covering.map(\.minY).min() else { return 0 }
-        return content.maxY - lowest + gap
+        return drop
     }
 
     /// Where a single banner appears when Accessibility cannot report the real ones, as measured on macOS 26.

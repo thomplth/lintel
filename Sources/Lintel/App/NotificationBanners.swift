@@ -63,14 +63,16 @@ final class NotificationBanners {
         return found.map { CGRect(x: $0.minX, y: primaryHeight - $0.maxY, width: $0.width, height: $0.height) }
     }
 
+    /// A banner counts whole; elsewhere, as in the open sidebar, the elements with no children of their own (texts,
+    /// buttons, widgets) mark what is shown, since the groups and scroll area around them span the whole column.
     private static func collectBanners(in element: AXUIElement, depth: Int, into found: inout [CGRect]) {
-        guard depth < 10 else { return }
-        if let subrole = string(of: element, attribute: kAXSubroleAttribute), subrole.hasPrefix("AXNotificationCenter"),
-           let frame = frame(of: element), frame.width > 0, frame.height > 0 {
-            found.append(frame)
+        let isBanner = string(of: element, attribute: kAXSubroleAttribute)?.hasPrefix("AXNotificationCenter") == true
+        let children = isBanner || depth >= 12 ? [] : children(of: element, attribute: kAXChildrenAttribute)
+        if children.isEmpty || isBanner {
+            if let frame = frame(of: element), frame.width > 0, frame.height > 0 { found.append(frame) }
             return
         }
-        for child in children(of: element, attribute: kAXChildrenAttribute) {
+        for child in children {
             collectBanners(in: child, depth: depth + 1, into: &found)
         }
     }

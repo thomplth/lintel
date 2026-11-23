@@ -108,9 +108,29 @@ import Testing
         #expect(NotificationClearance.drop(content: leftWidgets, banners: [banner], screen: screen) == 0)
     }
 
-    @Test func theOpenNotificationCentreSidebarLeavesWidgetsInPlace() {
-        let sidebar = CGRect(x: 2160, y: 0, width: 400, height: 1415)
-        #expect(NotificationClearance.drop(content: widgets, banners: [sidebar], screen: screen) == 0)
+    @Test func widgetsMoveBelowEverythingInTheOpenNotificationCentre() {
+        let notifications = CGRect(x: 2180, y: 1100, width: 360, height: 300)
+        let calendar = CGRect(x: 2180, y: 760, width: 170, height: 320)
+        let drop = NotificationClearance.drop(content: widgets, banners: [notifications, calendar], screen: screen)
+        #expect(drop == widgets.maxY - calendar.minY + NotificationClearance.gap)
+    }
+
+    @Test func widgetsAlsoClearContentTheyWouldLandOnOnceMoved() {
+        let banner = CGRect(x: 2180, y: 1300, width: 360, height: 100)
+        let lower = CGRect(x: 2180, y: 400, width: 360, height: 200)
+        let drop = NotificationClearance.drop(content: widgets, banners: [banner, lower], screen: screen)
+        #expect(drop == widgets.maxY - lower.minY + NotificationClearance.gap)
+    }
+
+    @Test func aFullNotificationCentrePushesWidgetsOffScreen() {
+        let column = (0..<6).map { CGRect(x: 2180, y: CGFloat(40 + $0 * 230), width: 360, height: 220) }
+        let drop = NotificationClearance.drop(content: widgets, banners: column, screen: screen)
+        #expect(widgets.maxY - drop < screen.minY + widgets.height)
+    }
+
+    @Test func aScreenSizedBackdropIsNotContent() {
+        let backdrop = CGRect(x: 0, y: 0, width: 2560, height: 1440)
+        #expect(NotificationClearance.drop(content: widgets, banners: [backdrop], screen: screen) == 0)
     }
 
     @Test func theFallbackBannerSitsInTheTopRightCornerUnderTheMenuBar() {
