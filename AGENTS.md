@@ -47,10 +47,19 @@ Accessibility only if the user granted it to that build, and without it the top-
 stay off; to check those on the desktop, run `build/Lintel.app/Contents/MacOS/Lintel` from the terminal so it inherits
 the terminal's grant.
 
-The user keeps using whichever Lintel you launched last, so never leave it running from a worktree. Before removing a
-worktree, quit the Lintel launched from it, rebuild in the primary checkout after integrating into `main`, and launch
-`build/Lintel.app` from there. A running Lintel whose bundle was deleted keeps its modules only until it restarts, and
-then comes back with none. `lsappinfo list | grep -A3 '"Lintel"'` shows which bundle is running.
+The user runs Lintel installed at `/Applications/Lintel.app`, so never leave it running from a worktree or `build/`.
+Before removing a worktree, quit the Lintel launched from it. After integrating into `main`, rebuild in the primary
+checkout and install it:
+
+```sh
+Scripts/bundle.sh
+/Applications/Lintel.app/Contents/MacOS/Lintel ctl '{"cmd":"quit"}'
+rm -rf /Applications/Lintel.app && ditto build/Lintel.app /Applications/Lintel.app
+open /Applications/Lintel.app
+```
+
+A running Lintel whose bundle was deleted keeps its modules only until it restarts, and then comes back with none.
+`lsappinfo list | grep -A3 '"Lintel"'` shows which bundle is running.
 
 Never mutate the user's local app configuration (`~/Library/Application Support/Lintel`) during testing or verification.
 `Lintel stage`, `trial`, `items`, and `export` run with `AppHome.standard.readOnly` so they cannot write to disk; any
