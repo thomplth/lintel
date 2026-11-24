@@ -339,11 +339,9 @@ function buildStacks(summaries, groupByStack) {
       .sort((a, b) => b.latest - a.latest || a.title.localeCompare(b.title));
   }
 
-  const stackSections = [];
-  const standaloneSections = [];
+  const repoSections = [];
 
   for (const repo of byRepo.values()) {
-    const repoTitle = singleOwner ? repo.shortName : repo.nameWithOwner;
     const byHead = new Map();
     for (const entry of repo.entries) {
       if (entry.pr.headRefName) byHead.set(entry.pr.headRefName, entry);
@@ -371,6 +369,7 @@ function buildStacks(summaries, groupByStack) {
       if (!allRoots.includes(entry)) allRoots.push(entry);
     }
 
+    const stacks = [];
     const standalone = [];
 
     for (const root of allRoots) {
@@ -393,48 +392,27 @@ function buildStacks(summaries, groupByStack) {
       if (nodes.length >= 2) {
         const size = nodes.length;
         const rows = nodes.map((n, idx) => ({ ...n, stackIndex: idx + 1, stackSize: size }));
-        const latest = Math.max(...rows.map((r) => new Date(r.entry.pr.updatedAt).getTime() || 0));
-        const baseName = shortBranch(root.pr.baseRefName || root.defaultBranch);
-        stackSections.push({
-          kind: 'stack',
-          title: repoTitle,
-          trailing: `${size} → ${baseName}`,
-          trailingTone: undefined,
-          latest,
-          rows,
-        });
+        stacks.push({ latest: Math.max(...rows.map((r) => updatedMs(r.entry))), rows });
       } else {
-        standalone.push(nodes[0]);
+        standalone.push({ ...nodes[0], stackIndex: 0, stackSize: 1 });
       }
     }
 
-    if (standalone.length > 0) {
-      standalone.sort((a, b) => new Date(b.entry.pr.updatedAt).getTime() - new Date(a.entry.pr.updatedAt).getTime());
-      let trailing = String(standalone.length);
-      let trailingTone;
-      if (standalone.length === 1) {
-        const only = standalone[0].entry;
-        if (only.pr.isDraft) {
-          trailing = 'Draft';
-          trailingTone = 'secondary';
-        } else {
-          trailing = `→ ${shortBranch(only.pr.baseRefName || only.defaultBranch)}`;
-        }
-      }
-      standaloneSections.push({
-        kind: 'repo',
-        title: repoTitle,
-        trailing,
-        trailingTone,
-        latest: Math.max(...standalone.map((r) => new Date(r.entry.pr.updatedAt).getTime() || 0)),
-        rows: standalone.map((n) => ({ ...n, stackIndex: 0, stackSize: 1 })),
-      });
-    }
+    stacks.sort((a, b) => b.latest - a.latest);
+    standalone.sort((a, b) => updatedMs(b.entry) - updatedMs(a.entry));
+    repoSections.push({
+      kind: 'repo',
+      title: singleOwner ? repo.shortName : repo.nameWithOwner,
+      latest: Math.max(...repo.entries.map(updatedMs)),
+      rows: [...stacks.flatMap((stack) => stack.rows), ...standalone],
+    });
   }
 
-  stackSections.sort((a, b) => b.latest - a.latest || a.title.localeCompare(b.title));
-  standaloneSections.sort((a, b) => b.latest - a.latest || a.title.localeCompare(b.title));
-  return [...stackSections, ...standaloneSections];
+  return repoSections.sort((a, b) => b.latest - a.latest || a.title.localeCompare(b.title));
+}
+
+function updatedMs(entry) {
+  return new Date(entry.pr.updatedAt).getTime() || 0;
 }
 
 function cleanTitle(raw) {

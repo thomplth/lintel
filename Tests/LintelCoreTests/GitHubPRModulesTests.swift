@@ -693,7 +693,7 @@ private func sampleMyPRsGraphQLResponse() -> String {
         #expect(lintErrors.filter { $0.severity == .error }.isEmpty)
     }
 
-    @Test func myPRsHandlesBranchingStacksExternalBasesCyclesAndFlatMode() throws {
+    @Test func myPRsShowsEachRepoAsOneCardWithStacksBeforeStandalonePRs() throws {
         let source = try #require(loadModuleSource("github-my-prs"))
         let branchingPayload = jsonString([
             "data": [
@@ -749,14 +749,12 @@ private func sampleMyPRsGraphQLResponse() -> String {
 
         let widget = try harness.render("widget")
         let cards = lists(in: widget)
-        #expect(cards.count == 2)
-        let stackItems = items(in: cards[0])
-        #expect(stackItems.count == 3)
-        #expect(stackItems.map { $0.string("value") ?? "" } == ["#10", "#11", "#12"])
-        #expect(stackItems.map { $0.string("tag") ?? "" } == ["1/3", "2/3", "3/3"])
-
-        let externalItem = items(in: cards[1]).first
-        #expect(externalItem?.string("caption")?.contains("← teammate/shared") == true)
+        #expect(cards.count == 1)
+        #expect(cards[0].string("title") == "repo")
+        let repoItems = items(in: cards[0])
+        #expect(repoItems.map { $0.string("value") ?? "" } == ["#10", "#11", "#12", "#20"])
+        #expect(repoItems.map { $0.string("tag") ?? "" } == ["1/3", "2/3", "3/3", ""])
+        #expect(repoItems.last?.string("caption")?.contains("← teammate/shared") == true)
 
         // Flat mode collapses stacks into a single repo card without stack step tags.
         try harness.act("setGroupByStack", payload: false)
