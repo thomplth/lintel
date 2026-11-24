@@ -694,11 +694,10 @@ final class BarModel: ObservableObject {
     func fitWidgetHeightToContent(_ id: String, isPeek: Bool = false) {
         let metrics = Metrics(theme)
         guard let contentH = reportedMaxContentHeights[id] else { return }
-        let clampedH = max(contentH.rounded(), metrics.minWidgetSize.height)
         if isPeek, let current = panel?.widgetBox {
-            onResizePeek(id, WidgetBox(width: current.width, height: Double(clampedH), followsContent: true))
+            onResizePeek(id, WidgetResize.fittedToContent(current, contentHeight: contentH, metrics: metrics))
         } else if let current = layout.widgetBox(of: id) {
-            onResizeWidget(id, WidgetBox(width: current.width, height: Double(clampedH), followsContent: true))
+            onResizeWidget(id, WidgetResize.fittedToContent(current, contentHeight: contentH, metrics: metrics))
         }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }

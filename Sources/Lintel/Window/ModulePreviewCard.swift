@@ -305,7 +305,7 @@ struct ModulePreviewCard: View {
                             },
                             onDragEnded: {
                                 if let committed = liveDragSize {
-                                    commitSize(WidgetBox(committed))
+                                    commitResize(committed, handle: .corner(.bottomRight))
                                 }
                                 dragStartSize = nil
                                 liveDragSize = nil
@@ -407,7 +407,7 @@ struct ModulePreviewCard: View {
                             value: Binding(
                                 get: { min(max(currentBox.width, widthRange.lowerBound), widthRange.upperBound) },
                                 set: { next in
-                                    commitSize(WidgetBox(width: next.rounded(), height: currentBox.height))
+                                    commitResize(CGSize(width: next.rounded(), height: currentBox.height), handle: .side(.bottomRight))
                                 }
                             ),
                             in: widthRange
@@ -426,7 +426,7 @@ struct ModulePreviewCard: View {
                             value: Binding(
                                 get: { min(max(currentBox.height, heightRange.lowerBound), heightRange.upperBound) },
                                 set: { next in
-                                    commitSize(WidgetBox(width: currentBox.width, height: next.rounded()))
+                                    commitResize(CGSize(width: currentBox.width, height: next.rounded()), handle: .bottom)
                                 }
                             ),
                             in: heightRange
@@ -498,10 +498,19 @@ struct ModulePreviewCard: View {
         }
     }
 
+    private func commitResize(_ size: CGSize, handle: ResizeHandle) {
+        commitSize(WidgetResize.committedBox(
+            size,
+            handle: handle,
+            previous: savedBox,
+            maxContentHeight: measuredContentHeight,
+            maxSize: maxEditableSize
+        ))
+    }
+
     private func fitHeightToContent() {
         guard let contentH = measuredContentHeight else { return }
-        let clampedH = max(contentH.rounded(), metrics.minWidgetSize.height)
-        commitSize(WidgetBox(width: savedBox.width, height: Double(clampedH)))
+        commitSize(WidgetResize.fittedToContent(savedBox, contentHeight: contentH, metrics: metrics))
     }
 
     private func makeExpandedContext(bounds: CGSize, material: SurfaceMaterial) -> RenderContext {

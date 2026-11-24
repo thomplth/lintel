@@ -162,6 +162,11 @@ public enum WidgetResize {
         return WidgetBox(size, followsContent: follows)
     }
 
+    public static func fittedToContent(_ box: WidgetBox, contentHeight: CGFloat, metrics: Metrics) -> WidgetBox {
+        let height = max(contentHeight.rounded(), metrics.minWidgetSize.height)
+        return WidgetBox(width: box.width, height: Double(height), followsContent: true)
+    }
+
     /// Computes the temporary max-size box when clicking an always-on desktop widget, capped to the visible screen
     /// below `topOffset` and never shrinking below `base`.
     public static func temporaryMaxBox(

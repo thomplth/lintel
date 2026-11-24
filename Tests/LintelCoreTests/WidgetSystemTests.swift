@@ -235,6 +235,17 @@ private func evaluate(_ script: String) -> JSValue {
         #expect(widened == WidgetBox(width: 400, height: 320, followsContent: true))
     }
 
+    @Test func fittingHeightToContentFollowsContentAndKeepsTheWidth() {
+        let box = WidgetResize.fittedToContent(WidgetBox(width: 340, height: 200), contentHeight: 412.4, metrics: metrics)
+        #expect(box == WidgetBox(width: 340, height: 412, followsContent: true))
+    }
+
+    @Test func fittingHeightToTinyContentStillRespectsTheMinimumHeight() {
+        let box = WidgetResize.fittedToContent(WidgetBox(width: 340, height: 200), contentHeight: 1, metrics: metrics)
+        #expect(box.height == Double(metrics.minWidgetSize.height))
+        #expect(box.followsContent)
+    }
+
     @Test func followingWidgetRequestsTheScreenCapSoItGrowsWithItsContent() {
         let maxS = CGSize(width: 600, height: 500)
         #expect(WidgetBox(width: 300, height: 320, followsContent: true).requestedHeight(maxSize: maxS) == 500)
